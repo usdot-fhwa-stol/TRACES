@@ -1,1 +1,2 @@
 # trajectory_tools
+This is a private repository that contains code, scripts and configuration files related to the Trajectory Tools project. Specifically, this repository hosts the development of a Proof-of-Concept (PoC) modular tool designed for importing, visualizing, and processing vehicle trajectory data. The tool focuses on providing open-source modules that enable efficient handling of trajectory datasets, customizable data processing, and meaningful visualizations to support traffic analysis and research. 
