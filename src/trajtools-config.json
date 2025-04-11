@@ -1,0 +1,24 @@
+[
+	{
+		"ohio-one-veh": 
+		[
+			{"name": "id", "parms": [0]}, 
+			{"name": "time", "col": 2, "type": "double", "units": "s"}, 
+			{"name": "lane_id", "col": 44, "type": "integer"}, 
+			{"name": "x_map_loc", "col": 6, "type": "double", "units": "m"}, 
+			{"name": "y_map_loc", "col": 7, "type": "double", "units": "m"}, 
+			{"name": "x_frenet", "col": 4, "type": "double"}, 
+			{"name": "y_frenet", "col": 5, "type": "double"}, 
+			{"name": "x_map_origin", "col": 36, "type": "double"}, 
+			{"name": "y_map_origin", "col": 37, "type": "double"}, 
+			{"name": "veh_lat", "func": "utm_lat", "parms": [36, 37, 6, 7]}, 
+			{"name": "veh_lon", "func": "utm_lon", "parms": [36, 37, 6, 7]}, 
+			{"name": "speed", "col": 12, "type": "double"}, 
+			{"name": "acc", "col": 13, "type": "double"}, 
+			{"name": "veh_length", "col": 9, "type": "double"}, 
+			{"name": "ads", "parms": [1]}, 
+			{"name": "event", "func": "group", "parms": [50, 51, 54]}, 
+			{"name": "veh_width", "col": 10, "type": "double"}
+		]
+	}
+]
