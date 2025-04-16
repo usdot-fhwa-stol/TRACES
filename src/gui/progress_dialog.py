@@ -5,7 +5,7 @@ class ProgressDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Import Progress")
-        self.setFixedSize(800, 600)
+        self.setFixedSize(640, 400)
         self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.WindowTitleHint | Qt.WindowType.WindowCloseButtonHint)
         self.setWindowModality(Qt.WindowModality.ApplicationModal)
         self.init_ui()
