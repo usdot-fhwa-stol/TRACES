@@ -1,10 +1,10 @@
 import sys
 import os
 from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QFileDialog, QAction
+    QApplication, QMainWindow, QFileDialog
 )
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QGuiApplication
+from PyQt6.QtGui import QGuiApplication, QAction
 
 class MainWindow(QMainWindow):
     def __init__(self):
