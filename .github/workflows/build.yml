@@ -14,7 +14,7 @@ jobs:
         python -m pip install --upgrade pip
         pip install pyinstaller pyqt6
     - name: Build with PyInstaller
-      run: pyinstaller --name "TrajectoryTools" --onefile --windowed --add-data "gui;gui" --hidden-import PyQt6 trajectory-tools.py
+      run: pyinstaller --name "TrajectoryTools" --onefile --windowed --add-data "src/gui:gui" --hidden-import PyQt6 src/trajectory-tools.py
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
