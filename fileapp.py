@@ -1,9 +1,10 @@
 import sys
 import os
 from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QFileDialog, QDesktopWidget, QAction
+    QApplication, QMainWindow, QFileDialog, QAction
 )
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QGuiApplication
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -62,7 +63,9 @@ class MainWindow(QMainWindow):
 
     def load_config(self):
         default_width, default_height = 1280, 720
-        desktop = QDesktopWidget().availableGeometry()
+        # Use QScreen to get the primary screen's available geometry
+        screen = QGuiApplication.primaryScreen()
+        desktop = screen.availableGeometry()
         default_x = (desktop.width() - default_width) // 2
         default_y = (desktop.height() - default_height) // 2
         x, y, width, height, maximized = default_x, default_y, default_width, default_height, False
@@ -75,9 +78,10 @@ class MainWindow(QMainWindow):
                 except ValueError:
                     pass
 
-        self.setGeometry(x, y, width, height)
         if maximized:
             self.showMaximized()
+        else:
+            self.setGeometry(x, y, width, height)
 
     def save_config(self):
         if self.isMinimized():
