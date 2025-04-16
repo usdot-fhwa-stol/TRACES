@@ -70,9 +70,7 @@ class MainWindow(QMainWindow):
             self.recent_files.insert(0, file_path)
             
             # Trim recent files list
-            if len(self.recent_files)
-
- > self.max_recent_files:
+            if len(self.recent_files) > self.max_recent_files:
                 self.recent_files = self.recent_files[:self.max_recent_files]
                 
             # Update recent files menu
@@ -131,48 +129,4 @@ class MainWindow(QMainWindow):
                     # Read recent files
                     self.recent_files = []
                     for line in lines[1:]:
-                        file_path = line.strip()
-                        if file_path and os.path.exists(file_path):
-                            self.recent_files.append(file_path)
-                    self.recent_files = self.recent_files[:self.max_recent_files]
-                    self.update_recent_files_menu()
-        else:
-            self.set_default_geometry(default_width, default_height)
-    
-    def set_default_geometry(self, width, height):
-        # Get primary screen
-        screen = QApplication.primaryScreen()
-        screen_rect = screen.availableGeometry()
-        
-        # Center window
-        x = (screen_rect.width() - width) // 2
-        y = (screen_rect.height() - height) // 2
-        self.setGeometry(x, y, width, height)
-    
-    def save_config(self):
-        if self.isMinimized():
-            return
-            
-        geometry = self.geometry()
-        maximized = 1 if self.isMaximized() else 0
-        
-        with open(self.conf_file, 'w') as f:
-            # Write window geometry
-            f.write(f"{geometry.x()},{geometry.y()},{geometry.width()},{geometry.height()},{maximized}\n")
-            # Write recent files
-            for file_path in self.recent_files:
-                if os.path.exists(file_path):  # Only save existing files
-                    f.write(f"{file_path}\n")
-    
-    def closeEvent(self, event):
-        self.save_config()
-        super().closeEvent(event)
-
-def main():
-    app = QApplication(sys.argv)
-    window = MainWindow()
-    window.show()
-    sys.exit(app.exec())
-
-if __name__ == '__main__':
-    main()
+                        file_path
