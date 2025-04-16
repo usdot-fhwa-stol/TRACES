@@ -13,6 +13,7 @@ class MainWindow(QMainWindow):
         self.recent_files = []
         self.max_recent_files = 7
         self.conf_file = f"{self.app_name}.conf"
+        self.recent_file_actions = []  # Track recent file actions
         
         # Initialize UI
         self.init_ui()
@@ -22,37 +23,36 @@ class MainWindow(QMainWindow):
     def init_ui(self):
         # Create menu bar
         menubar = self.menuBar()
-        file_menu = menubar.addMenu("&File")
+        self.file_menu = menubar.addMenu("&File")
         
         # Open action
         open_action = QAction("&Open", self)
         open_action.triggered.connect(self.open_file)
-        file_menu.addAction(open_action)
+        self.file_menu.addAction(open_action)
         
         # Import action
         import_action = QAction("&Import", self)
-        file_menu.addAction(import_action)
+        self.file_menu.addAction(import_action)
         
         # Export action
         export_action = QAction("&Export", self)
         export_action.setEnabled(False)
-        file_menu.addAction(export_action)
+        self.file_menu.addAction(export_action)
         
         # Separator
-        file_menu.addSeparator()
+        self.file_menu.addSeparator()
         
-        # Recent files menu items will be added here
-        self.recent_files_menu = file_menu.addMenu("Recent Files")
+        # Recent files will be added here dynamically
         
         # Separator
-        file_menu.addSeparator()
+        self.file_menu.addSeparator()
         
         # Exit action
         exit_action = QAction("E&xit", self)
         exit_action.triggered.connect(self.close)
-        file_menu.addAction(exit_action)
+        self.file_menu.addAction(exit_action)
         
-        # Update recent files menu
+        # Update recent files menu items
         self.update_recent_files_menu()
     
     def open_file(self):
@@ -77,14 +77,24 @@ class MainWindow(QMainWindow):
             self.update_recent_files_menu()
     
     def update_recent_files_menu(self):
-        self.recent_files_menu.clear()
+        # Remove existing recent file actions
+        for action in self.recent_file_actions:
+            self.file_menu.removeAction(action)
+        self.recent_file_actions.clear()
+        
+        # Find the position of the first separator
+        actions = self.file_menu.actions()
+        separator_index = next(i for i, action in enumerate(actions) if action.isSeparator())
+        
+        # Add new recent file actions before the first separator
         for file_path in self.recent_files:
             # Compact file path for display
             display_path = pathlib.Path(file_path).name
             action = QAction(display_path, self)
             action.setData(file_path)  # Store full path
             action.triggered.connect(self.open_recent_file)
-            self.recent_files_menu.addAction(action)
+            self.file_menu.insertAction(actions[separator_index], action)
+            self.recent_file_actions.append(action)
     
     def open_recent_file(self):
         action = self.sender()
