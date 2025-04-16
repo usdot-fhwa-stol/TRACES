@@ -1,4 +1,4 @@
-from pyproj import Proj
+import utm
 
 class Csv:
     def __init__(self):
@@ -11,11 +11,11 @@ class Csv:
 
     def utm_lon(self, row, col, parms):
         return Csv.__utm_common(float(row[parms[0] - 1]), float(row[parms[1] - 1]), 
-            float(row[parms[2] - 1]), float(row[parms[3] - 1]))[0]
+            float(row[parms[2] - 1]), float(row[parms[3] - 1]))[1]
 
     def utm_lat(self, row, col, parms):
         return Csv.__utm_common(float(row[parms[0] - 1]), float(row[parms[1] - 1]), 
-            float(row[parms[2] - 1]), float(row[parms[3] - 1]))[1]
+            float(row[parms[2] - 1]), float(row[parms[3] - 1]))[0]
 
     def group(self, row, col, parms):
         # Generate key from 1-based column indices
@@ -28,10 +28,5 @@ class Csv:
 
     @staticmethod
     def __utm_common(map_origin_x, map_origin_y, x_map_loc, y_map_loc):
-        utm_zone = int((map_origin_x + 180.0) / 6.0) + 1
-        if utm_zone > 60: utm_zone = 60
-        elif utm_zone < 1: utm_zone = 1
-
-        utm_proj = Proj(proj='utm', zone=utm_zone, ellps='WGS84')
-        easting, northing = utm_proj(map_origin_x, map_origin_y)
-        return utm_proj(easting + x_map_loc, northing + y_map_loc, inverse=True)
+        easting, northing, zone_num, zone_letter = utm.from_latlon(map_origin_x, map_origin_y)
+        return utm.to_latlon(easting + x_map_loc, northing + y_map_loc, zone_num, zone_letter)
