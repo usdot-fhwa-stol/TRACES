@@ -1,6 +1,6 @@
 import os
-from PyQt6.QtWidgets import QMainWindow, QFileDialog, QMenuBar, QMenu, QApplication, QScreen
-from PyQt6.QtGui import QAction
+from PyQt6.QtWidgets import QMainWindow, QFileDialog, QMenuBar, QMenu, QApplication
+from PyQt6.QtGui import QAction, QScreen
 from PyQt6.QtCore import Qt, QTimer
 from .progress_dialog import ProgressDialog
 
