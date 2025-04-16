@@ -39,7 +39,7 @@ class MainWindow(QMainWindow):
         export_action.setEnabled(False)
         self.file_menu.addAction(export_action)
         
-        # Separator
+        # Separator after Export
         self.file_menu.addSeparator()
         
         # Recent files will be added here dynamically
@@ -70,7 +70,9 @@ class MainWindow(QMainWindow):
             self.recent_files.insert(0, file_path)
             
             # Trim recent files list
-            if len(self.recent_files) > self.max_recent_files:
+            if len(self.recent_files)
+
+ > self.max_recent_files:
                 self.recent_files = self.recent_files[:self.max_recent_files]
                 
             # Update recent files menu
@@ -86,15 +88,22 @@ class MainWindow(QMainWindow):
         actions = self.file_menu.actions()
         separator_index = next(i for i, action in enumerate(actions) if action.isSeparator())
         
-        # Add new recent file actions before the first separator
-        for file_path in self.recent_files:
-            # Compact file path for display
-            display_path = pathlib.Path(file_path).name
-            action = QAction(display_path, self)
-            action.setData(file_path)  # Store full path
-            action.triggered.connect(self.open_recent_file)
-            self.file_menu.insertAction(actions[separator_index], action)
-            self.recent_file_actions.append(action)
+        # Add blank item if no recent files
+        if not self.recent_files:
+            blank_action = QAction("", self)
+            blank_action.setEnabled(False)
+            self.file_menu.insertAction(actions[separator_index], blank_action)
+            self.recent_file_actions.append(blank_action)
+        else:
+            # Add recent file actions before the first separator
+            for index, file_path in enumerate(self.recent_files, 1):
+                # Compact file path with position
+                display_path = f"{index} {pathlib.Path(file_path).name}"
+                action = QAction(display_path, self)
+                action.setData(file_path)  # Store full path
+                action.triggered.connect(self.open_recent_file)
+                self.file_menu.insertAction(actions[separator_index], action)
+                self.recent_file_actions.append(action)
     
     def open_recent_file(self):
         action = self.sender()
