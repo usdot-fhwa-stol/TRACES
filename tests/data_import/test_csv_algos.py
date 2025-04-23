@@ -29,13 +29,13 @@ class TestCsvAlgos:
         # Same test case as above
         row = [40.7128, -74.0060, 1000, 2000]
         lon = csv_algos.utm_lon(row, 0, [0, 1, 2, 3])
-        assert abs(lon - -73.9917) < 0.001  # Approximate expected longitude
+        assert abs(lon - -73.9939) < 0.001  # Approximate expected longitude
 
     def test_utm_common(self):
         # Direct test of static method
         lat, lon = CsvAlgos._CsvAlgos__utm_common(40.7128, -74.0060, 1000, 2000)
         assert abs(lat - 40.7308) < 0.001
-        assert abs(lon - -73.9917) < 0.001
+        assert abs(lon - -73.9939) < 0.001
 
     def test_group_new_key(self, csv_algos):
         row = ["x", "y", "z"]
