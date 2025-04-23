@@ -27,4 +27,4 @@ jobs:
           pip install pytest pytest-mock utm
 
       - name: Run tests
-        run: pytest tests/ --verbose
+        run: PYTHONPATH=src pytest tests/ --verbose
