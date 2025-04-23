@@ -26,9 +26,15 @@ jobs:
       # Install dependencies
       - name: Install package and dependencies
         run: |
-          python -m pip install --upgrade pip
+          pip install --upgrade pip setuptools
           pip install -e .
           pip install pytest pytest-mock
+
+      - name: Show installed packages
+        run: pip list
+
+      - name: Check import path
+        run: python -c "import sys; print(sys.path)"
 
       # Run pytest
       - name: Run tests
