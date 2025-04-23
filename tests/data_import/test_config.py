@@ -1,7 +1,7 @@
 import pytest
 import json
 from unittest.mock import Mock
-from src.data_import.config import Config
+from data_import.config import Config
 
 # Mock CsvAlgos class
 class MockCsvAlgos:
