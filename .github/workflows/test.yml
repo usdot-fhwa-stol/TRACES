@@ -32,5 +32,4 @@ jobs:
       # Run pytest
       - name: Run tests
         run: |
-          export PYTHONPATH=$PYTHONPATH:$PWD/src
-          pytest tests/ --verbose
+          PYTHONPATH=src pytest tests/ --verbose
