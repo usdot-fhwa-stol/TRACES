@@ -1,21 +1,21 @@
 import utm
 
-class Csv:
+class CsvAlgos:
     def __init__(self):
         self._group_lookup = {}
 
     def copy(self, row, col, parms):
         if col >= 0 and col < len(row):
-            return row[col - 1]
+            return row[col]
         return parms[0] if parms else None
 
     def utm_lon(self, row, col, parms):
-        return Csv.__utm_common(float(row[parms[0] - 1]), float(row[parms[1] - 1]), 
-            float(row[parms[2] - 1]), float(row[parms[3] - 1]))[1]
+        return CsvAlgos.__utm_common(float(row[parms[0]]), float(row[parms[1]]), 
+            float(row[parms[2]]), float(row[parms[3]]))[1]
 
     def utm_lat(self, row, col, parms):
-        return Csv.__utm_common(float(row[parms[0] - 1]), float(row[parms[1] - 1]), 
-            float(row[parms[2] - 1]), float(row[parms[3] - 1]))[0]
+        return CsvAlgos.__utm_common(float(row[parms[0]]), float(row[parms[1]]), 
+            float(row[parms[2]]), float(row[parms[3]]))[0]
 
     def group(self, row, col, parms):
         # Generate key from 1-based column indices
