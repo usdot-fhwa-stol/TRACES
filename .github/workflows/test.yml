@@ -13,29 +13,18 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # Checkout the repository
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # Set up Python environment
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.9'  # Adjust to your preferred Python version
+          python-version: '3.11'  # Adjust to your preferred Python version
 
-      # Install dependencies
-      - name: Install package and dependencies
+      - name: Install dependencies
         run: |
-          pip install --upgrade pip setuptools
-          pip install -e .
-          pip install pytest pytest-mock
+          python -m pip install --upgrade pip
+          pip install pytest pytest-mock utm
 
-      - name: Show installed packages
-        run: pip list
-
-      - name: Check import path
-        run: python -c "import sys; print(sys.path)"
-
-      # Run pytest
       - name: Run tests
         run: pytest tests/ --verbose
