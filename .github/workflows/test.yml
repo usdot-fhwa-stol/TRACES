@@ -31,5 +31,6 @@ jobs:
 
       # Run pytest
       - name: Run tests
-        run: |
-          PYTHONPATH=src pytest tests/ --verbose
+        env:
+          PYTHONPATH: src
+        run: pytest tests/ --verbose
