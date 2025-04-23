@@ -67,7 +67,7 @@ def test_missing_required_keys(temp_config_file, mock_csv_algos):
     with open(temp_config_file, 'w') as f:
         json.dump(invalid_config, f)
     config = Config(str(temp_config_file))
-    with pytest.raises(ValueError, match="Missing required coluna names"):
+    with pytest.raises(ValueError, match="Missing required column names"):
         config.get_config("test_type")
 
 def test_invalid_cols_format(temp_config_file, mock_csv_algos):
