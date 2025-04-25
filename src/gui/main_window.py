@@ -21,24 +21,23 @@ class MainWindow(QMainWindow):
         file_menu = menubar.addMenu("&File")
 
         # Open action
-        open_action = QAction("&Open", self)
+        open_action = QAction("&Open...", self)
         open_action.triggered.connect(self.open_file)
         file_menu.addAction(open_action)
 
         # Open Recent submenu
-        self.recent_menu = QMenu("Open &Recent", self)
+        self.recent_menu = QMenu("&Recent", self)
         file_menu.addMenu(self.recent_menu)
         self.update_recent_menu()
 
+        file_menu.addSeparator()
+
         # Import action
-        import_action = QAction("&Import", self)
+        import_action = QAction("&Import...", self)
         import_action.triggered.connect(self.import_data)
         file_menu.addAction(import_action)
 
-        # Export action (disabled by default)
-        export_action = QAction("&Export", self)
-        export_action.setEnabled(False)
-        file_menu.addAction(export_action)
+        file_menu.addSeparator()
 
         # Exit action
         exit_action = QAction("E&xit", self)
