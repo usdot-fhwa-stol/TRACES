@@ -18,10 +18,10 @@ jobs:
       run: |
         pyinstaller --name "trajectory_tools" --onedir --windowed `
           --add-data "src/configuration;configuration" `
-          --add-data "trajectory_tools.html;." `
-          --add-data "leidos-logo.svg;." `
-          --add-data "usdot-logo.svg;." `
-          --add-data "trajectory_tools.conf;." `
+          --add-data "src/trajectory_tools.html;trajectory_tools.html" `
+          --add-data "src/leidos-logo.svg;leidos-logo.svg" `
+          --add-data "src/usdot-logo.svg;usdot-logo.svg" `
+          --add-data "src/trajectory_tools.conf;trajectory_tools.conf" `
           --add-data "src/data_import;data_import" `
           --add-data "src/gui;gui" `
           --hidden-import PyQt6 `
