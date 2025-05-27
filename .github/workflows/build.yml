@@ -31,4 +31,4 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: trajectory_tools
-        path: dist/trajectory_tools.zip
+        path: dist/trajectory_tools/*
