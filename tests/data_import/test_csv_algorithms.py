@@ -1,11 +1,11 @@
 import pytest
 import utm
-from data_import.csv_algos import CsvAlgos
+from data_import.csv_algorithms import CsvAlgorithms
 
-class TestCsvAlgos:
+class TestCsvAlgorithms:
     @pytest.fixture
     def csv_algos(self):
-        return CsvAlgos()
+        return CsvAlgorithms()
 
     def test_copy_valid_column(self, csv_algos):
         row = ["a", "b", "c"]
@@ -33,7 +33,7 @@ class TestCsvAlgos:
 
     def test_utm_common(self):
         # Direct test of static method
-        lat, lon = CsvAlgos._CsvAlgos__utm_common(40.7128, -74.0060, 1000, 2000)
+        lat, lon = CsvAlgorithms._CsvAlgorithms__utm_common(40.7128, -74.0060, 1000, 2000)
         assert abs(lat - 40.7308) < 0.001
         assert abs(lon - -73.9939) < 0.001
 
