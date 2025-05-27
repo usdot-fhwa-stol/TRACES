@@ -44,14 +44,14 @@ class TestCsvAlgorithms:
 
     def test_group_new_key(self, csv_algos):
         row = ["x", "y", "z"]
-        params = [1, 2]  # 1-based indices: columns 0 and 1
+        params = [0, 1]  # 0-based indices: columns 0 and 1
         assert csv_algos.group(row, 0, params) == 0
         assert csv_algos._group_lookup == {"x y": 0}
 
     def test_group_existing_key(self, csv_algos):
         row1 = ["x", "y", "z"]
         row2 = ["x", "y", "w"]
-        params = [1, 2]
+        params = [0, 1]  # 0-based indices
         assert csv_algos.group(row1, 0, params) == 0
         assert csv_algos.group(row2, 0, params) == 0
         assert len(csv_algos._group_lookup) == 1
@@ -59,19 +59,19 @@ class TestCsvAlgorithms:
     def test_group_different_key(self, csv_algos):
         row1 = ["x", "y", "z"]
         row2 = ["a", "b", "c"]
-        params = [1, 2]
+        params = [0, 1]  # 0-based indices
         assert csv_algos.group(row1, 0, params) == 0
         assert csv_algos.group(row2, 0, params) == 1
         assert csv_algos._group_lookup == {"x y": 0, "a b": 1}
 
     def test_group_out_of_bounds_params(self, csv_algos):
         row = ["x", "y"]
-        params = [1, 3]  # 1-based: col 1 ("x"), col 3 (skipped)
+        params = [0, 2]  # 0-based: col 0 ("x"), col 2 (out of bounds, skipped)
         assert csv_algos.group(row, 0, params) == 0
         assert csv_algos._group_lookup == {"x": 0}
 
     def test_group_invalid_index(self, csv_algos):
         row = ["x"]
-        params = [3]  # 1-based index 3 is out of bounds
+        params = [1]  # 0-based index 1 is out of bounds
         assert csv_algos.group(row, 0, params) == 0
         assert csv_algos._group_lookup == {"": 0}
