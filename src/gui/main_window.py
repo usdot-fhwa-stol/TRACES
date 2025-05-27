@@ -1,86 +1,109 @@
+from PyQt6.QtWidgets import QMainWindow, QFileDialog, QMessageBox, QMenu, QApplication
+from PyQt6.QtGui import QAction
 import os
-from PyQt6.QtWidgets import QMainWindow, QFileDialog, QMenuBar, QMenu, QApplication
-from PyQt6.QtGui import QAction, QScreen
-from PyQt6.QtCore import Qt, QTimer
-from .progress_dialog import ProgressDialog
+import sqlite3
+from .import_dialog import ImportDialog
+from .export_dialog import ExportDialog
+from .about_dialog import AboutDialog
+
 
 class MainWindow(QMainWindow):
-    def __init__(self):
-        super().__init__()
-        self.recent_files = []
-        self.max_recent_files = 7
-        self.conf_file = f"{QApplication.applicationName().lower().replace(' ', '-')}.conf"
-        self.init_ui()
-        self.load_config()
+    """Main application window for Trajectory Tools.
 
-    def init_ui(self):
-        self.setWindowTitle(QApplication.applicationName())
-        
-        # Create menu bar
+    Manages the main GUI, menu actions, and database connections.
+    """
+
+    def __init__(self):
+        """Initialize the main window and setup UI."""
+        super().__init__()
+        self.db_conn = None
+        self.recent_files = []
+        self.setWindowTitle("Trajectory Tools")
+        self.setup_menu()
+        self.load_settings()
+        self.show_splash()
+
+    def setup_menu(self):
+        """Setup the File menu and its actions."""
         menubar = self.menuBar()
         file_menu = menubar.addMenu("&File")
 
-        # Open action
-        open_action = QAction("&Open...", self)
+        open_action = QAction("&Open…", self)
+        open_action.setShortcut("Ctrl+O")
         open_action.triggered.connect(self.open_file)
         file_menu.addAction(open_action)
 
-        # Open Recent submenu
-        self.recent_menu = QMenu("&Recent", self)
+        self.recent_menu = QMenu("Recent", self)
+        self.recent_menu.setEnabled(False)
         file_menu.addMenu(self.recent_menu)
-        self.update_recent_menu()
 
         file_menu.addSeparator()
 
-        # Import action
-        import_action = QAction("&Import...", self)
-        import_action.triggered.connect(self.import_data)
+        import_action = QAction("&Import…", self)
+        import_action.setShortcut("Ctrl+I")
+        import_action.triggered.connect(self.show_import_dialog)
         file_menu.addAction(import_action)
 
+        self.export_action = QAction("&Export…", self)
+        self.export_action.setShortcut("Ctrl+E")
+        self.export_action.setEnabled(False)
+        self.export_action.triggered.connect(self.show_export_dialog)
+        file_menu.addAction(self.export_action)
+
         file_menu.addSeparator()
 
-        # Exit action
+        about_action = QAction("&About", self)
+        about_action.setShortcut("Ctrl+?")
+        about_action.triggered.connect(self.show_about_dialog)
+        file_menu.addAction(about_action)
+
         exit_action = QAction("E&xit", self)
+        exit_action.setShortcut("Ctrl+Q")
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
 
-    def load_config(self):
-        if not os.path.exists(self.conf_file):
-            # Default window size and position
-            default_width, default_height = 1280, 720
-            screen = QApplication.primaryScreen().availableGeometry()
-            x = (screen.width() - default_width) // 2
-            y = (screen.height() - default_height) // 2
-            self.setGeometry(x, y, default_width, default_height)
-            return
+    def load_settings(self):
+        """Load window settings and recent files from config file."""
+        config_file = "trajectory_tools.conf"
+        desktop = QApplication.primaryScreen().availableGeometry()
+        default_width = int(desktop.width() * 0.8)
+        default_height = int(desktop.height() * 0.8)
+        default_x = (desktop.width() - default_width) // 2
+        default_y = (desktop.height() - default_height) // 2
 
-        with open(self.conf_file, 'r') as f:
-            lines = f.readlines()
-            if lines:
-                # Parse window geometry
-                geometry = lines[0].strip().split(',')
-                x, y, width, height, maximized = map(int, geometry)
-                self.setGeometry(x, y, width, height)
-                if maximized:
-                    self.showMaximized()
-                # Load recent files
-                self.recent_files = [line.strip() for line in lines[1:] if line.strip()]
+        try:
+            with open(config_file, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+                if lines:
+                    x, y, width, height, maximized = lines[0].strip().split(',')
+                    x, y, width, height = map(int, (x, y, width, height))
+                    maximized = int(maximized)
+                    if (x < 0 or y < 0 or x + width > desktop.width() or
+                            y + height > desktop.height()):
+                        x, y, width, height = default_x, default_y, default_width, default_height
+                    self.setGeometry(x, y, width, height)
+                    if maximized:
+                        self.showMaximized()
+                self.recent_files = [line.strip() for line in lines[1:] if line.strip()][:7]
                 self.update_recent_menu()
+        except FileNotFoundError:
+            self.setGeometry(default_x, default_y, default_width, default_height)
+        except Exception as e:
+            QMessageBox.warning(self, "Warning", f"Error loading settings: {str(e)}")
+            self.setGeometry(default_x, default_y, default_width, default_height)
 
-    def save_config(self):
+    def save_settings(self):
+        """Save window settings and recent files to config file."""
+        config_file = "trajectory_tools.conf"
+        geometry = self.geometry()
         maximized = 1 if self.isMaximized() else 0
-        if not maximized:
-            geom = self.geometry()
-            x, y, width, height = geom.x(), geom.y(), geom.width(), geom.height()
-        else:
-            x, y, width, height = 0, 0, 1280, 720  # Default values when maximized
-
-        with open(self.conf_file, 'w') as f:
-            f.write(f"{x},{y},{width},{height},{maximized}\n")
+        with open(config_file, 'w', encoding='utf-8') as f:
+            f.write(f"{geometry.x()},{geometry.y()},{geometry.width()},{geometry.height()},{maximized}\n")
             for path in self.recent_files:
                 f.write(f"{path}\n")
 
     def update_recent_menu(self):
+        """Update the Recent submenu with current recent files."""
         self.recent_menu.clear()
         for path in self.recent_files:
             action = QAction(path, self)
@@ -89,49 +112,110 @@ class MainWindow(QMainWindow):
         self.recent_menu.setEnabled(bool(self.recent_files))
 
     def open_file(self):
-        file_path, _ = QFileDialog.getOpenFileName(self, "Open File")
+        """Open a SQLite database file."""
+        file_path, _ = QFileDialog.getOpenFileName(self, "Open Database", "",
+                                                  "SQLite Database (*.sqlite)")
         if file_path:
-            self.setWindowTitle(f"{QApplication.applicationName()} - {file_path}")
-            if file_path in self.recent_files:
-                self.recent_files.remove(file_path)
-            self.recent_files.insert(0, file_path)
-            if len(self.recent_files) > self.max_recent_files:
-                self.recent_files.pop()
-            self.update_recent_menu()
+            self.open_database(file_path)
 
-    def open_recent_file(self, file_path):
-        if os.path.exists(file_path):
-            self.setWindowTitle(f"{QApplication.applicationName()} - {file_path}")
-            if file_path in self.recent_files:
-                self.recent_files.remove(file_path)
-            self.recent_files.insert(0, file_path)
-            self.update_recent_menu()
-        else:
+    def open_recent_file(self, file_path: str):
+        """Open a recent database file.
+
+        Args:
+            file_path: Path to the database file.
+        """
+        if not os.path.exists(file_path):
+            QMessageBox.critical(self, "Error", f"File {file_path} no longer exists")
             self.recent_files.remove(file_path)
             self.update_recent_menu()
+            self.save_settings()
+            return
+        self.open_database(file_path)
 
-    def import_data(self):
-        self.progress_dialog = ProgressDialog(self)
-        self.progress_dialog.show()
-        self.simulate_import()
+    def open_database(self, file_path: str):
+        """Open and validate a SQLite database file.
 
-    def simulate_import(self):
-        self.event_count = 0
-        self.total_events = 10
+        Args:
+            file_path: Path to the database file.
+        """
+        try:
+            conn = sqlite3.connect(file_path)
+            cursor = conn.cursor()
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='trajectories'")
+            if not cursor.fetchone():
+                conn.close()
+                QMessageBox.critical(self, "Error", "Trajectories table not found")
+                return
 
-        def process_event():
-            self.event_count += 1
-            progress = (self.event_count / self.total_events) * 100
-            self.progress_dialog.update_progress(progress)
-            self.progress_dialog.append_message(f"Processing event {self.event_count}...")
-            if self.event_count < self.total_events:
-                QTimer.singleShot(1000, process_event)
-            else:
-                self.progress_dialog.append_message("Import completed.")
-                self.progress_dialog.enable_close_button()
+            cursor.execute("PRAGMA table_info(trajectories)")
+            columns = cursor.fetchall()
+            expected_columns = {
+                "event": "INTEGER", "id": "INTEGER", "time": "REAL", "lane_id": "INTEGER",
+                "x_map_loc": "REAL", "y_map_loc": "REAL", "x_frenet": "REAL",
+                "y_frenet": "REAL", "x_map_origin": "REAL", "y_map_origin": "REAL",
+                "veh_lat": "REAL", "veh_lon": "REAL", "speed": "REAL",
+                "acceleration": "REAL", "length": "REAL", "automated": "INTEGER",
+                "way_id": "REAL", "preceding": "REAL", "speed_limit": "REAL",
+                "width": "REAL", "traffic_control": "REAL"
+            }
+            if len(columns) != len(expected_columns) or any(
+                    col[1] not in expected_columns or col[2].upper() != expected_columns[col[1]]
+                    for col in columns):
+                conn.close()
+                QMessageBox.critical(self, "Error", "Trajectories table has incorrect schema")
+                return
 
-        QTimer.singleShot(1000, process_event)
+            cursor.execute("SELECT COUNT(*) FROM trajectories")
+            if cursor.fetchone()[0] == 0:
+                conn.close()
+                QMessageBox.critical(self, "Error", "Trajectories table is empty")
+                return
+
+            if self.db_conn:
+                self.db_conn.close()
+            self.db_conn = conn
+            self.setWindowTitle(f"Trajectory Tools - {file_path}")
+            self.export_action.setEnabled(True)
+
+            if file_path in self.recent_files:
+                self.recent_files.remove(file_path)
+            self.recent_files.insert(0, file_path)
+            if len(self.recent_files) > 7:
+                self.recent_files.pop()
+            self.update_recent_menu()
+            self.save_settings()
+        except sqlite3.Error as e:
+            QMessageBox.critical(self, "Error", f"Invalid SQLite database: {str(e)}")
+            if 'conn' in locals():
+                conn.close()
+
+    def show_import_dialog(self):
+        """Show the import dialog."""
+        dialog = ImportDialog(self)
+        dialog.exec()
+
+    def show_export_dialog(self):
+        """Show the export dialog."""
+        dialog = ExportDialog(self, self.db_conn)
+        dialog.exec()
+
+    def show_about_dialog(self):
+        """Show the about dialog."""
+        dialog = AboutDialog(self, splash=False)
+        dialog.exec()
+
+    def show_splash(self):
+        """Show the splash screen."""
+        dialog = AboutDialog(self, splash=True)
+        dialog.exec()
 
     def closeEvent(self, event):
-        self.save_config()
+        """Handle window close event.
+
+        Args:
+            event: Close event.
+        """
+        if self.db_conn:
+            self.db_conn.close()
+        self.save_settings()
         super().closeEvent(event)
