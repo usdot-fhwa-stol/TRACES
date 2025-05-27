@@ -8,23 +8,24 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.x'
+        python-version: '3.9'
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install pyinstaller pyqt6 utm
     - name: Build with PyInstaller
+      shell: powershell
       run: |
-        pyinstaller --name "trajectory_tools" --onedir --windowed ^
-          --add-data "configuration;configuration" ^
-          --add-data "trajectory_tools.html;." ^
-          --add-data "leidos-logo.svg;." ^
-          --add-data "usdot-logo.svg;." ^
-          --add-data "trajectory_tools.conf;." ^
-          --add-data "src/data_import;data_import" ^
-          --add-data "src/gui;gui" ^
-          --hidden-import PyQt6 ^
-          --hidden-import utm ^
+        pyinstaller --name "trajectory_tools" --onedir --windowed `
+          --add-data "configuration;configuration" `
+          --add-data "trajectory_tools.html;." `
+          --add-data "leidos-logo.svg;." `
+          --add-data "usdot-logo.svg;." `
+          --add-data "trajectory_tools.conf;." `
+          --add-data "src/data_import;data_import" `
+          --add-data "src/gui;gui" `
+          --hidden-import PyQt6 `
+          --hidden-import utm `
           src/trajectory_tools.py
     - name: Package artifact
       run: |

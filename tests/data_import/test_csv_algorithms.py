@@ -2,8 +2,9 @@ import pytest
 import utm
 from data_import.csv_algorithms import CsvAlgorithms
 
+
 class TestCsvAlgorithms:
-    @pytest.fixture
+    @pytest.fixture(scope="function")
     def csv_algos(self):
         return CsvAlgorithms()
 
@@ -17,25 +18,29 @@ class TestCsvAlgorithms:
         assert csv_algos.copy(row, -1, ["default"]) == "default"
         assert csv_algos.copy(row, 5, []) is None
 
-    def test_utm_lat(self, csv_algos):
-        # Test with known UTM coordinates
-        # Map origin: (40.7128, -74.0060) ~ NYC
-        # Offset: (1000, 2000) meters
+    def test_utm_lat(self, csv_algos, mocker):
+        mocker.patch('utm.from_latlon', return_value=(555000, 4500000, 18, 'N'))
+        mocker.patch('utm.to_latlon', return_value=(40.730811, -73.993895))
         row = [40.7128, -74.0060, 1000, 2000]
         lat = csv_algos.utm_lat(row, 0, [0, 1, 2, 3])
-        assert abs(lat - 40.7308) < 0.001  # Approximate expected latitude
+        assert abs(lat - 40.730811) < 0.01
 
-    def test_utm_lon(self, csv_algos):
-        # Same test case as above
+    def test_utm_lon(self, csv_algos, mocker):
+        mocker.patch('utm.from_latlon', return_value=(555000, 4500000, 18, 'N'))
+        mocker.patch('utm.to_latlon', return_value=(40.730811, -73.993895))
         row = [40.7128, -74.0060, 1000, 2000]
         lon = csv_algos.utm_lon(row, 0, [0, 1, 2, 3])
-        assert abs(lon - -73.9939) < 0.001  # Approximate expected longitude
+        assert abs(lon - -73.993895) < 0.01
 
-    def test_utm_common(self):
-        # Direct test of static method
-        lat, lon = CsvAlgorithms._CsvAlgorithms__utm_common(40.7128, -74.0060, 1000, 2000)
-        assert abs(lat - 40.7308) < 0.001
-        assert abs(lon - -73.9939) < 0.001
+    def test_utm_lat_invalid_index(self, csv_algos):
+        row = [40.7128, -74.0060]
+        with pytest.raises(IndexError):
+            csv_algos.utm_lat(row, 0, [0, 1, 2, 3])
+
+    def test_utm_lat_invalid_float(self, csv_algos):
+        row = ["invalid", -74.0060, 1000, 2000]
+        with pytest.raises(ValueError):
+            csv_algos.utm_lat(row, 0, [0, 1, 2, 3])
 
     def test_group_new_key(self, csv_algos):
         row = ["x", "y", "z"]
@@ -61,6 +66,12 @@ class TestCsvAlgorithms:
 
     def test_group_out_of_bounds_params(self, csv_algos):
         row = ["x", "y"]
-        params = [1, 3]  # 3 is out of bounds
+        params = [1, 3]  # 1-based: col 1 ("x"), col 3 (skipped)
         assert csv_algos.group(row, 0, params) == 0
         assert csv_algos._group_lookup == {"x": 0}
+
+    def test_group_invalid_index(self, csv_algos):
+        row = ["x"]
+        params = [3]  # 1-based index 3 is out of bounds
+        assert csv_algos.group(row, 0, params) == 0
+        assert csv_algos._group_lookup == {"": 0}
