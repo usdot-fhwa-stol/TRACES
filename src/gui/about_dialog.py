@@ -6,7 +6,7 @@ import os
 class AboutDialog(QDialog):
     """Dialog for displaying about information or splash screen.
 
-    Displays content from trajectory_tools.html in a fixed 800x600 window.
+    Displays content from trajectory_tools.html in a fixed size window.
     """
 
     def __init__(self, parent=None, splash=False):
@@ -53,7 +53,7 @@ class AboutDialog(QDialog):
         layout.addLayout(button_layout)
 
         self.setLayout(layout)
-        self.setFixedSize(800, 600)  # Set fixed 800x600 size
+        self.setFixedSize(400, 300)  # Set fixed size
 
         # Center dialog in parent window
         if self.parent():
