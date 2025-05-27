@@ -1,5 +1,6 @@
 from PyQt6.QtWidgets import QMainWindow, QFileDialog, QMessageBox, QMenu, QApplication
 from PyQt6.QtGui import QAction
+from PyQt6.QtCore import Qt
 import os
 import sqlite3
 from .import_dialog import ImportDialog
@@ -66,31 +67,33 @@ class MainWindow(QMainWindow):
         """Load window settings and recent files from config file."""
         config_file = "trajectory_tools.conf"
         desktop = QApplication.primaryScreen().availableGeometry()
-        default_width = int(desktop.width() * 0.8)
-        default_height = int(desktop.height() * 0.8)
+
+        # Default to 1280x720 centered on screen
+        default_width = 1280
+        default_height = 720
         default_x = (desktop.width() - default_width) // 2
         default_y = (desktop.height() - default_height) // 2
 
         try:
             with open(config_file, 'r', encoding='utf-8') as f:
                 lines = f.readlines()
-                if lines:
-                    x, y, width, height, maximized = lines[0].strip().split(',')
-                    x, y, width, height = map(int, (x, y, width, height))
-                    maximized = int(maximized)
-                    if (x < 0 or y < 0 or x + width > desktop.width() or
-                            y + height > desktop.height()):
-                        x, y, width, height = default_x, default_y, default_width, default_height
-                    self.setGeometry(x, y, width, height)
-                    if maximized:
-                        self.showMaximized()
+                if not lines or not lines[0].strip():  # Check for empty file
+                    self.setGeometry(default_x, default_y, default_width, default_height)
+                    return
+                x, y, width, height, maximized = lines[0].strip().split(',')
+                x, y, width, height = map(int, (x, y, width, height))
+                maximized = int(maximized)
+                if (x < 0 or y < 0 or x + width > desktop.width() or
+                        y + height > desktop.height()):
+                    x, y, width, height = default_x, default_y, default_width, default_height
+                self.setGeometry(x, y, width, height)
+                if maximized:
+                    self.showMaximized()
                 self.recent_files = [line.strip() for line in lines[1:] if line.strip()][:7]
                 self.update_recent_menu()
-        except FileNotFoundError:
+        except (FileNotFoundError, IndexError, ValueError) as e:
             self.setGeometry(default_x, default_y, default_width, default_height)
-        except Exception as e:
             QMessageBox.warning(self, "Warning", f"Error loading settings: {str(e)}")
-            self.setGeometry(default_x, default_y, default_width, default_height)
 
     def save_settings(self):
         """Save window settings and recent files to config file."""
