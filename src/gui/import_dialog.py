@@ -24,7 +24,7 @@ def resource_path(relative_path: str) -> str:
     """
     if hasattr(sys, '_MEIPASS'):
         return os.path.join(sys._MEIPASS, relative_path)
-    return os.path.join(os.path.abspath(os.path.dirname(__file__))), relative_path)
+    return os.path.join(os.path.abspath(os.path.dirname(__file__)), relative_path)
 
 class WorkerThread(QThread):
     """Worker thread for import operations.
@@ -50,7 +50,7 @@ class WorkerThread(QThread):
         """Execute the import process in the worker thread."""
         logging.debug("Starting WorkerThread.run")
         try:
-            module_path, _class_name = self.class_path.rsplit('.', 1)
+            module_path, class_name = self.class_path.rsplit('.', 1)
             module = importlib.import_module(module_path)
             process_class = getattr(module, class_name)
             if not issubclass(process_class, BaseProcess):
