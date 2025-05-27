@@ -12,11 +12,25 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install pyinstaller pyqt6
+        pip install pyinstaller pyqt6 utm
     - name: Build with PyInstaller
-      run: pyinstaller --name "TrajectoryTools" --onefile --windowed --add-data "src/gui:gui" --hidden-import PyQt6 src/trajectory_tools.py
+      run: |
+        pyinstaller --name "trajectory_tools" --onedir --windowed ^
+          --add-data "configuration;configuration" ^
+          --add-data "trajectory_tools.html;." ^
+          --add-data "leidos-logo.svg;." ^
+          --add-data "usdot-logo.svg;." ^
+          --add-data "trajectory_tools.conf;." ^
+          --add-data "src/data_import;data_import" ^
+          --add-data "src/gui;gui" ^
+          --hidden-import PyQt6 ^
+          --hidden-import utm ^
+          src/trajectory_tools.py
+    - name: Package artifact
+      run: |
+        powershell -Command "Compress-Archive -Path dist/trajectory_tools/* -DestinationPath dist/trajectory_tools.zip"
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
         name: trajectory_tools
-        path: dist/TrajectoryTools.exe
+        path: dist/trajectory_tools.zip
