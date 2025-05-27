@@ -85,16 +85,16 @@ class CsvAlgorithms:
         Args:
             row (list): The input CSV row as a list of strings.
             col (int): Ignored in this implementation; included for interface consistency.
-            parms (list): List of 1-based column indices to concatenate for the group key.
+            parms (list): List of 0-based column indices to concatenate for the group key.
 
         Returns:
             int: A unique integer identifier for the group.
 
         Raises:
-            IndexError: If any parameter 0-based index is out of bounds for the row.
+            IndexError: If any parameter index is out of bounds for the row.
         """
-        # Generate key from 1-based column indices
-        key_parts = [row[i] for i in parms if i >= 0 and i <= len(row)]
+        # Generate key from 0-based column indices
+        key_parts = [row[i] for i in parms if i >= 0 and i < len(row)]
         key = " ".join(key_parts)
 
         if key not in self._group_lookup:
