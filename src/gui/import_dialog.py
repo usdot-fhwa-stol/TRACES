@@ -5,6 +5,8 @@ import json
 import importlib
 from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QProgressBar, QTextEdit, QFileDialog, QMessageBox
 from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot, QThread
+from data_import.base_process import BaseProcess
+
 
 # Configure logging
 logging.basicConfig(
