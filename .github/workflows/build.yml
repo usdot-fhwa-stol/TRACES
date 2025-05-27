@@ -17,7 +17,7 @@ jobs:
       shell: powershell
       run: |
         pyinstaller --name "trajectory_tools" --onedir --windowed `
-          --add-data "configuration;configuration" `
+          --add-data "src/configuration;configuration" `
           --add-data "trajectory_tools.html;." `
           --add-data "leidos-logo.svg;." `
           --add-data "usdot-logo.svg;." `
