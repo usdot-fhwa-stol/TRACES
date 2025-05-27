@@ -18,18 +18,15 @@ jobs:
       run: |
         pyinstaller --name "trajectory_tools" --onedir --windowed `
           --add-data "src/configuration;configuration" `
-          --add-data "src/trajectory_tools.html;trajectory_tools.html" `
-          --add-data "src/leidos-logo.svg;leidos-logo.svg" `
-          --add-data "src/usdot-logo.svg;usdot-logo.svg" `
-          --add-data "src/trajectory_tools.conf;trajectory_tools.conf" `
+          --add-data "src/trajectory_tools.html;." `
+          --add-data "src/leidos-logo.svg;." `
+          --add-data "src/usdot-logo.svg;." `
+          --add-data "src/trajectory_tools.conf;." `
           --add-data "src/data_import;data_import" `
           --add-data "src/gui;gui" `
           --hidden-import PyQt6 `
           --hidden-import utm `
           src/trajectory_tools.py
-    - name: Package artifact
-      run: |
-        powershell -Command "Compress-Archive -Path dist/trajectory_tools/* -DestinationPath dist/trajectory_tools.zip"
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
