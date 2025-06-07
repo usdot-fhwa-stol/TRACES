@@ -1,309 +1,416 @@
-import logging
-import os
-import sys
+# gui/import_dialog.py
+
 import json
-import importlib
-from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QProgressBar, QTextEdit, QFileDialog, QMessageBox
-from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot, QThread
+import sqlite3
+from datetime import datetime
+from pathlib import Path
+from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QProgressBar, QTextEdit, QFileDialog
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject
 from data_import.base_process import BaseProcess
+import importlib
 
-
-# Configure logging
-logging.basicConfig(
-    filename='trajectory_tools.log',
-    level=logging.DEBUG,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
-
-def resource_path(relative_path: str) -> str:
-    """Get absolute path to resource in PyInstaller or development environment.
-
-    Args:
-        relative_path: Relative path to the resource.
-
-    Returns:
-        str: Absolute path to the resource.
-    """
-    if hasattr(sys, '_MEIPASS'):
-        return os.path.join(sys._MEIPASS, relative_path)
-    return os.path.join(os.path.abspath(os.path.dirname(__file__)), relative_path)
-
-class WorkerThread(QThread):
-    """Worker thread for import operations.
+class ImportWorker(QObject):
+    """Worker class for handling import operations in a separate thread.
 
     Attributes:
-        finished: Signal emitted when processing is complete.
-        Args:
-            config_file: Path to the JSON configuration file.
-            input_file: Path to the input file.
-            dialog: Reference to the import dialog.
-            class_path: Path to the processing class.
+        log_signal (pyqtSignal): Signal to emit log messages.
+        progress_signal (pyqtSignal): Signal to emit progress updates.
+        interrupt_flag (bool): Flag to indicate if the import is interrupted.
     """
-    finished = pyqtSignal(dict)
 
-    def __init__(self, config_file: str, input_file: str, dialog: 'ImportDialog', class_path: str):
+    log_signal = pyqtSignal(str, bool)
+    progress_signal = pyqtSignal(int)
+
+    def __init__(self, config: dict, input_path: str, output_path: str, db_connection: sqlite3.Connection):
+        """Initialize the worker with import parameters.
+
+        Args:
+            config (dict): JSON configuration for the import.
+            input_path (str): Path to the input file.
+            output_path (str): Path to the output SQLite database.
+            db_connection (sqlite3.Connection): Database connection.
+        """
         super().__init__()
-        self.config_file = config_file
-        self.input_file = input_file
-        self.dialog = dialog
-        self.class_path = class_path
+        self.config = config
+        self.input_path = input_path
+        self.output_path = output_path
+        self.db_connection = db_connection
+        self.interrupt_flag = False
 
     def run(self):
-        """Execute the import process in the worker thread."""
-        logging.debug("Starting WorkerThread.run")
+        """Execute the import process and update vehicle distances."""
         try:
-            module_path, class_name = self.class_path.rsplit('.', 1)
-            module = importlib.import_module(module_path)
-            process_class = getattr(module, class_name)
-            if not issubclass(process_class, BaseProcess):
-                error_msg = f"Specified class {self.class_path} is not of type BaseProcess"
-                logging.error(error_msg)
-                self.dialog.append_message(error_msg)
-                self.finished.emit({"error_count": 1, "db_conn": None})
+            # Delete existing output file
+            if Path(self.output_path).exists():
+                Path(self.output_path).unlink()
+
+            # Set up database
+            self.db_connection.execute("PRAGMA auto_vacuum=INCREMENTAL;")
+            self.db_connection.execute("VACUUM;")
+            self.db_connection.execute("""
+                CREATE TABLE events (
+                    event_id INTEGER NOT NULL,
+                    veh_id INTEGER NOT NULL,
+                    event_time REAL NOT NULL,
+                    lane_id INTEGER,
+                    x_map_loc REAL,
+                    y_map_loc REAL,
+                    x_frenet REAL,
+                    y_frenet REAL,
+                    x_map_origin REAL,
+                    y_map_origin REAL,
+                    veh_lat REAL,
+                    veh_lon REAL,
+                    veh_speed REAL,
+                    veh_acceleration REAL,
+                    veh_length REAL,
+                    veh_width REAL,
+                    veh_automated INTEGER,
+                    osm_way_id INTEGER,
+                    osm_speed_limit INTEGER,
+                    osm_traffic_control INTEGER,
+                    preceding_veh_id INTEGER,
+                    veh_dist REAL,
+                    PRIMARY KEY (event_id, veh_id, event_time)
+                ) WITHOUT ROWID;
+            """)
+            self.db_connection.commit()
+
+            # Instantiate processor
+            module_name, class_name = self.config.get("class", "data_import.csv_process.CsvProcess").rsplit(".", 1)
+            module = importlib.import_module(module_name)
+            processor_class = getattr(module, class_name)
+            
+            if not issubclass(processor_class, BaseProcess):
+                self.log_signal.emit("Error: Processor class is not a subclass of BaseProcess.", False)
                 return
-            processor = process_class()
-            result = processor.process(self.config_file, self.input_file, self.dialog)
-            self.finished.emit(result)
+
+            processor = processor_class()
+            error_count = processor.process(self.config, self.input_path, self.db_connection, self)
+
+            if error_count == 0 and not self.interrupt_flag:
+                self.log_signal.emit("Updating vehicle distances", True)
+                
+                # Calculate total records for progress
+                cursor = self.db_connection.cursor()
+                cursor.execute("SELECT COUNT(*) FROM events")
+                total_records = cursor.fetchone()[0]
+                
+                # Calculate cumulative distances
+                cursor.execute("SELECT DISTINCT event_id, veh_id FROM events")
+                pairs = cursor.fetchall()
+                processed_records = 0
+                batch_size = 1000
+                
+                for event_id, veh_id in pairs:
+                    if self.interrupt_flag:
+                        break
+                    cursor.execute("""
+                        SELECT event_time, x_map_loc, y_map_loc
+                        FROM events
+                        WHERE event_id = ? AND veh_id = ?
+                        ORDER BY event_time
+                    """, (event_id, veh_id))
+                    points = cursor.fetchall()
+                    
+                    total_dist = 0.0
+                    prev_x_loc = None
+                    prev_y_loc = None
+                    
+                    for i, (event_time, x_map_loc, y_map_loc) in enumerate(points):
+                        if prev_x_loc is not None and prev_y_loc is not None:
+                            dist = ((x_map_loc - prev_x_loc) ** 2 + (y_map_loc - prev_y_loc) ** 2) ** 0.5
+                            total_dist += dist
+                        cursor.execute("""
+                            UPDATE events
+                            SET veh_dist = ?
+                            WHERE event_id = ? AND veh_id = ? AND event_time = ?
+                        """, (total_dist, event_id, veh_id, event_time))
+                        prev_x_loc = x_map_loc
+                        prev_y_loc = y_map_loc
+                        
+                        if (i + 1) % batch_size == 0 or i == len(points) - 1:
+                            self.db_connection.commit()
+                            processed_records += min(batch_size, len(points) - i)
+                            self.progress_signal.emit(int((processed_records / total_records) * 100))
+                
+                if not self.interrupt_flag:
+                    self.db_connection.commit()
+                    self.log_signal.emit(f"{self.input_path} successfully imported", True)
+                else:
+                    self.log_signal.emit("Import interrupted", False)
+                    if Path(self.output_path).exists():
+                        Path(self.output_path).unlink()
+
         except Exception as e:
-            error_msg = f"Error in WorkerThread.run: {str(e)}"
-            logging.error(error_msg, exc_info=True)
-            self.dialog.append_message(error_msg)
-            self.finished.emit({"error_count": 1, "db_conn": None})
+            self.log_signal.emit(f"Error during import: {str(e)}", False)
 
 class ImportDialog(QDialog):
-    """Dialog for importing data files.
+    """Modal dialog for importing trajectory data into SQLite databases.
 
-    Displays import progress and logs messages.
+    Manages the import process, displays progress, and logs messages.
+
+    Attributes:
+        _progress_bar (QProgressBar): Progress bar for import progress.
+        _text_edit (QTextEdit): Log display for import messages.
+        _input_button (QPushButton): Button to select input file.
+        _output_button (QPushButton): Button to select output file.
+        _import_button (QPushButton): Button to start import.
+        _interrupt_button (QPushButton): Button to interrupt import.
+        _input_path (str): Selected input file path.
+        _output_path (str): Selected output file path.
+        _configs (dict): Valid JSON configurations by file type.
+        _selected_file_type (str): File type selected in the file dialog.
+        _worker_thread (QThread): Thread for running import worker.
+        _worker (ImportWorker): Worker for import process.
+        _log_file (Path): Path to the log file.
     """
-    update_progress_signal = pyqtSignal(float)
-    append_message_signal = pyqtSignal(str)
-    stop_signal = pyqtSignal()
 
     def __init__(self, parent=None):
-        """Initialize the import dialog.
-
-        Args:
-            parent: Parent widget, typically the main window.
-        """
+        """Initialize the dialog with layout and initial state."""
         super().__init__(parent)
-        self.setWindowTitle("Import Progress")
+        self.setWindowTitle("Import Trajectory Data")
         self.setFixedSize(800, 600)
-        self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.WindowTitleHint)
-        self.setup_ui()
-        self.worker = None
-        self.stopped = False
+        self._input_path = ""
+        self._output_path = ""
+        self._configs = {}
+        self._selected_file_type = ""  # New: Store selected file type
+        self._worker_thread = None
+        self._worker = None
+        self._log_file = Path("trajectory_tools.log")
+        self._setup_ui()
+        self._center_dialog()
+        self._initialize()
 
-        # Center dialog in parent window
-        if parent:
-            parent_geo = parent.geometry()
-            self.move(parent_geo.center() - self.rect().center())
-
-    def setup_ui(self):
-        """Setup the dialog UI."""
-        layout = QVBoxLayout()
-        self.progress_bar = QProgressBar()
-        layout.addWidget(self.progress_bar)
-
-        self.log_area = QTextEdit()
-        self.log_area.setReadOnly(True)
-        layout.addWidget(self.log_area)
-
+    def _setup_ui(self):
+        """Set up the dialog layout and widgets."""
+        layout = QVBoxLayout(self)
+        
+        # Progress bar
+        self._progress_bar = QProgressBar()
+        self._progress_bar.setMinimum(0)
+        self._progress_bar.setMaximum(100)
+        layout.addWidget(self._progress_bar)
+        
+        # Text edit
+        self._text_edit = QTextEdit()
+        self._text_edit.setReadOnly(True)
+        layout.addWidget(self._text_edit, stretch=1)
+        
+        # Button row
         button_layout = QHBoxLayout()
-        self.close_button = QPushButton("Close")
-        self.close_button.setEnabled(False)
-        self.close_button.clicked.connect(self.close)
-        button_layout.addWidget(self.close_button)
-
-        self.stop_button = QPushButton("Stop")
-        self.stop_button.clicked.connect(self.stop_signal)
-        button_layout.addWidget(self.stop_button)
+        self._input_button = QPushButton("Input")
+        self._output_button = QPushButton("Output")
+        self._import_button = QPushButton("Import")
+        self._interrupt_button = QPushButton("Interrupt")
+        
+        self._input_button.setEnabled(False)
+        self._output_button.setEnabled(False)
+        self._import_button.setEnabled(False)
+        self._interrupt_button.setEnabled(False)
+        
+        button_layout.addStretch()
+        button_layout.addWidget(self._input_button)
+        button_layout.addStretch()
+        button_layout.addWidget(self._output_button)
+        button_layout.addStretch()
+        button_layout.addWidget(self._import_button)
+        button_layout.addStretch()
+        button_layout.addWidget(self._interrupt_button)
+        button_layout.addStretch()
+        
         layout.addLayout(button_layout)
-
-        self.setLayout(layout)
-
+        
         # Connect signals
-        self.update_progress_signal.connect(self.update_progress)
-        self.append_message_signal.connect(self.append_message)
-        self.stop_signal.connect(self.stop_import)
+        self._input_button.clicked.connect(self._select_input)
+        self._output_button.clicked.connect(self._select_output)
+        self._import_button.clicked.connect(self._start_import)
+        self._interrupt_button.clicked.connect(self._interrupt_import)
 
-    @pyqtSlot(float)
-    def update_progress(self, value: float):
-        """Update the progress bar.
+    def _center_dialog(self):
+        """Center the dialog within the parent window."""
+        parent = self.parent()
+        if parent:
+            parent_rect = parent.geometry()
+            dialog_rect = self.geometry()
+            x = parent_rect.x() + (parent_rect.width() - dialog_rect.width()) // 2
+            y = parent_rect.y() + (parent_rect.height() - dialog_rect.height()) // 2
+            self.move(x, y)
+
+    def _initialize(self):
+        """Initialize the dialog by checking configuration files."""
+        self.setWindowFlag(Qt.WindowCloseButtonHint, False)
+        
+        # Clear log file
+        if self._log_file.exists():
+            self._log_file.unlink()
+        
+        # Create config directory if it doesn't exist
+        config_dir = Path("config")
+        config_dir.mkdir(exist_ok=True)
+        
+        # Check JSON configuration files
+        config_files = list(config_dir.glob("*.json"))
+        if not config_files:
+            self._log_message("Error: No JSON configuration files found in 'config' directory.", False)
+            self.setWindowFlag(Qt.WindowCloseButtonHint, True)
+            return
+        
+        for config_file in config_files:
+            try:
+                with config_file.open('r') as f:
+                    config = json.load(f)
+                
+                if not isinstance(config, dict):
+                    self._log_message(f"Error: {config_file} does not contain a JSON object.", False)
+                    continue
+                
+                if "file_type" not in config or not isinstance(config["file_type"], str):
+                    self._log_message(f"Error: {config_file} missing or invalid 'file_type' key.", False)
+                    continue
+                
+                if "col_defs" not in config:
+                    self._log_message(f"Error: {config_file} missing 'col_defs' key.", False)
+                    continue
+                
+                file_type = config["file_type"]
+                if file_type in self._configs:
+                    self._log_message(f"Error: Multiple configurations for file type '{file_type}'.", False)
+                    self._configs.clear()
+                    break
+                
+                config.setdefault("file_ext", "csv")
+                config.setdefault("class", "data_import.csv_process.CsvProcess")
+                self._configs[file_type] = config
+                
+            except json.JSONDecodeError:
+                self._log_message(f"Error: {config_file} is not a valid JSON file.", False)
+        
+        if not self._configs:
+            self._log_message("Error: No valid JSON configuration files found. Import cannot continue.", False)
+            self.setWindowFlag(Qt.WindowCloseButtonHint, True)
+        else:
+            file_types = ", ".join(self._configs.keys())
+            self._log_message(f"Info: Available file types for import: {file_types}", True)
+            self._log_message("Info: Please select an input file.", True)
+            self._input_button.setEnabled(True)
+            self.setWindowFlag(Qt.WindowCloseButtonHint, True)
+
+    def _log_message(self, message: str, is_html: bool = False):
+        """Log a message to the text edit and log file.
 
         Args:
-            value: Progress percentage (0-100).
+            message (str): Message to log.
+            is_html (bool): Whether the message contains HTML formatting.
         """
-        self.progress_bar.setValue(int(value))
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        display_message = f"[{timestamp}] {message}"
+        
+        if is_html:
+            self._text_edit.append(display_message)
+        else:
+            self._text_edit.append(display_message.replace("<", "&lt;").replace(">", "&gt;"))
+        
+        # Write plain text to log file
+        plain_message = display_message.replace("<b>", "").replace("</b>", "").replace("<i>", "").replace("</i>", "")
+        with self._log_file.open('a') as f:
+            f.write(plain_message + "\n")
+        
+        self._text_edit.verticalScrollBar().setValue(self._text_edit.verticalScrollBar().maximum())
 
-    @pyqtSlot(str)
-    def append_message(self, message: str):
-        """Append a message to the log area.
+    def _select_input(self):
+        """Handle input file selection."""
+        file_types = ";".join([f"{ft} (*.{config['file_ext']})" for ft, config in self._configs.items()])
+        file_path, selected_filter = QFileDialog.getOpenFileName(
+            self,
+            "Select Input File",
+            "",
+            file_types
+        )
+        
+        if file_path:
+            self._input_path = file_path
+            # Extract file_type from selected_filter (e.g., "ohio-one-veh (*.csv)" -> "ohio-one-veh")
+            self._selected_file_type = selected_filter.split(" (")[0]
+            self._output_path = str(Path(file_path).with_suffix(".sqlite"))
+            self._log_message(f"Info: Input file selected: {file_path}", True)
+            self._log_message(f"Info: Output file set to: {self._output_path}", True)
+            if Path(self._output_path).exists():
+                self._log_message(f"Warning: Output file {self._output_path} will be overwritten.", False)
+            self._log_message("Info: You can change the output file.", True)
+            self._output_button.setEnabled(True)
+            self._import_button.setEnabled(True)
 
-        Args:
-            message: Message to append.
-        """
-        self.log_area.append(message)
-        self.log_area.verticalScrollBar().setValue(self.log_area.verticalScrollBar().maximum())
+    def _select_output(self):
+        """Handle output file selection."""
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Select Output SQLite Database",
+            self._output_path,
+            "SQLite Database (*.sqlite)"
+        )
+        
+        if file_path:
+            self._output_path = file_path
+            self._log_message(f"Info: Output file changed to: {file_path}", True)
 
-    @pyqtSlot()
-    def stop_import(self):
-        """Handle the stop button click."""
-        self.stopped = True
-        self.stop_button.setEnabled(False)
+    def _start_import(self):
+        """Start the import process in a separate thread."""
+        self.setWindowFlag(Qt.WindowCloseButtonHint, False)
+        self._input_button.setEnabled(False)
+        self._output_button.setEnabled(False)
+        self._import_button.setEnabled(False)
+        self._interrupt_button.setEnabled(True)
+        
+        if not self._selected_file_type or self._selected_file_type not in self._configs:
+            self._log_message(f"Error: Invalid or missing file type '{self._selected_file_type}'.", False)
+            self._input_button.setEnabled(True)
+            self.setWindowFlag(Qt.WindowCloseButtonHint, True)
+            return
+        
+        config = self._configs[self._selected_file_type]
+        db_connection = sqlite3.connect(self._output_path)
+        
+        self._worker_thread = QThread()
+        self._worker = ImportWorker(config, self._input_path, self._output_path, db_connection)
+        self._worker.moveToThread(self._worker_thread)
+        
+        self._worker.log_signal.connect(self._log_message)
+        self._worker.progress_signal.connect(self._progress_bar.setValue)
+        self._worker_thread.started.connect(self._worker.run)
+        self._worker_thread.finished.connect(self._finish_import)
+        
+        self._worker_thread.start()
 
-    def is_stopped(self) -> bool:
-        """Check if the stop button has been clicked.
+    def _interrupt_import(self):
+        """Handle interrupt button click."""
+        if self._worker:
+            self._worker.interrupt_flag = True
+        self._interrupt_button.setEnabled(False)
+        self._log_message("Warning: Interrupt requested", False)
+
+    def _finish_import(self):
+        """Handle import completion or interruption."""
+        self._worker_thread.quit()
+        self._worker_thread.wait()
+        
+        if self._worker.interrupt_flag:
+            if Path(self._output_path).exists():
+                Path(self._output_path).unlink()
+            self._input_path = ""
+            self._output_path = ""
+        else:
+            self._input_path = ""
+        
+        self._input_button.setEnabled(True)
+        self.setWindowFlag(Qt.WindowCloseButtonHint, True)
+        self._worker_thread = None
+        self._worker = None
+
+    def get_output_path(self) -> str:
+        """Get the output file path.
 
         Returns:
-            bool: True if stopped, False otherwise.
+            str: Path to the output SQLite database, or empty string if none.
         """
-        return self.stopped
-
-    def cleanup(self):
-        """Cleanup after import process."""
-        self.stop_button.setEnabled(False)
-        self.close_button.setEnabled(True)
-
-    def showEvent(self, event):
-        """Handle dialog show event.
-
-        Args:
-            event: Show event.
-        """
-        logging.debug("Entering ImportDialog.showEvent")
-        try:
-            super().showEvent(event)
-            self.progress_bar.setValue(0)
-            self.log_area.clear()
-            self.close_button.setEnabled(False)
-            self.stop_button.setEnabled(True)
-            self.stopped = False
-
-            self.append_message("Reading configuration files...")
-            config_dir = resource_path("configuration")
-            if not os.path.exists(config_dir):
-                error_msg = f"Configuration directory {config_dir} not found"
-                logging.error(error_msg)
-                self.append_message(error_msg)
-                self.cleanup()
-                return
-
-            file_types = []
-            for file in os.listdir(config_dir):
-                if file.endswith(".json"):
-                    file_path = os.path.join(config_dir, file)
-                    try:
-                        with open(file_path, 'r', encoding='utf-8') as f:
-                            config = json.load(f)
-                        if "type" not in config:
-                            error_msg = f"File {file_path} is missing required type key"
-                            logging.error(error_msg)
-                            self.append_message(error_msg)
-                            self.cleanup()
-                            return
-                        file_type = {
-                            "config_file": file_path,
-                            "ext": config.get("ext", "csv"),
-                            "class": config.get("class", "data_import.csv_process.CsvProcess"),
-                            "type": config["type"]
-                        }
-                        if any(ft["type"] == file_type["type"] for ft in file_types):
-                            error_msg = f"File {file_path} contains a duplicate definition for file type {file_type['type']}"
-                            logging.error(error_msg)
-                            self.append_message(error_msg)
-                            self.cleanup()
-                            return
-                        file_types.append(file_type)
-                    except json.JSONDecodeError as e:
-                        error_msg = f"Invalid JSON in {file_path}: {str(e)}"
-                        logging.error(error_msg)
-                        self.append_message(error_msg)
-                        self.cleanup()
-                        return
-                    except Exception as e:
-                        error_msg = f"Error reading {file_path}: {str(e)}"
-                        logging.error(error_msg)
-                        self.append_message(error_msg)
-                        self.cleanup()
-                        return
-
-            if not file_types:
-                error_msg = "No valid configuration files found"
-                logging.error(error_msg)
-                self.append_message(error_msg)
-                self.cleanup()
-                return
-
-            filters = ";".join(f"{ft['type']} (*.{ft['ext']})" for ft in file_types)
-            file_path, selected_filter = QFileDialog.getOpenFileName(self, "Select Input File", "", filters)
-            if not file_path:
-                self.append_message("No file selected")
-                self.cleanup()
-                return
-
-            selected_type = next((ft for ft in file_types
-                                 if f"{ft['type']} (*.{ft['ext']})" == selected_filter), None)
-            if not selected_type:
-                error_msg = "Invalid file type selected"
-                logging.error(error_msg)
-                self.append_message(error_msg)
-                self.cleanup()
-                return
-
-            self.start_import(selected_type["config_file"], file_path, selected_type["class"])
-        except Exception as e:
-            error_msg = f"Unexpected error in showEvent: {str(e)}"
-            logging.error(error_msg, exc_info=True)
-            self.append_message(error_msg)
-            self.cleanup()
-
-    def start_import(self, config_file: str, input_file: str, class_path: str):
-        """Start the import process in a worker thread.
-
-        Args:
-            config_file: Path to the JSON configuration file.
-            input_file: Path to the input file.
-            class_path: Path to the processing class.
-        """
-        logging.debug(f"Starting import: config={config_file}, input={input_file}, class={class_path}")
-        db_file = os.path.splitext(input_file)[0] + ".sqlite"
-        if os.path.exists(db_file):
-            reply = QMessageBox.question(self, "Overwrite Database",
-                                        f"Database {db_file} already exists. Overwrite?",
-                                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-            if reply == QMessageBox.StandardButton.No:
-                self.append_message("Existing database file not overwritten")
-                self.cleanup()
-                return
-            self.append_message(f"Overwriting {db_file}")
-            if self.parent().db_conn and self.parent().db_conn.cursor().execute(
-                    "SELECT name FROM sqlite_master WHERE type='table'").fetchone():
-                self.parent().db_conn.close()
-            os.remove(db_file)
-
-        self.worker = WorkerThread(config_file, input_file, self, class_path)
-        self.worker.finished.connect(self.on_import_finished)
-        self.worker.start()
-
-    def on_import_finished(self, result: dict):
-        """Handle completion of the import process.
-
-        Args:
-            result: Dictionary containing 'error_count' and 'db_conn'.
-        """
-        logging.debug(f"Import finished with result: {result}")
-        if result["error_count"] == 0 and result["db_conn"]:
-            self.parent().db_conn = result["db_conn"]
-            self.parent().setWindowTitle(f"Trajectory Tools - {result['db_conn'].cursor().execute('PRAGMA database_list').fetchone()[2]}")
-            self.parent().export_action.setEnabled(True)
-            if self.parent().db_conn.cursor().execute("SELECT name FROM sqlite_master WHERE type='table'").fetchone()[0] == "trajectories":
-                if self.parent().db_conn.cursor().execute("SELECT COUNT(*) FROM trajectories").fetchone()[0] > 0:
-                    if input_file := result["db_conn"].cursor().execute("PRAGMA database_list").fetchone()[2]:
-                        if input_file in self.parent().recent_files:
-                            self.parent().recent_files.remove(input_file)
-                        self.parent().recent_files.insert(0, input_file)
-                        if len(self.parent().recent_files) > 7:
-                            self.parent().recent_files.pop()
-                        self.parent().update_recent_menu()
-                        self.parent().save_settings()
-        self.cleanup()
+        return self._output_path

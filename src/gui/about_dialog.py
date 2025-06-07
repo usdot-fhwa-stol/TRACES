@@ -1,68 +1,60 @@
-from PyQt6.QtWidgets import QDialog, QVBoxLayout, QPushButton, QTextEdit, QHBoxLayout
-from PyQt6.QtCore import Qt, QTimer
-import os
+"""About dialog for Trajectory Tools.
+
+This module implements a simple about dialog showing application information.
+"""
+
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QDialog, QVBoxLayout, QLabel, QPushButton
 
 
 class AboutDialog(QDialog):
-    """Dialog for displaying about information or splash screen.
-
-    Displays content from trajectory_tools.html in a fixed size window.
-    """
-
-    def __init__(self, parent=None, splash=False):
-        """Initialize the about dialog or splash screen.
-
+    """About dialog showing application information."""
+    
+    def __init__(self, parent=None):
+        """Initialize the about dialog.
+        
         Args:
-            parent: Parent widget, typically the main window.
-            splash: True to show as splash screen, False for about dialog.
+            parent: Parent widget.
         """
         super().__init__(parent)
-        self.splash = splash
-        self.setWindowTitle("About Trajectory Tools" if not splash else "")
-        if splash:
-            self.setWindowFlags(Qt.WindowType.SplashScreen)
-        else:
-            self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.WindowTitleHint)
-        self.setup_ui()
-
-    def setup_ui(self):
-        """Setup the dialog UI with a fixed size."""
-        layout = QVBoxLayout()
-        text_area = QTextEdit()
-        text_area.setReadOnly(True)
-        try:
-            with open("trajectory_tools.html", 'r', encoding='utf-8') as f:
-                text_area.setHtml(f.read())
-        except FileNotFoundError:
-            text_area.setText("About content not found")
-        layout.addWidget(text_area)
-
-        button_layout = QHBoxLayout()
-        if self.splash:
-            self.skip_button = QPushButton("Skip (3)")
-            self.skip_button.clicked.connect(self.close)
-            button_layout.addWidget(self.skip_button)
-            self.timer = QTimer()
-            self.timer.timeout.connect(self.update_timer)
-            self.timer.start(1000)
-            self.seconds = 3
-        else:
-            close_button = QPushButton("Close")
-            close_button.clicked.connect(self.close)
-            button_layout.addWidget(close_button)
-        layout.addLayout(button_layout)
-
-        self.setLayout(layout)
-        self.setFixedSize(400, 300)  # Set fixed size
-
-        # Center dialog in parent window
-        if self.parent():
-            parent_geo = self.parent().geometry()
-            self.move(parent_geo.center() - self.rect().center())
-
-    def update_timer(self):
-        """Update the splash screen timer."""
-        self.seconds -= 1
-        self.skip_button.setText(f"Skip ({self.seconds})")
-        if self.seconds == 0:
-            self.close()
+        
+        self.setWindowTitle("About Trajectory Tools")
+        self.setModal(True)
+        self.setFixedSize(400, 300)
+        
+        # Layout
+        layout = QVBoxLayout(self)
+        layout.setSpacing(20)
+        
+        # Title
+        title_label = QLabel("<h2>Trajectory Tools</h2>")
+        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(title_label)
+        
+        # Version
+        version_label = QLabel("Version 1.0.0")
+        version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(version_label)
+        
+        # Description
+        desc_label = QLabel(
+            "A PyQt6 application for importing and visualizing\n"
+            "transportation trajectory data from CSV files\n"
+            "into SQLite databases with time-space plots."
+        )
+        desc_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        desc_label.setWordWrap(True)
+        layout.addWidget(desc_label)
+        
+        # Copyright
+        copyright_label = QLabel("© 2024 Trajectory Tools")
+        copyright_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(copyright_label)
+        
+        layout.addStretch()
+        
+        # OK button
+        ok_button = QPushButton("OK")
+        ok_button.clicked.connect(self.accept)
+        ok_button.setDefault(True)
+        layout.addWidget(ok_button, alignment=Qt.AlignmentFlag.AlignCenter)

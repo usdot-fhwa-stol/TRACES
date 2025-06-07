@@ -1,0 +1,25 @@
+{
+  "file_type": "ohio-one-veh", 
+  "file_ext": "csv", 
+  "class": "data_import.csv_process.CsvProcess", 
+  "col_defs": 
+  {
+    "event_id": {"func": "group", "parms": [50, 51, 54]},
+    "veh_id": {"type": "int", "parms": [0]},
+    "event_time": {"col": 2, "units": "s"},
+    "lane_id": {"col": 44, "type": "int"},
+    "x_map_loc": {"col": 6, "units": "m"},
+    "y_map_loc": {"col": 7, "units": "m"},
+    "x_frenet": {"col": 4},
+    "y_frenet": {"col": 5},
+    "x_map_origin": {"col": 36},
+    "y_map_origin": {"col": 37},
+    "veh_lat": {"func": "utm_lat", "parms": [36, 37, 6, 7]},
+    "veh_lon": {"func": "utm_lon", "parms": [36, 37, 6, 7]},
+    "veh_speed": {"col": 12, "units": "m/s"},
+    "veh_acceleration": {"col": 13, "units": "m/s^2"},
+    "veh_length": {"col": 9, "units": "m"},
+    "veh_automated": {"parms": [1]},
+    "veh_width": {"col": 10, "units": "m"}
+  }
+}

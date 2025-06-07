@@ -1,22 +1,23 @@
-from abc import ABC, abstractmethod
+# data_import/base_process.py
 
+import sqlite3
 
-class BaseProcess(ABC):
-    """Abstract base class for data import processing.
+class BaseProcess:
+    """Base class for processing input files into SQLite databases.
 
-    Defines the interface for processing input files into SQLite databases.
+    Subclasses must implement the process method to handle specific file types.
     """
 
-    @abstractmethod
-    def process(self, config_file: str, input_file: str, dialog: object) -> dict:
-        """Process an input file based on configuration.
+    def process(self, config: dict, input_path: str, db_connection: sqlite3.Connection, worker: object) -> int:
+        """Process an input file and import data into the database.
 
         Args:
-            config_file: Path to the JSON configuration file.
-            input_file: Path to the input data file.
-            dialog: Reference to the import dialog for progress updates.
+            config (dict): JSON configuration for the import.
+            input_path (str): Path to the input file.
+            db_connection (sqlite3.Connection): Database connection.
+            worker (object): Worker object for logging and progress updates.
 
         Returns:
-            dict: Contains 'error_count' (int) and 'db_conn' (sqlite3.Connection or None).
+            int: Number of errors encountered during processing.
         """
-        pass
+        raise NotImplementedError("Subclasses must implement process method")

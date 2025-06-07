@@ -1,121 +1,136 @@
-import utm
+# data_import/csv_algorithms.py
 
+import utm
+from typing import Any, List, Dict
 
 class CsvAlgorithms:
-    """Utility class for processing CSV column data with specific algorithms.
+    """Utility class for processing CSV column data based on JSON configuration.
 
-    Provides methods to transform or compute values for database columns based on
-    CSV input records and configuration parameters.
+    Provides functions to interpret and transform column values for import.
     """
 
     def __init__(self):
-        """Initialize the CsvAlgorithms instance.
+        """Initialize the group dictionary for group function."""
+        self._group_dict: Dict[str, int] = {}
 
-        Sets up an internal dictionary to track group assignments for the group method.
-        """
-        self._group_lookup = {}
-
-    def copy(self, row: list, col: int, parms: list) -> any:
-        """Copy a value from the specified column or return a default parameter.
+    def copy(self, row: List[str], col_def: Dict[str, Any]) -> Any:
+        """Copy a value from the row or return default from params.
 
         Args:
-            row (list): The input CSV row as a list of strings.
-            col (int): Zero-based index of the column to copy from.
-            parms (list): List of parameters, where the first element is used as a default
-                value if the column index is invalid.
+            row (List[str]): CSV row data.
+            col_def (Dict[str, Any]): Column definition with src_col, type, and params.
 
         Returns:
-            any: The value from the specified column, or the first parameter if the column
-                index is invalid and parameters are provided, otherwise None.
-
-        Raises:
-            IndexError: If the column index is negative and no parameters are provided.
+            Any: Processed column value or None if invalid.
         """
-        if col >= 0 and col < len(row):
-            return row[col]
-        return parms[0] if parms else None
+        src_col = col_def.get("src_col", -1)
+        col_type = col_def.get("type", "float")
+        params = col_def.get("params", [])
 
-    def utm_lon(self, row: list, col: int, parms: list) -> float:
-        """Compute the longitude from UTM coordinates using map origin and offsets.
-
-        Args:
-            row (list): The input CSV row as a list of strings.
-            col (int): Ignored in this implementation; included for interface consistency.
-            parms (list): List of four indices [map_origin_x, map_origin_y, x_map_loc, y_map_loc]
-                referencing columns in the row for UTM conversion.
-
-        Returns:
-            float: The computed longitude value.
-
-        Raises:
-            IndexError: If any parameter index is out of bounds for the row.
-            ValueError: If any referenced value cannot be converted to float.
-            utm.error.OutOfRangeError: If UTM conversion fails due to invalid coordinates.
-        """
-        return self.__utm_common(
-            float(row[parms[0]]), float(row[parms[1]]),
-            float(row[parms[2]]), float(row[parms[3]])
-        )[1]
-
-    def utm_lat(self, row: list, col: int, parms: list) -> float:
-        """Compute the latitude from UTM coordinates using map origin and offsets.
-
-        Args:
-            row (list): The input CSV row as a list of strings.
-            col (int): Ignored in this implementation; included for interface consistency.
-            parms (list): List of four indices [map_origin_x, map_origin_y, x_map_loc, y_map_loc]
-                referencing columns in the row for UTM conversion.
-
-        Returns:
-            float: The computed latitude value.
-
-        Raises:
-            IndexError: If any parameter index is out of bounds for the row.
-            ValueError: If any referenced value cannot be converted to float.
-            utm.error.OutOfRangeError: If UTM conversion fails due to invalid coordinates.
-        """
-        return self.__utm_common(
-            float(row[parms[0]]), float(row[parms[1]]),
-            float(row[parms[2]]), float(row[parms[3]])
-        )[0]
-
-    def group(self, row: list, col: int, parms: list) -> int:
-        """Assign a unique integer to a group based on concatenated column values.
-
-        Args:
-            row (list): The input CSV row as a list of strings.
-            col (int): Ignored in this implementation; included for interface consistency.
-            parms (list): List of 0-based column indices to concatenate for the group key.
-
-        Returns:
-            int: A unique integer identifier for the group.
-
-        Raises:
-            IndexError: If any parameter index is out of bounds for the row.
-        """
-        # Generate key from 0-based column indices
-        key_parts = [row[i] for i in parms if i >= 0 and i < len(row)]
-        key = " ".join(key_parts)
-
-        if key not in self._group_lookup:
-            self._group_lookup[key] = len(self._group_lookup)
-        return self._group_lookup[key]
+        if src_col < 0 or src_col >= len(row) or not row[src_col]:
+            return params[0] if params else None
+        
+        try:
+            value = row[src_col]
+            if col_type == "int":
+                return int(float(value))  # Handle float strings
+            elif col_type == "float":
+                return float(value)
+            return value
+        except (ValueError, TypeError):
+            return None
 
     @staticmethod
-    def __utm_common(map_origin_x: float, map_origin_y: float, x_map_loc: float, y_map_loc: float) -> tuple:
-        """Convert map coordinates to latitude and longitude using UTM.
+    def utm_common(row: List[str], col_def: Dict[str, Any]) -> tuple:
+        """Convert UTM coordinates to latitude and longitude.
 
         Args:
-            map_origin_x (float): Latitude of the map origin.
-            map_origin_y (float): Longitude of the map origin.
-            x_map_loc (float): X offset from the map origin in meters.
-            y_map_loc (float): Y offset from the map origin in meters.
+            row (List[str]): CSV row data.
+            col_def (Dict[str, Any]): Column definition with params for coordinates.
 
         Returns:
-            tuple: A tuple of (latitude, longitude) in decimal degrees.
-
-        Raises:
-            utm.error.OutOfRangeError: If the coordinates are invalid for UTM conversion.
+            tuple: (latitude, longitude) or (None, None) if invalid.
         """
-        easting, northing, zone_num, zone_letter = utm.from_latlon(map_origin_x, map_origin_y)
-        return utm.to_latlon(easting + x_map_loc, northing + y_map_loc, zone_num, zone_letter)
+        params = col_def.get("params", [])
+        if len(params) < 4:
+            return None, None
+
+        try:
+            map_origin_x = float(row[params[0]]) if params[0] < len(row) else 0.0
+            map_origin_y = float(row[params[1]]) if params[1] < len(row) else 0.0
+            x_map_loc = float(row[params[2]]) if params[2] < len(row) else 0.0
+            y_map_loc = float(row[params[3]]) if params[3] < len(row) else 0.0
+
+            easting, northing, zone_num, zone_letter = utm.from_latlon(map_origin_y, map_origin_x)
+            lat, lon = utm.to_latlon(easting + x_map_loc, northing + y_map_loc, zone_num, zone_letter)
+            return lat, lon
+        except (ValueError, TypeError, IndexError):
+            return None, None
+
+    def utm_lat(self, row: List[str], col_def: Dict[str, Any]) -> float:
+        """Get latitude from UTM coordinates.
+
+        Args:
+            row (List[str]): CSV row data.
+            col_def (Dict[str, Any]): Column definition with params.
+
+        Returns:
+            float: Latitude value or None if invalid.
+        """
+        lat, _ = self.utm_common(row, col_def)
+        return lat
+
+    def utm_lon(self, row: List[str], col_def: Dict[str, Any]) -> float:
+        """Get longitude from UTM coordinates.
+
+        Args:
+            row (List[str]): CSV row data.
+            col_def (Dict[str, Any]): Column definition with params.
+
+        Returns:
+            float: Longitude value or None if invalid.
+        """
+        _, lon = self.utm_common(row, col_def)
+        return lon
+
+    def tgsim_lane(self, row: List[str], col_def: Dict[str, Any]) -> int:
+        """Calculate lane ID based on tgsim rules.
+
+        Args:
+            row (List[str]): CSV row data.
+            col_def (Dict[str, Any]): Column definition with src_col and params.
+
+        Returns:
+            int: Calculated lane ID or None if invalid.
+        """
+        src_col = col_def.get("src_col", -1)
+        params = col_def.get("params", [])
+        
+        if src_col < 0 or src_col >= len(row) or not row[src_col] or len(params) < 1:
+            return None
+        
+        try:
+            lane_kf = int(float(row[params[0]])) if params[0] < len(row) else 0
+            src_value = int(float(row[src_col]))
+            return 7 - lane_kf if src_value % 2 else 16 - lane_kf
+        except (ValueError, TypeError, IndexError):
+            return None
+
+    def group(self, row: List[str], col_def: Dict[str, Any]) -> int:
+        """Generate an index based on concatenated unique strings.
+
+        Args:
+            row (List[str]): CSV row data.
+            col_def (Dict[str, Any]): Column definition with params.
+
+        Returns:
+            int: Group index or None if invalid.
+        """
+        params = col_def.get("params", [])
+        try:
+            key = " ".join(str(row[i]) for i in params if i < len(row) and row[i])
+            if key not in self._group_dict:
+                self._group_dict[key] = len(self._group_dict)
+            return self._group_dict[key]
+        except (IndexError, TypeError):
+            return None
