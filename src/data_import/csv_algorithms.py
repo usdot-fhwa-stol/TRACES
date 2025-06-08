@@ -1,5 +1,3 @@
-# data_import/csv_algorithms.py
-
 import utm
 from typing import Any, List, Dict
 

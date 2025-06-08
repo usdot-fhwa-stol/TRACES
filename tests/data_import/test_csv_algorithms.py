@@ -1,5 +1,3 @@
-# tests/data_import/test_csv_algorithms.py
-
 import pytest
 import utm
 from typing import Dict, Any, List

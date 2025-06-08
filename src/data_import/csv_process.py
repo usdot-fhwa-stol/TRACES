@@ -1,5 +1,3 @@
-# data_import/csv_process.py
-
 import csv
 import sqlite3
 from typing import Dict, Any, Callable

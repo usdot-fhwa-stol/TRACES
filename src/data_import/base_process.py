@@ -1,5 +1,3 @@
-# data_import/base_process.py
-
 import sqlite3
 
 class BaseProcess:

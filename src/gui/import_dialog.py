@@ -1,7 +1,6 @@
-# gui/import_dialog.py
-
 import json
 import sqlite3
+import logging
 from datetime import datetime
 from pathlib import Path
 from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QProgressBar, QTextEdit, QFileDialog
@@ -9,42 +8,78 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject
 from data_import.base_process import BaseProcess
 import importlib
 
-class ImportWorker(QObject):
-    """Worker class for handling import operations in a separate thread.
+# Set up logger
+logger = logging.getLogger(__name__)
 
-    Attributes:
-        log_signal (pyqtSignal): Signal to emit log messages.
-        progress_signal (pyqtSignal): Signal to emit progress updates.
-        interrupt_flag (bool): Flag to indicate if the import is interrupted.
-    """
+class ImportWorker(QObject):
+    """Worker class for handling import operations in a separate thread."""
 
     log_signal = pyqtSignal(str, bool)
     progress_signal = pyqtSignal(int)
+    finished_signal = pyqtSignal()  # Add explicit finished signal
 
-    def __init__(self, config: dict, input_path: str, output_path: str, db_connection: sqlite3.Connection):
-        """Initialize the worker with import parameters.
-
-        Args:
-            config (dict): JSON configuration for the import.
-            input_path (str): Path to the input file.
-            output_path (str): Path to the output SQLite database.
-            db_connection (sqlite3.Connection): Database connection.
-        """
+    def __init__(self, config: dict, input_path: str, output_path: str, db_connection: sqlite3.Connection = None):
         super().__init__()
         self.config = config
         self.input_path = input_path
         self.output_path = output_path
-        self.db_connection = db_connection
+        self.db_connection = db_connection  # Will be None initially, created in run()
         self.interrupt_flag = False
+        logger.debug(f"ImportWorker initialized with input: {input_path}, output: {output_path}")
 
     def run(self):
         """Execute the import process and update vehicle distances."""
+        logger.debug("ImportWorker.run() started")
         try:
-            # Delete existing output file
+            # CRITICAL FIX: Close any existing database connection first
+            # and ensure the database file is not locked before deletion
+            logger.debug("Checking and cleaning up existing output file")
+            
             if Path(self.output_path).exists():
-                Path(self.output_path).unlink()
+                logger.debug(f"Output file exists, attempting to remove: {self.output_path}")
+                
+                # Try to close any existing connections to this database
+                try:
+                    # Create a temporary connection to ensure file is accessible
+                    temp_conn = sqlite3.connect(self.output_path)
+                    temp_conn.close()
+                    logger.debug("Temporary connection test successful")
+                except Exception as e:
+                    logger.warning(f"Could not test database connection: {e}")
+                
+                # Add a small delay to ensure file handles are released
+                import time
+                time.sleep(0.1)
+                
+                # Now try to remove the file
+                try:
+                    Path(self.output_path).unlink()
+                    logger.debug(f"Successfully removed existing output file: {self.output_path}")
+                except PermissionError as e:
+                    logger.error(f"Permission error removing file: {e}")
+                    # Try to rename instead of delete (sometimes works when delete fails)
+                    backup_path = Path(self.output_path).with_suffix(".sqlite.backup")
+                    try:
+                        Path(self.output_path).rename(backup_path)
+                        logger.debug(f"Renamed existing file to: {backup_path}")
+                    except Exception as rename_error:
+                        logger.error(f"Could not rename file either: {rename_error}")
+                        raise Exception(f"Cannot access output file {self.output_path}. File may be locked by another process.")
 
+            # Now create the new database connection
+            logger.debug(f"Creating new database connection to: {self.output_path}")
+            # Ensure we're using the instance connection, not creating a new one
+            if hasattr(self, 'db_connection') and self.db_connection:
+                try:
+                    self.db_connection.close()
+                except:
+                    pass
+            
+            # Create fresh connection
+            self.db_connection = sqlite3.connect(self.output_path)
+            
             # Set up database
+            logger.debug("Setting up database")
             self.db_connection.execute("PRAGMA auto_vacuum=INCREMENTAL;")
             self.db_connection.execute("VACUUM;")
             self.db_connection.execute("""
@@ -75,26 +110,33 @@ class ImportWorker(QObject):
                 ) WITHOUT ROWID;
             """)
             self.db_connection.commit()
+            logger.debug("Database setup completed")
 
             # Instantiate processor
+            logger.debug(f"Instantiating processor: {self.config.get('class', 'data_import.csv_process.CsvProcess')}")
             module_name, class_name = self.config.get("class", "data_import.csv_process.CsvProcess").rsplit(".", 1)
             module = importlib.import_module(module_name)
             processor_class = getattr(module, class_name)
             
             if not issubclass(processor_class, BaseProcess):
+                logger.error("Processor class is not a subclass of BaseProcess")
                 self.log_signal.emit("Error: Processor class is not a subclass of BaseProcess.", False)
                 return
 
             processor = processor_class()
+            logger.debug("Starting data processing")
             error_count = processor.process(self.config, self.input_path, self.db_connection, self)
+            logger.debug(f"Data processing completed with {error_count} errors")
 
             if error_count == 0 and not self.interrupt_flag:
+                logger.debug("Starting vehicle distance calculation")
                 self.log_signal.emit("Updating vehicle distances", True)
                 
                 # Calculate total records for progress
                 cursor = self.db_connection.cursor()
                 cursor.execute("SELECT COUNT(*) FROM events")
                 total_records = cursor.fetchone()[0]
+                logger.debug(f"Total records for distance calculation: {total_records}")
                 
                 # Calculate cumulative distances
                 cursor.execute("SELECT DISTINCT event_id, veh_id FROM events")
@@ -102,9 +144,12 @@ class ImportWorker(QObject):
                 processed_records = 0
                 batch_size = 1000
                 
-                for event_id, veh_id in pairs:
+                logger.debug(f"Processing {len(pairs)} vehicle pairs")
+                for i, (event_id, veh_id) in enumerate(pairs):
                     if self.interrupt_flag:
+                        logger.debug("Interrupt flag set, breaking distance calculation loop")
                         break
+                        
                     cursor.execute("""
                         SELECT event_time, x_map_loc, y_map_loc
                         FROM events
@@ -117,7 +162,11 @@ class ImportWorker(QObject):
                     prev_x_loc = None
                     prev_y_loc = None
                     
-                    for i, (event_time, x_map_loc, y_map_loc) in enumerate(points):
+                    for j, (event_time, x_map_loc, y_map_loc) in enumerate(points):
+                        if self.interrupt_flag:
+                            logger.debug("Interrupt flag set during point processing")
+                            break
+                            
                         if prev_x_loc is not None and prev_y_loc is not None:
                             dist = ((x_map_loc - prev_x_loc) ** 2 + (y_map_loc - prev_y_loc) ** 2) ** 0.5
                             total_dist += dist
@@ -129,61 +178,61 @@ class ImportWorker(QObject):
                         prev_x_loc = x_map_loc
                         prev_y_loc = y_map_loc
                         
-                        if (i + 1) % batch_size == 0 or i == len(points) - 1:
+                        if (j + 1) % batch_size == 0 or j == len(points) - 1:
                             self.db_connection.commit()
-                            processed_records += min(batch_size, len(points) - i)
-                            self.progress_signal.emit(int((processed_records / total_records) * 100))
+                            processed_records += min(batch_size, len(points) - j)
+                            if total_records > 0:
+                                progress = int((processed_records / total_records) * 100)
+                                self.progress_signal.emit(progress)
+                    
+                    if i % 100 == 0:  # Log progress every 100 pairs
+                        logger.debug(f"Processed {i}/{len(pairs)} vehicle pairs")
                 
                 if not self.interrupt_flag:
+                    logger.debug("Committing final database changes")
                     self.db_connection.commit()
                     self.log_signal.emit(f"{self.input_path} successfully imported", True)
+                    logger.info(f"Import completed successfully: {self.input_path}")
                 else:
+                    logger.debug("Import was interrupted, cleaning up")
                     self.log_signal.emit("Import interrupted", False)
                     if Path(self.output_path).exists():
                         Path(self.output_path).unlink()
 
         except Exception as e:
+            logger.exception(f"Exception in ImportWorker.run(): {e}")
             self.log_signal.emit(f"Error during import: {str(e)}", False)
+        finally:
+            logger.debug("ImportWorker.run() finishing, closing database connection")
+            try:
+                self.db_connection.close()
+            except Exception as e:
+                logger.error(f"Error closing database connection: {e}")
+            logger.debug("Emitting finished signal")
+            self.finished_signal.emit()
 
 class ImportDialog(QDialog):
-    """Modal dialog for importing trajectory data into SQLite databases.
-
-    Manages the import process, displays progress, and logs messages.
-
-    Attributes:
-        _progress_bar (QProgressBar): Progress bar for import progress.
-        _text_edit (QTextEdit): Log display for import messages.
-        _input_button (QPushButton): Button to select input file.
-        _output_button (QPushButton): Button to select output file.
-        _import_button (QPushButton): Button to start import.
-        _interrupt_button (QPushButton): Button to interrupt import.
-        _input_path (str): Selected input file path.
-        _output_path (str): Selected output file path.
-        _configs (dict): Valid JSON configurations by file type.
-        _selected_file_type (str): File type selected in the file dialog.
-        _worker_thread (QThread): Thread for running import worker.
-        _worker (ImportWorker): Worker for import process.
-        _log_file (Path): Path to the log file.
-    """
+    """Modal dialog for importing trajectory data into SQLite databases."""
 
     def __init__(self, parent=None):
-        """Initialize the dialog with layout and initial state."""
         super().__init__(parent)
         self.setWindowTitle("Import Trajectory Data")
         self.setFixedSize(800, 600)
         self._input_path = ""
         self._output_path = ""
         self._configs = {}
-        self._selected_file_type = ""  # New: Store selected file type
+        self._selected_file_type = ""
         self._worker_thread = None
         self._worker = None
         self._log_file = Path("trajectory_tools.log")
+        logger.debug("ImportDialog initialized")
         self._setup_ui()
         self._center_dialog()
         self._initialize()
 
     def _setup_ui(self):
         """Set up the dialog layout and widgets."""
+        logger.debug("Setting up UI")
         layout = QVBoxLayout(self)
         
         # Progress bar
@@ -239,6 +288,7 @@ class ImportDialog(QDialog):
 
     def _initialize(self):
         """Initialize the dialog by checking configuration files."""
+        logger.debug("Initializing dialog")
         self.setWindowFlag(Qt.WindowCloseButtonHint, False)
         
         # Clear log file
@@ -297,12 +347,7 @@ class ImportDialog(QDialog):
             self.setWindowFlag(Qt.WindowCloseButtonHint, True)
 
     def _log_message(self, message: str, is_html: bool = False):
-        """Log a message to the text edit and log file.
-
-        Args:
-            message (str): Message to log.
-            is_html (bool): Whether the message contains HTML formatting.
-        """
+        """Log a message to the text edit and log file."""
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         display_message = f"[{timestamp}] {message}"
         
@@ -320,6 +365,7 @@ class ImportDialog(QDialog):
 
     def _select_input(self):
         """Handle input file selection."""
+        logger.debug("Selecting input file")
         file_types = ";".join([f"{ft} (*.{config['file_ext']})" for ft, config in self._configs.items()])
         file_path, selected_filter = QFileDialog.getOpenFileName(
             self,
@@ -330,9 +376,9 @@ class ImportDialog(QDialog):
         
         if file_path:
             self._input_path = file_path
-            # Extract file_type from selected_filter (e.g., "ohio-one-veh (*.csv)" -> "ohio-one-veh")
             self._selected_file_type = selected_filter.split(" (")[0]
             self._output_path = str(Path(file_path).with_suffix(".sqlite"))
+            logger.debug(f"Input file selected: {file_path}, type: {self._selected_file_type}")
             self._log_message(f"Info: Input file selected: {file_path}", True)
             self._log_message(f"Info: Output file set to: {self._output_path}", True)
             if Path(self._output_path).exists():
@@ -343,6 +389,7 @@ class ImportDialog(QDialog):
 
     def _select_output(self):
         """Handle output file selection."""
+        logger.debug("Selecting output file")
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "Select Output SQLite Database",
@@ -352,10 +399,12 @@ class ImportDialog(QDialog):
         
         if file_path:
             self._output_path = file_path
+            logger.debug(f"Output file changed to: {file_path}")
             self._log_message(f"Info: Output file changed to: {file_path}", True)
 
     def _start_import(self):
         """Start the import process in a separate thread."""
+        logger.debug("Starting import process")
         self.setWindowFlag(Qt.WindowCloseButtonHint, False)
         self._input_button.setEnabled(False)
         self._output_button.setEnabled(False)
@@ -363,27 +412,53 @@ class ImportDialog(QDialog):
         self._interrupt_button.setEnabled(True)
         
         if not self._selected_file_type or self._selected_file_type not in self._configs:
+            logger.error(f"Invalid file type: {self._selected_file_type}")
             self._log_message(f"Error: Invalid or missing file type '{self._selected_file_type}'.", False)
             self._input_button.setEnabled(True)
             self.setWindowFlag(Qt.WindowCloseButtonHint, True)
             return
         
         config = self._configs[self._selected_file_type]
-        db_connection = sqlite3.connect(self._output_path)
         
+        # DON'T create the connection here - let the worker create it
+        # This prevents file locking issues
+        logger.debug("Creating worker thread")
         self._worker_thread = QThread()
-        self._worker = ImportWorker(config, self._input_path, self._output_path, db_connection)
-        self._worker.moveToThread(self._worker_thread)
+        self._worker = ImportWorker(config, self._input_path, self._output_path, None)  # Pass None for db_connection
         
+        # CRITICAL: Move worker to thread AFTER creating all connections
+        logger.debug("Connecting signals before moving to thread")
+        
+        # Connect signals BEFORE moving to thread
         self._worker.log_signal.connect(self._log_message)
         self._worker.progress_signal.connect(self._progress_bar.setValue)
-        self._worker_thread.started.connect(self._worker.run)
-        self._worker_thread.finished.connect(self._finish_import)
+        self._worker.finished_signal.connect(self._finish_import)
         
-        self._worker_thread.start()
+        # Connect thread started to worker run - use Qt.QueuedConnection explicitly
+        self._worker_thread.started.connect(self._worker.run, Qt.QueuedConnection)
+        
+        # Add debug connection to verify thread started signal
+        self._worker_thread.started.connect(lambda: logger.debug("QThread started signal emitted"))
+        
+        # Move to thread AFTER signal connections
+        logger.debug("Moving worker to thread")
+        self._worker.moveToThread(self._worker_thread)
+        
+        # Verify the worker is in the correct thread
+        logger.debug(f"Worker thread: {self._worker.thread()}")
+        logger.debug(f"Created thread: {self._worker_thread}")
+        
+        logger.debug("Starting worker thread")
+#        self._worker_thread.start()
+        self._worker.run()  # Direct call to test if the method works
+        
+        # Add a small delay and check if thread is running
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(100, self._check_thread_status)
 
     def _interrupt_import(self):
         """Handle interrupt button click."""
+        logger.debug("Interrupt requested")
         if self._worker:
             self._worker.interrupt_flag = True
         self._interrupt_button.setEnabled(False)
@@ -391,26 +466,59 @@ class ImportDialog(QDialog):
 
     def _finish_import(self):
         """Handle import completion or interruption."""
-        self._worker_thread.quit()
-        self._worker_thread.wait()
+        logger.debug("Finishing import process")
         
-        if self._worker.interrupt_flag:
+        if self._worker_thread and self._worker_thread.isRunning():
+            logger.debug("Waiting for worker thread to finish")
+            self._worker_thread.quit()
+            success = self._worker_thread.wait(5000)  # Wait up to 5 seconds
+            if not success:
+                logger.warning("Worker thread did not finish within timeout")
+                self._worker_thread.terminate()
+                self._worker_thread.wait()
+        
+        if self._worker and self._worker.interrupt_flag:
+            logger.debug("Import was interrupted, cleaning up")
             if Path(self._output_path).exists():
                 Path(self._output_path).unlink()
             self._input_path = ""
             self._output_path = ""
         else:
+            logger.debug("Import completed normally")
             self._input_path = ""
+        
+        # Clean up references
+        self._worker = None
+        self._worker_thread = None
         
         self._input_button.setEnabled(True)
         self.setWindowFlag(Qt.WindowCloseButtonHint, True)
-        self._worker_thread = None
-        self._worker = None
+        logger.debug("Import process finished")
+
+    def _check_thread_status(self):
+        """Debug method to check thread status after start."""
+        if self._worker_thread:
+            logger.debug(f"Thread running: {self._worker_thread.isRunning()}")
+            logger.debug(f"Thread finished: {self._worker_thread.isFinished()}")
+            if self._worker:
+                logger.debug(f"Worker thread ID: {self._worker.thread()}")
+                logger.debug(f"Main thread ID: {self.thread()}")
+
+    def closeEvent(self, event):
+        """Handle dialog close event."""
+        logger.debug("Dialog close event triggered")
+        if self._worker_thread and self._worker_thread.isRunning():
+            logger.debug("Worker thread still running, interrupting")
+            if self._worker:
+                self._worker.interrupt_flag = True
+            self._worker_thread.quit()
+            success = self._worker_thread.wait(3000)
+            if not success:
+                logger.warning("Forcing thread termination")
+                self._worker_thread.terminate()
+                self._worker_thread.wait()
+        event.accept()
 
     def get_output_path(self) -> str:
-        """Get the output file path.
-
-        Returns:
-            str: Path to the output SQLite database, or empty string if none.
-        """
+        """Get the output file path."""
         return self._output_path
