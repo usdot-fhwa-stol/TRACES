@@ -1,20 +1,31 @@
 import csv
 import sqlite3
+import io
+import os
 from typing import Dict, Any, Callable
 from pathlib import Path
 from .base_process import BaseProcess
 from .csv_algorithms import CsvAlgorithms
 
-class CsvProcess(BaseProcess):
-    """Processor for importing CSV files into SQLite database based on JSON configuration.
+class ByteCountingStream(io.BufferedReader):
+    """A buffered reader that tracks the number of bytes read."""
+    
+    def __init__(self, raw):
+        super().__init__(raw)
+        self.bytes_read = 0
+    
+    def read(self, size=-1):
+        data = super().read(size)
+        self.bytes_read += len(data)
+        return data
+    
+    def read1(self, size=-1):
+        data = super().read1(size)
+        self.bytes_read += len(data)
+        return data
 
-    Attributes:
-        _func_dict (Dict[str, Callable]): Mapping of function names to CsvAlgorithms methods.
-        _has_header (bool): Whether the CSV file has a header row.
-        _min_cols (int): Minimum number of columns required based on configuration.
-        _col_defs (List[Dict[str, Any]]): List of column definition dictionaries.
-        _algorithms (CsvAlgorithms): Instance of CsvAlgorithms for processing column data.
-    """
+class CsvProcess(BaseProcess):
+    """Processor for importing CSV files into SQLite database based on JSON configuration."""
 
     def __init__(self):
         """Initialize the processor with a CsvAlgorithms instance."""
@@ -34,16 +45,13 @@ class CsvProcess(BaseProcess):
                 if callable(method):  # Ensure it's a callable method
                     self._func_dict[method_name] = method
 
+    def _count_csv_rows(self, input_path: str, has_header: bool) -> int:
+        """Count total rows in CSV file for progress tracking."""
+        # This method is no longer needed with byte counting approach
+        pass
+
     def _check_configuration(self, config: Dict[str, Any], worker: Any) -> int:
-        """Validate the JSON configuration and set up column definitions.
-
-        Args:
-            config (Dict[str, Any]): JSON configuration dictionary.
-            worker (Any): Worker object for logging.
-
-        Returns:
-            int: Number of errors encountered.
-        """
+        """Validate the JSON configuration and set up column definitions."""
         error_count = 0
         col_defs = config.get("col_defs", {})
 
@@ -67,6 +75,11 @@ class CsvProcess(BaseProcess):
 
             # Set defaults and validate
             for key, col_def in col_def_set.items():
+                if not isinstance(col_def, dict):
+                    worker.log_signal.emit(f"Error: col_defs[{i}]['{key}'] is not a dictionary.", False)
+                    error_count += 1
+                    continue
+
                 if key in seen_keys:
                     worker.log_signal.emit(f"Error: Duplicate key '{key}' in col_defs[{i}].", False)
                     error_count += 1
@@ -77,22 +90,15 @@ class CsvProcess(BaseProcess):
                 col_def.setdefault("type", "float")
                 col_def.setdefault("units", "")
                 col_def.setdefault("func", "copy")
-                col_def.setdefault("params", [])
+                col_def.setdefault("parms", [])
 
                 if col_def["src_col"] >= 0:
                     self._min_cols = max(self._min_cols, col_def["src_col"] + 1)
 
-                if key in required_cols and (col_def["src_col"] < 0 or col_def["func"] != "copy" or col_def["params"]):
-                    worker.log_signal.emit(
-                        f"Error: Required column '{key}' in col_defs[{i}] must have src_col >= 0, "
-                        "func='copy', and empty params.", False
-                    )
-                    error_count += 1
-
-                if col_def["src_col"] < 0 and (not col_def["func"] or not col_def["params"]):
+                if col_def["src_col"] < 0 and (not col_def["func"] or not col_def["parms"]):
                     worker.log_signal.emit(
                         f"Error: Column '{key}' in col_defs[{i}] with src_col < 0 must have "
-                        "non-empty func and params.", False
+                        "non-empty func and parms.", False
                     )
                     error_count += 1
 
@@ -118,29 +124,23 @@ class CsvProcess(BaseProcess):
                             f"Info: {key} reads column {col_def['src_col']} using {col_def['func']}", True
                         )
                     else:
-                        worker.log_signal.emit(f"Info: {key} is using {col_def['func']}", True
-                        )
+                        worker.log_signal.emit(f"Info: {key} is using {col_def['func']}", True)
 
         return error_count
 
     def _check_import_file(self, input_path: str, worker: Any) -> int:
-        """Validate the CSV file structure and data types.
-
-        Args:
-            input_path (str): Path to the CSV file.
-            worker (Any): Worker object for logging and progress.
-
-        Returns:
-            int: Number of errors encountered.
-        """
+        """Validate the CSV file structure and data types."""
         error_count = 0
-        file_size = Path(input_path).stat().st_size()
+        file_size = os.path.getsize(input_path)
         if file_size == 0:
             worker.log_signal.emit("Error: Input file is empty.", False)
             return 1
 
-        with open(input_path, 'r', newline='') as csvfile:
-            reader = csv.reader(csvfile)
+        with open(input_path, 'rb') as f_raw:
+            tracker = ByteCountingStream(f_raw)
+            text_stream = io.TextIOWrapper(tracker, encoding='utf-8', newline='')
+            reader = csv.reader(text_stream)
+            
             try:
                 first_row = next(reader)
             except StopIteration:
@@ -188,19 +188,19 @@ class CsvProcess(BaseProcess):
                                 )
                                 error_count += 1
 
-            # Check remaining rows in batches
+            # Check remaining rows in batches with byte-based progress
             total_error_count = error_count
-            bytes_read = csvfile.tell()
             batch_size = 1000
-            row_count = 1 if not self._has_header else 2
-            batch_rows = [first_data_row] if not self._has_header else []
+            row_count = 1  # Already processed first row
+            batch_rows = []
 
             for row in reader:
                 batch_rows.append(row)
                 row_count += 1
 
                 if len(batch_rows) >= batch_size:
-                    for i, row in enumerate(batch_rows, start=row_count - len(batch_rows) + 1):
+                    # Process batch
+                    for i, row in enumerate(batch_rows, start=row_count - len(batch_rows)):
                         if len(row) < self._min_cols:
                             worker.log_signal.emit(
                                 f"Error: Row {i} contains fewer than {self._min_cols} columns.", False
@@ -229,15 +229,17 @@ class CsvProcess(BaseProcess):
                                                 )
                                                 total_error_count += 1
 
-                    bytes_read = csvfile.tell()
-                    worker.progress_signal.emit(int((bytes_read / file_size) * 100))
+                    # Update progress based on bytes read
+                    progress = int((tracker.bytes_read / file_size) * 100)
+                    worker.progress_signal.emit(progress)
                     
                     if worker.interrupt_flag or total_error_count > 100:
                         break
                     batch_rows = []
 
+            # Process remaining rows
             if batch_rows and not (worker.interrupt_flag or total_error_count > 100):
-                for i, row in enumerate(batch_rows, start=row_count - len(batch_rows) + 1):
+                for i, row in enumerate(batch_rows, start=row_count - len(batch_rows)):
                     if len(row) < self._min_cols:
                         worker.log_signal.emit(
                             f"Error: Row {i} contains fewer than {self._min_cols} columns.", False
@@ -266,23 +268,14 @@ class CsvProcess(BaseProcess):
                                             )
                                             total_error_count += 1
 
-                bytes_read = csvfile.tell()
-                worker.progress_signal.emit(int((bytes_read / file_size) * 100))
+                # Final progress update
+                progress = int((tracker.bytes_read / file_size) * 100)
+                worker.progress_signal.emit(progress)
 
         return total_error_count
 
     def process(self, config: Dict[str, Any], input_path: str, db_connection: sqlite3.Connection, worker: Any) -> int:
-        """Process a CSV file into the SQLite database.
-
-        Args:
-            config (Dict[str, Any]): JSON configuration dictionary.
-            input_path (str): Path to the CSV file.
-            db_connection (sqlite3.Connection): Database connection.
-            worker (Any): Worker object for logging and progress updates.
-
-        Returns:
-            int: Number of errors encountered during processing.
-        """
+        """Process a CSV file into the SQLite database."""
         error_count = self._check_configuration(config, worker)
         if worker.interrupt_flag or error_count > 0:
             return error_count
@@ -290,6 +283,10 @@ class CsvProcess(BaseProcess):
         error_count = self._check_import_file(input_path, worker)
         if worker.interrupt_flag or error_count > 0:
             return error_count
+
+        # Get file size for progress tracking
+        file_size = os.path.getsize(input_path)
+        worker.log_signal.emit(f"Info: Processing file of size {file_size:,} bytes", True)
 
         # Prepare insert query
         columns = [
@@ -301,17 +298,18 @@ class CsvProcess(BaseProcess):
         insert_query = f"INSERT OR IGNORE INTO events ({', '.join(columns)}) VALUES ({', '.join(['?'] * len(columns))})"
         default_record = {col: None for col in columns}
 
-        # Process CSV rows
-        with open(input_path, 'r', newline='') as csvfile:
-            reader = csv.reader(csvfile)
+        # Process CSV rows with byte counting
+        with open(input_path, 'rb') as f_raw:
+            tracker = ByteCountingStream(f_raw)
+            text_stream = io.TextIOWrapper(tracker, encoding='utf-8', newline='')
+            reader = csv.reader(text_stream)
+            
             if self._has_header:
                 next(reader)  # Skip header
 
             row_count = 0
             batch_size = 1000
             batch_records = []
-            file_size = Path(input_path).stat().st_size
-            bytes_read = csvfile.tell()
 
             for row in reader:
                 if worker.interrupt_flag:
@@ -339,19 +337,24 @@ class CsvProcess(BaseProcess):
                         db_connection.commit()
                     except sqlite3.Error as e:
                         worker.log_signal.emit(f"Error: Database insert failed: {str(e)}", False)
-                        # Ignore duplicate key errors
+                        # Continue processing, ignore duplicate key errors
+                    
                     batch_records = []
-                    bytes_read = csvfile.tell()
-                    worker.progress_signal.emit(int((bytes_read / file_size) * 100))
+                    # Update progress based on bytes read
+                    progress = int((tracker.bytes_read / file_size) * 100)
+                    worker.progress_signal.emit(progress)
 
+            # Process final batch
             if batch_records and not worker.interrupt_flag:
                 try:
                     db_connection.executemany(insert_query, batch_records)
                     db_connection.commit()
                 except sqlite3.Error:
                     pass  # Ignore duplicate key errors
-                bytes_read = csvfile.tell()
-                worker.progress_signal.emit(int((bytes_read / file_size) * 100))
+                
+                # Final progress update
+                progress = int((tracker.bytes_read / file_size) * 100)
+                worker.progress_signal.emit(progress)
 
         if not worker.interrupt_flag:
             worker.log_signal.emit(f"Info: {row_count} rows successfully imported", True)

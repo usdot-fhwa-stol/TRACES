@@ -3,33 +3,32 @@ import sqlite3
 import logging
 from datetime import datetime
 from pathlib import Path
-from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QProgressBar, QTextEdit, QFileDialog
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject
+from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QProgressBar, QTextEdit, QFileDialog, QMessageBox
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from data_import.base_process import BaseProcess
 import importlib
 
 # Set up logger
 logger = logging.getLogger(__name__)
 
-class ImportWorker(QObject):
-    """Worker class for handling import operations in a separate thread."""
+class ImportWorkerThread(QThread):
+    """Worker thread for handling import operations."""
 
     log_signal = pyqtSignal(str, bool)
     progress_signal = pyqtSignal(int)
-    finished_signal = pyqtSignal()  # Add explicit finished signal
 
-    def __init__(self, config: dict, input_path: str, output_path: str, db_connection: sqlite3.Connection = None):
+    def __init__(self, config: dict, input_path: str, output_path: str):
         super().__init__()
         self.config = config
         self.input_path = input_path
         self.output_path = output_path
-        self.db_connection = db_connection  # Will be None initially, created in run()
+        self.db_connection = None
         self.interrupt_flag = False
-        logger.debug(f"ImportWorker initialized with input: {input_path}, output: {output_path}")
+        logger.debug(f"ImportWorkerThread initialized with input: {input_path}, output: {output_path}")
 
     def run(self):
         """Execute the import process and update vehicle distances."""
-        logger.debug("ImportWorker.run() started")
+        logger.debug("ImportWorkerThread.run() started")
         try:
             # CRITICAL FIX: Close any existing database connection first
             # and ensure the database file is not locked before deletion
@@ -68,13 +67,6 @@ class ImportWorker(QObject):
 
             # Now create the new database connection
             logger.debug(f"Creating new database connection to: {self.output_path}")
-            # Ensure we're using the instance connection, not creating a new one
-            if hasattr(self, 'db_connection') and self.db_connection:
-                try:
-                    self.db_connection.close()
-                except:
-                    pass
-            
             # Create fresh connection
             self.db_connection = sqlite3.connect(self.output_path)
             
@@ -200,19 +192,25 @@ class ImportWorker(QObject):
                         Path(self.output_path).unlink()
 
         except Exception as e:
-            logger.exception(f"Exception in ImportWorker.run(): {e}")
+            logger.exception(f"Exception in ImportWorkerThread.run(): {e}")
             self.log_signal.emit(f"Error during import: {str(e)}", False)
         finally:
-            logger.debug("ImportWorker.run() finishing, closing database connection")
+            logger.debug("ImportWorkerThread.run() finishing, closing database connection")
             try:
-                self.db_connection.close()
+                if self.db_connection:
+                    self.db_connection.close()
             except Exception as e:
                 logger.error(f"Error closing database connection: {e}")
-            logger.debug("Emitting finished signal")
-            self.finished_signal.emit()
+
 
 class ImportDialog(QDialog):
-    """Modal dialog for importing trajectory data into SQLite databases."""
+    """Modal dialog for importing trajectory data into SQLite databases.
+
+    Signals:
+        import_finished (str): Emitted when the dialog closes with the most recently imported database file path.
+    """
+
+    import_finished = pyqtSignal(str)  # Signal to emit output path
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -223,12 +221,15 @@ class ImportDialog(QDialog):
         self._configs = {}
         self._selected_file_type = ""
         self._worker_thread = None
-        self._worker = None
         self._log_file = Path("trajectory_tools.log")
+        self._import_completed = False  # Track if import completed successfully
         logger.debug("ImportDialog initialized")
         self._setup_ui()
         self._center_dialog()
         self._initialize()
+
+    def __del__(self):
+        logger.debug("ImportDialog.__del__ called")
 
     def _setup_ui(self):
         """Set up the dialog layout and widgets."""
@@ -289,7 +290,7 @@ class ImportDialog(QDialog):
     def _initialize(self):
         """Initialize the dialog by checking configuration files."""
         logger.debug("Initializing dialog")
-        self.setWindowFlag(Qt.WindowCloseButtonHint, False)
+        # Keep close button enabled throughout
         
         # Clear log file
         if self._log_file.exists():
@@ -303,7 +304,6 @@ class ImportDialog(QDialog):
         config_files = list(config_dir.glob("*.json"))
         if not config_files:
             self._log_message("Error: No JSON configuration files found in 'config' directory.", False)
-            self.setWindowFlag(Qt.WindowCloseButtonHint, True)
             return
         
         for config_file in config_files:
@@ -338,13 +338,11 @@ class ImportDialog(QDialog):
         
         if not self._configs:
             self._log_message("Error: No valid JSON configuration files found. Import cannot continue.", False)
-            self.setWindowFlag(Qt.WindowCloseButtonHint, True)
         else:
             file_types = ", ".join(self._configs.keys())
             self._log_message(f"Info: Available file types for import: {file_types}", True)
             self._log_message("Info: Please select an input file.", True)
             self._input_button.setEnabled(True)
-            self.setWindowFlag(Qt.WindowCloseButtonHint, True)
 
     def _log_message(self, message: str, is_html: bool = False):
         """Log a message to the text edit and log file."""
@@ -354,7 +352,7 @@ class ImportDialog(QDialog):
         if is_html:
             self._text_edit.append(display_message)
         else:
-            self._text_edit.append(display_message.replace("<", "&lt;").replace(">", "&gt;"))
+            self._text_edit.append(display_message.replace("<", "<").replace(">", ">"))
         
         # Write plain text to log file
         plain_message = display_message.replace("<b>", "").replace("</b>", "").replace("<i>", "").replace("</i>", "")
@@ -405,120 +403,112 @@ class ImportDialog(QDialog):
     def _start_import(self):
         """Start the import process in a separate thread."""
         logger.debug("Starting import process")
-        self.setWindowFlag(Qt.WindowCloseButtonHint, False)
+        # Keep close button enabled, handle close logic in closeEvent
         self._input_button.setEnabled(False)
         self._output_button.setEnabled(False)
         self._import_button.setEnabled(False)
         self._interrupt_button.setEnabled(True)
+        self._import_completed = False  # Reset completion flag
         
         if not self._selected_file_type or self._selected_file_type not in self._configs:
             logger.error(f"Invalid file type: {self._selected_file_type}")
             self._log_message(f"Error: Invalid or missing file type '{self._selected_file_type}'.", False)
             self._input_button.setEnabled(True)
-            self.setWindowFlag(Qt.WindowCloseButtonHint, True)
             return
         
         config = self._configs[self._selected_file_type]
         
-        # DON'T create the connection here - let the worker create it
-        # This prevents file locking issues
         logger.debug("Creating worker thread")
-        self._worker_thread = QThread()
-        self._worker = ImportWorker(config, self._input_path, self._output_path, None)  # Pass None for db_connection
+        self._worker_thread = ImportWorkerThread(config, self._input_path, self._output_path)
         
-        # CRITICAL: Move worker to thread AFTER creating all connections
-        logger.debug("Connecting signals before moving to thread")
-        
-        # Connect signals BEFORE moving to thread
-        self._worker.log_signal.connect(self._log_message)
-        self._worker.progress_signal.connect(self._progress_bar.setValue)
-        self._worker.finished_signal.connect(self._finish_import)
-        
-        # Connect thread started to worker run - use Qt.QueuedConnection explicitly
-        self._worker_thread.started.connect(self._worker.run, Qt.QueuedConnection)
-        
-        # Add debug connection to verify thread started signal
-        self._worker_thread.started.connect(lambda: logger.debug("QThread started signal emitted"))
-        
-        # Move to thread AFTER signal connections
-        logger.debug("Moving worker to thread")
-        self._worker.moveToThread(self._worker_thread)
-        
-        # Verify the worker is in the correct thread
-        logger.debug(f"Worker thread: {self._worker.thread()}")
-        logger.debug(f"Created thread: {self._worker_thread}")
+        # Connect signals directly to the thread
+        self._worker_thread.log_signal.connect(self._log_message)
+        self._worker_thread.progress_signal.connect(self._progress_bar.setValue)
+        self._worker_thread.finished.connect(self._finish_import)
         
         logger.debug("Starting worker thread")
-#        self._worker_thread.start()
-        self._worker.run()  # Direct call to test if the method works
-        
-        # Add a small delay and check if thread is running
-        from PyQt6.QtCore import QTimer
-        QTimer.singleShot(100, self._check_thread_status)
+        self._worker_thread.start()
 
     def _interrupt_import(self):
         """Handle interrupt button click."""
         logger.debug("Interrupt requested")
-        if self._worker:
-            self._worker.interrupt_flag = True
+        if self._worker_thread:
+            self._worker_thread.interrupt_flag = True
         self._interrupt_button.setEnabled(False)
         self._log_message("Warning: Interrupt requested", False)
 
     def _finish_import(self):
-        """Handle import completion or interruption."""
-        logger.debug("Finishing import process")
+        """Handle import completion without closing dialog."""
+        logger.debug("Import process completed")
         
-        if self._worker_thread and self._worker_thread.isRunning():
-            logger.debug("Waiting for worker thread to finish")
-            self._worker_thread.quit()
-            success = self._worker_thread.wait(5000)  # Wait up to 5 seconds
-            if not success:
-                logger.warning("Worker thread did not finish within timeout")
-                self._worker_thread.terminate()
-                self._worker_thread.wait()
-        
-        if self._worker and self._worker.interrupt_flag:
-            logger.debug("Import was interrupted, cleaning up")
-            if Path(self._output_path).exists():
-                Path(self._output_path).unlink()
-            self._input_path = ""
-            self._output_path = ""
+        # Check if import was successful (not interrupted and output file exists)
+        if (not getattr(self._worker_thread, 'interrupt_flag', False) and 
+            self._output_path and 
+            Path(self._output_path).exists()):
+            self._import_completed = True
+            logger.debug("Import completed successfully")
         else:
-            logger.debug("Import completed normally")
-            self._input_path = ""
+            self._import_completed = False
+            logger.debug("Import was interrupted or failed")
         
-        # Clean up references
-        self._worker = None
-        self._worker_thread = None
-        
-        self._input_button.setEnabled(True)
-        self.setWindowFlag(Qt.WindowCloseButtonHint, True)
-        logger.debug("Import process finished")
-
-    def _check_thread_status(self):
-        """Debug method to check thread status after start."""
+        # Clean up thread
         if self._worker_thread:
-            logger.debug(f"Thread running: {self._worker_thread.isRunning()}")
-            logger.debug(f"Thread finished: {self._worker_thread.isFinished()}")
-            if self._worker:
-                logger.debug(f"Worker thread ID: {self._worker.thread()}")
-                logger.debug(f"Main thread ID: {self.thread()}")
+            self._worker_thread.wait()  # Wait for thread to finish
+            self._worker_thread.deleteLater()
+            self._worker_thread = None
+        
+        # Re-enable buttons but don't close dialog
+        self._input_button.setEnabled(True)
+        self._output_button.setEnabled(True)
+        self._import_button.setEnabled(True)
+        self._interrupt_button.setEnabled(False)
+        
+        logger.debug("Import process finished, dialog remains open")
 
     def closeEvent(self, event):
-        """Handle dialog close event."""
+        """Handle dialog close event and emit the output path."""
         logger.debug("Dialog close event triggered")
+        
+        # If import is running, ask user for confirmation
         if self._worker_thread and self._worker_thread.isRunning():
-            logger.debug("Worker thread still running, interrupting")
-            if self._worker:
-                self._worker.interrupt_flag = True
+            logger.debug("Import is running, asking user for confirmation")
+            
+            reply = QMessageBox.question(
+                self,
+                "Import In Progress",
+                "An import process is currently running. Do you want to interrupt it and close the dialog?\n\n"
+                "Warning: Interrupting the import will cancel the process and any partial results will be lost.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel  # Default to Cancel for safety
+            )
+            
+            if reply == QMessageBox.StandardButton.Cancel:
+                logger.debug("User chose to cancel dialog close")
+                event.ignore()  # Prevent the dialog from closing
+                return
+            
+            # User chose Yes - interrupt the import
+            logger.debug("User confirmed to interrupt import and close dialog")
+            self._worker_thread.interrupt_flag = True
+            self._log_message("Warning: Import interrupted by user", False)
+            
+            # Wait for thread to finish
             self._worker_thread.quit()
             success = self._worker_thread.wait(3000)
             if not success:
                 logger.warning("Forcing thread termination")
                 self._worker_thread.terminate()
                 self._worker_thread.wait()
+            
+            # Mark import as not completed since it was interrupted
+            self._import_completed = False
+        
+        # Only emit signal if import was completed successfully
+        if self._import_completed and self._output_path and Path(self._output_path).exists():
+            logger.debug(f"Emitting import_finished signal with path: {self._output_path}")
+            self.import_finished.emit(self._output_path)
+        else:
+            logger.debug("No valid output path to emit or import was not completed")
+            self.import_finished.emit("")
+        
         event.accept()
-
-    def get_output_path(self) -> str:
-        """Get the output file path."""
-        return self._output_path

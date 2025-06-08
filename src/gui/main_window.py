@@ -2,6 +2,7 @@ import sqlite3
 from pathlib import Path
 from PyQt6.QtWidgets import QMainWindow, QMenuBar, QMenu, QApplication, QFileDialog, QMessageBox
 from PyQt6.QtGui import QAction
+from PyQt6.QtCore import pyqtSignal  # Added for signal connection
 from .time_space_plot_widget import TimeSpacePlotWidget
 from .import_dialog import ImportDialog
 
@@ -27,6 +28,7 @@ class MainWindow(QMainWindow):
         self._export_menu = None
         self._db_connection = None
         self._plot_widget = None
+        self._import_dialog = None
         self._setup_ui()
         self._load_settings()
 
@@ -286,16 +288,29 @@ class MainWindow(QMainWindow):
     def _import_file(self):
         """Handle the Import menu action."""
         dialog = ImportDialog(self)
-        if dialog.exec():
-            output_path = dialog.get_output_path()
-            if output_path and self._check_database(output_path):
-                self.add_recent_file(output_path)
-                self.setWindowTitle(f"Trajectory Tools - {output_path}")
-                if not self._plot_widget:
-                    self._plot_widget = TimeSpacePlotWidget()
-                    self.setCentralWidget(self._plot_widget)
-                self._plot_widget.set_database(output_path, self._db_connection)
-                self._export_menu.setEnabled(True)
+        dialog.setModal(True)
+        # Connect to the import_finished signal to receive the output path
+        dialog.import_finished.connect(self._handle_import_finished)
+        dialog.show()
+        self._import_dialog = dialog
+
+    def _handle_import_finished(self, output_path: str):
+        """Handle the import finished signal from ImportDialog.
+
+        Args:
+            output_path (str): Path to the imported SQLite database file.
+        """
+        if output_path and self._check_database(output_path):
+            print(output_path)
+            self.add_recent_file(output_path)
+            self.setWindowTitle(f"Trajectory Tools - {output_path}")
+            if not self._plot_widget:
+                self._plot_widget = TimeSpacePlotWidget()
+                self.setCentralWidget(self._plot_widget)
+            self._plot_widget.set_database(output_path, self._db_connection)
+            self._export_menu.setEnabled(True)
+
+        self._import_dialog = None
 
     def _export_all(self):
         """Handle the Export All menu action."""

@@ -12,21 +12,21 @@ class CsvAlgorithms:
         self._group_dict: Dict[str, int] = {}
 
     def copy(self, row: List[str], col_def: Dict[str, Any]) -> Any:
-        """Copy a value from the row or return default from params.
+        """Copy a value from the row or return default from parms.
 
         Args:
             row (List[str]): CSV row data.
-            col_def (Dict[str, Any]): Column definition with src_col, type, and params.
+            col_def (Dict[str, Any]): Column definition with src_col, type, and parms.
 
         Returns:
             Any: Processed column value or None if invalid.
         """
         src_col = col_def.get("src_col", -1)
         col_type = col_def.get("type", "float")
-        params = col_def.get("params", [])
+        parms = col_def.get("parms", [])
 
         if src_col < 0 or src_col >= len(row) or not row[src_col]:
-            return params[0] if params else None
+            return parms[0] if parms else None
         
         try:
             value = row[src_col]
@@ -44,24 +44,24 @@ class CsvAlgorithms:
 
         Args:
             row (List[str]): CSV row data.
-            col_def (Dict[str, Any]): Column definition with params for coordinates.
+            col_def (Dict[str, Any]): Column definition with parms for coordinates.
 
         Returns:
             tuple: (latitude, longitude) or (None, None) if invalid.
         """
-        params = col_def.get("params", [])
-        if len(params) < 4:
+        parms = col_def.get("parms", [])
+        if len(parms) < 4:
             return None, None
 
         # Validate all indices are within bounds
-        if any(p < 0 or p >= len(row) for p in params):
+        if any(p < 0 or p >= len(row) for p in parms):
             return None, None
 
         try:
-            map_origin_x = float(row[params[0]])
-            map_origin_y = float(row[params[1]])
-            x_map_loc = float(row[params[2]])
-            y_map_loc = float(row[params[3]])
+            map_origin_x = float(row[parms[0]])
+            map_origin_y = float(row[parms[1]])
+            x_map_loc = float(row[parms[2]])
+            y_map_loc = float(row[parms[3]])
 
             easting, northing, zone_num, zone_letter = utm.from_latlon(map_origin_y, map_origin_x)
             lat, lon = utm.to_latlon(easting + x_map_loc, northing + y_map_loc, zone_num, zone_letter)
@@ -74,7 +74,7 @@ class CsvAlgorithms:
 
         Args:
             row (List[str]): CSV row data.
-            col_def (Dict[str, Any]): Column definition with params.
+            col_def (Dict[str, Any]): Column definition with parms.
 
         Returns:
             float: Latitude value or None if invalid.
@@ -87,7 +87,7 @@ class CsvAlgorithms:
 
         Args:
             row (List[str]): CSV row data.
-            col_def (Dict[str, Any]): Column definition with params.
+            col_def (Dict[str, Any]): Column definition with parms.
 
         Returns:
             float: Longitude value or None if invalid.
@@ -100,22 +100,22 @@ class CsvAlgorithms:
 
         Args:
             row (List[str]): CSV row data.
-            col_def (Dict[str, Any]): Column definition with src_col and params.
+            col_def (Dict[str, Any]): Column definition with src_col and parms.
 
         Returns:
             int: Calculated lane ID or None if invalid.
         """
         src_col = col_def.get("src_col", -1)
-        params = col_def.get("params", [])
+        parms = col_def.get("parms", [])
         
-        if src_col < 0 or src_col >= len(row) or not row[src_col] or len(params) < 1:
+        if src_col < 0 or src_col >= len(row) or not row[src_col] or len(parms) < 1:
             return None
         
-        if params[0] < 0 or params[0] >= len(row):
+        if parms[0] < 0 or parms[0] >= len(row):
             return None
         
         try:
-            lane_kf = int(float(row[params[0]]))
+            lane_kf = int(float(row[parms[0]]))
             src_value = int(float(row[src_col]))
             return 7 - lane_kf if src_value % 2 else 16 - lane_kf
         except (ValueError, TypeError):
@@ -126,14 +126,14 @@ class CsvAlgorithms:
 
         Args:
             row (List[str]): CSV row data.
-            col_def (Dict[str, Any]): Column definition with params.
+            col_def (Dict[str, Any]): Column definition with parms.
 
         Returns:
             int: Group index or None if invalid.
         """
-        params = col_def.get("params", [])
+        parms = col_def.get("parms", [])
         try:
-            key = " ".join(str(row[i]) for i in params if i < len(row) and row[i])
+            key = " ".join(str(row[i]) for i in parms if i < len(row) and row[i])
             if not key:  # Return None if key is empty
                 return None
             if key not in self._group_dict:
