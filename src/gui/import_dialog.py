@@ -223,6 +223,7 @@ class ImportDialog(QDialog):
         self._worker_thread = None
         self._log_file = Path("trajectory_tools.log")
         self._import_completed = False  # Track if import completed successfully
+        self._successful_import_path = ""  # Store path of successful import
         logger.debug("ImportDialog initialized")
         self._setup_ui()
         self._center_dialog()
@@ -236,16 +237,16 @@ class ImportDialog(QDialog):
         logger.debug("Setting up UI")
         layout = QVBoxLayout(self)
         
-        # Progress bar
-        self._progress_bar = QProgressBar()
-        self._progress_bar.setMinimum(0)
-        self._progress_bar.setMaximum(100)
-        layout.addWidget(self._progress_bar)
-        
         # Text edit
         self._text_edit = QTextEdit()
         self._text_edit.setReadOnly(True)
         layout.addWidget(self._text_edit, stretch=1)
+        
+        # Progress bar (moved between text area and buttons)
+        self._progress_bar = QProgressBar()
+        self._progress_bar.setMinimum(0)
+        self._progress_bar.setMaximum(100)
+        layout.addWidget(self._progress_bar)
         
         # Button row
         button_layout = QHBoxLayout()
@@ -403,6 +404,9 @@ class ImportDialog(QDialog):
     def _start_import(self):
         """Start the import process in a separate thread."""
         logger.debug("Starting import process")
+        # Clear the button's clicked state for better visibility when disabled
+        self._import_button.clearFocus()
+        
         # Keep close button enabled, handle close logic in closeEvent
         self._input_button.setEnabled(False)
         self._output_button.setEnabled(False)
@@ -441,14 +445,19 @@ class ImportDialog(QDialog):
         """Handle import completion without closing dialog."""
         logger.debug("Import process completed")
         
+        # Always reset progress bar to 0
+        self._progress_bar.setValue(0)
+        
         # Check if import was successful (not interrupted and output file exists)
         if (not getattr(self._worker_thread, 'interrupt_flag', False) and 
             self._output_path and 
             Path(self._output_path).exists()):
             self._import_completed = True
+            self._successful_import_path = self._output_path  # Store successful path
             logger.debug("Import completed successfully")
         else:
             self._import_completed = False
+            self._successful_import_path = ""  # Clear on failure
             logger.debug("Import was interrupted or failed")
         
         # Clean up thread
@@ -457,13 +466,18 @@ class ImportDialog(QDialog):
             self._worker_thread.deleteLater()
             self._worker_thread = None
         
-        # Re-enable buttons but don't close dialog
+        # Reset UI for next import - clear paths and reset button states
+        self._input_path = ""
+        self._output_path = ""
+        self._selected_file_type = ""
+        
+        # Reset button states: only Input enabled, others disabled
         self._input_button.setEnabled(True)
-        self._output_button.setEnabled(True)
-        self._import_button.setEnabled(True)
+        self._output_button.setEnabled(False)
+        self._import_button.setEnabled(False)
         self._interrupt_button.setEnabled(False)
         
-        logger.debug("Import process finished, dialog remains open")
+        logger.debug("Import process finished, dialog ready for next import")
 
     def closeEvent(self, event):
         """Handle dialog close event and emit the output path."""
@@ -504,9 +518,9 @@ class ImportDialog(QDialog):
             self._import_completed = False
         
         # Only emit signal if import was completed successfully
-        if self._import_completed and self._output_path and Path(self._output_path).exists():
-            logger.debug(f"Emitting import_finished signal with path: {self._output_path}")
-            self.import_finished.emit(self._output_path)
+        if self._import_completed and self._successful_import_path and Path(self._successful_import_path).exists():
+            logger.debug(f"Emitting import_finished signal with path: {self._successful_import_path}")
+            self.import_finished.emit(self._successful_import_path)
         else:
             logger.debug("No valid output path to emit or import was not completed")
             self.import_finished.emit("")

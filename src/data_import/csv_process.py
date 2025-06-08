@@ -52,6 +52,7 @@ class CsvProcess(BaseProcess):
 
     def _check_configuration(self, config: Dict[str, Any], worker: Any) -> int:
         """Validate the JSON configuration and set up column definitions."""
+        worker.log_signal.emit("Info: Checking configured column definitions", True)
         error_count = 0
         col_defs = config.get("col_defs", {})
 
@@ -130,6 +131,7 @@ class CsvProcess(BaseProcess):
 
     def _check_import_file(self, input_path: str, worker: Any) -> int:
         """Validate the CSV file structure and data types."""
+        worker.log_signal.emit("Checking import file columns", True)
         error_count = 0
         file_size = os.path.getsize(input_path)
         if file_size == 0:
