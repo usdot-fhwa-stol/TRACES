@@ -1,11 +1,13 @@
 import sqlite3
+from abc import ABC, abstractmethod
 
-class BaseProcess:
+class BaseProcess(ABC):
     """Base class for processing input files into SQLite databases.
 
     Subclasses must implement the process method to handle specific file types.
     """
 
+    @abstractmethod
     def process(self, config: dict, input_path: str, db_connection: sqlite3.Connection, worker: object) -> int:
         """Process an input file and import data into the database.
 
@@ -18,4 +20,4 @@ class BaseProcess:
         Returns:
             int: Number of errors encountered during processing.
         """
-        raise NotImplementedError("Subclasses must implement process method")
+        pass

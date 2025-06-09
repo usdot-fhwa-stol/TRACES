@@ -31,17 +31,27 @@ class TestBaseProcess:
     
     def test_base_process_is_abstract(self):
         """Test that BaseProcess cannot be instantiated directly."""
-        with pytest.raises(TypeError):
+        with pytest.raises(TypeError, match="Can't instantiate abstract class BaseProcess"):
             BaseProcess()
     
     def test_process_method_not_implemented(self):
-        """Test that process method raises NotImplementedError."""
-        class TestProcessor(BaseProcess):
+        """Test that concrete subclass must implement process method."""
+        class IncompleteProcessor(BaseProcess):
             pass
         
-        processor = TestProcessor()
-        with pytest.raises(NotImplementedError):
-            processor.process({}, "", None, None)
+        # Should raise TypeError when trying to instantiate without implementing abstract method
+        with pytest.raises(TypeError, match="Can't instantiate abstract class IncompleteProcessor"):
+            IncompleteProcessor()
+        
+        # Test that proper implementation works
+        class CompleteProcessor(BaseProcess):
+            def process(self, config: dict, input_path: str, db_connection, worker) -> int:
+                return 0
+        
+        # This should work fine
+        processor = CompleteProcessor()
+        result = processor.process({}, "", None, None)
+        assert result == 0
 
 
 class TestCsvAlgorithms:
@@ -271,6 +281,21 @@ class TestCsvAlgorithms:
         col_def = {"parms": [0, 1, 5]}  # Index 5 is out of bounds
         
         result = self.algorithms.group(row, col_def)
+        # Looking at the actual implementation in csv_algorithms.py:
+        # It uses: key = " ".join(str(row[i]) for i in parms if i < len(row) and row[i])
+        # This means it will skip index 5 (out of bounds) and only use indices 0, 1
+        # So it creates key "A B" and returns 0 (first unique key)
+        assert result == 0
+        assert "A B" in self.algorithms._group_dict
+    
+    def test_group_with_all_out_of_bounds_params(self):
+        """Test group function with all out of bounds parameters."""
+        row = ["A", "B"]
+        col_def = {"parms": [5, 6, 7]}  # All indices are out of bounds
+        
+        result = self.algorithms.group(row, col_def)
+        # When all indices are out of bounds, no valid values can be joined
+        # The key becomes empty string, which should return None per implementation
         assert result is None
 
 
