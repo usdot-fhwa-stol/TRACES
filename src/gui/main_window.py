@@ -2,9 +2,10 @@ import sqlite3
 from pathlib import Path
 from PyQt6.QtWidgets import QMainWindow, QMenuBar, QMenu, QApplication, QFileDialog, QMessageBox
 from PyQt6.QtGui import QAction
-from PyQt6.QtCore import pyqtSignal  # Added for signal connection
+from PyQt6.QtCore import pyqtSignal, QTimer  # Added QTimer for splash screen delay
 from .time_space_plot_widget import TimeSpacePlotWidget
 from .import_dialog import ImportDialog
+from .about_dialog import AboutDialog
 
 class MainWindow(QMainWindow):
     """Main window for the Trajectory Tools application.
@@ -18,10 +19,15 @@ class MainWindow(QMainWindow):
         _export_menu (QMenu): Submenu for export options.
         _db_connection (sqlite3.Connection): Current database connection.
         _plot_widget (TimeSpacePlotWidget): Plot widget for displaying trajectory data.
+        _splash_dialog (AboutDialog): Splash screen dialog instance.
     """
 
-    def __init__(self):
-        """Initialize the main window with menu bar and load settings."""
+    def __init__(self, show_splash=True):
+        """Initialize the main window with menu bar and load settings.
+        
+        Args:
+            show_splash (bool): Whether to show splash screen on startup.
+        """
         super().__init__()
         self._recent_files = []
         self._recent_menu = None
@@ -29,8 +35,13 @@ class MainWindow(QMainWindow):
         self._db_connection = None
         self._plot_widget = None
         self._import_dialog = None
+        self._splash_dialog = None
         self._setup_ui()
         self._load_settings()
+        
+        if show_splash:
+            # Use QTimer to show splash after main window is properly initialized
+            QTimer.singleShot(100, self._show_splash_screen)
 
     def _setup_ui(self):
         """Set up the main window UI including menu bar and initial settings."""
@@ -86,6 +97,16 @@ class MainWindow(QMainWindow):
         exit_action = QAction("E&xit", self)
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
+
+    def _show_splash_screen(self):
+        """Show the splash screen dialog."""
+        self._splash_dialog = AboutDialog(parent=self, is_splash=True)
+        self._splash_dialog.closed.connect(self._on_splash_closed)
+        self._splash_dialog.show()
+
+    def _on_splash_closed(self):
+        """Handle splash screen being closed."""
+        self._splash_dialog = None
 
     def _load_settings(self):
         """Load window settings and recent files from configuration file.
@@ -323,9 +344,9 @@ class MainWindow(QMainWindow):
         pass
 
     def _show_about(self):
-        """Handle the About menu action."""
-        # To be implemented: Show about dialog
-        pass
+        """Handle the About menu action by showing the AboutDialog."""
+        about_dialog = AboutDialog(parent=self, is_splash=False)
+        about_dialog.exec()
 
     def add_recent_file(self, file_path: str):
         """Add a file to the recent files list.
@@ -346,6 +367,10 @@ class MainWindow(QMainWindow):
         Args:
             event (QCloseEvent): The close event.
         """
+        # Close splash dialog if it's still open
+        if self._splash_dialog:
+            self._splash_dialog.close()
+            
         if self._db_connection:
             self._db_connection.close()
         self._save_settings()
