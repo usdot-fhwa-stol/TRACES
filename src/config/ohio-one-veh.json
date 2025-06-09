@@ -1,5 +1,4 @@
 {
-  "file_type": "ohio-one-veh", 
   "file_ext": "csv", 
   "class": "data_import.csv_process.CsvProcess", 
   "col_defs": 

@@ -4,7 +4,7 @@ import logging
 from datetime import datetime
 from pathlib import Path
 from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QProgressBar, QTextEdit, QFileDialog, QMessageBox
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtCore import QThread, QTimer, pyqtSignal
 from data_import.base_process import BaseProcess
 import importlib
 
@@ -259,7 +259,7 @@ class ImportDialog(QDialog):
         self._output_button.setEnabled(False)
         self._import_button.setEnabled(False)
         self._interrupt_button.setEnabled(False)
-        
+
         button_layout.addStretch()
         button_layout.addWidget(self._input_button)
         button_layout.addStretch()
@@ -275,7 +275,7 @@ class ImportDialog(QDialog):
         # Connect signals
         self._input_button.clicked.connect(self._select_input)
         self._output_button.clicked.connect(self._select_output)
-        self._import_button.clicked.connect(self._start_import)
+        self._import_button.clicked.connect(self._on_import)
         self._interrupt_button.clicked.connect(self._interrupt_import)
 
     def _center_dialog(self):
@@ -316,24 +316,14 @@ class ImportDialog(QDialog):
                     self._log_message(f"Error: {config_file} does not contain a JSON object.", False)
                     continue
                 
-                if "file_type" not in config or not isinstance(config["file_type"], str):
-                    self._log_message(f"Error: {config_file} missing or invalid 'file_type' key.", False)
-                    continue
-                
                 if "col_defs" not in config:
                     self._log_message(f"Error: {config_file} missing 'col_defs' key.", False)
                     continue
                 
-                file_type = config["file_type"]
-                if file_type in self._configs:
-                    self._log_message(f"Error: Multiple configurations for file type '{file_type}'.", False)
-                    self._configs.clear()
-                    break
-                
                 config.setdefault("file_ext", "csv")
                 config.setdefault("class", "data_import.csv_process.CsvProcess")
-                self._configs[file_type] = config
-                
+                self._configs[Path(config_file).stem] = config
+
             except json.JSONDecodeError:
                 self._log_message(f"Error: {config_file} is not a valid JSON file.", False)
         
@@ -365,7 +355,7 @@ class ImportDialog(QDialog):
     def _select_input(self):
         """Handle input file selection."""
         logger.debug("Selecting input file")
-        file_types = ";".join([f"{ft} (*.{config['file_ext']})" for ft, config in self._configs.items()])
+        file_types = ";;".join([f"{ft} (*.{config['file_ext']})" for ft, config in self._configs.items()])
         file_path, selected_filter = QFileDialog.getOpenFileName(
             self,
             "Select Input File",
@@ -401,13 +391,15 @@ class ImportDialog(QDialog):
             logger.debug(f"Output file changed to: {file_path}")
             self._log_message(f"Info: Output file changed to: {file_path}", True)
 
+    def _on_import(self):
+        QTimer.singleShot(200, self._start_import) # delay for button repaint
+
     def _start_import(self):
         """Start the import process in a separate thread."""
         logger.debug("Starting import process")
-        # Clear the button's clicked state for better visibility when disabled
-        self._import_button.clearFocus()
         
         # Keep close button enabled, handle close logic in closeEvent
+        self._input_button.clearFocus()
         self._input_button.setEnabled(False)
         self._output_button.setEnabled(False)
         self._import_button.setEnabled(False)

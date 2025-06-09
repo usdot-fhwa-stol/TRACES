@@ -252,7 +252,7 @@ class MainWindow(QMainWindow):
             self,
             "Open SQLite Database",
             "",
-            "SQLite Database (*.sqlite)"
+            "SQLite Database (*.sqlite);;SQLite Database (*.db);;SQLite Database (*)"
         )
         
         if file_path and self._check_database(file_path):
