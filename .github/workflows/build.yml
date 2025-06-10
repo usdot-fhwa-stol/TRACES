@@ -12,7 +12,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install pyinstaller pyqt6 utm
+        pip install pyinstaller pyqt6 pyqtgraph utm
     - name: Build with PyInstaller
       shell: powershell
       run: |
