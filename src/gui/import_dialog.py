@@ -6,12 +6,13 @@ from pathlib import Path
 from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QProgressBar, QTextEdit, QFileDialog, QMessageBox
 from PyQt6.QtCore import QThread, QTimer, pyqtSignal
 from data_import.base_process import BaseProcess
+from utils import get_resource_path
 import importlib
 
 # Set up logger
 logger = logging.getLogger(__name__)
 
-class ImportWorkerThread(QThread):
+class _ImportWorkerThread(QThread):
     """Worker thread for handling import operations."""
 
     log_signal = pyqtSignal(str, bool)
@@ -221,7 +222,8 @@ class ImportDialog(QDialog):
         self._configs = {}
         self._selected_file_type = ""
         self._worker_thread = None
-        self._log_file = Path("trajectory_tools.log")
+        # Use get_resource_path for log file to work in both development and PyInstaller environments
+        self._log_file = Path(get_resource_path("trajectory_tools.log"))
         self._import_completed = False  # Track if import completed successfully
         self._successful_import_path = ""  # Store path of successful import
         logger.debug("ImportDialog initialized")
@@ -297,8 +299,8 @@ class ImportDialog(QDialog):
         if self._log_file.exists():
             self._log_file.unlink()
         
-        # Create config directory if it doesn't exist
-        config_dir = Path("config")
+        # Use get_resource_path for config directory to work in both development and PyInstaller environments
+        config_dir = Path(get_resource_path("config"))
         config_dir.mkdir(exist_ok=True)
         
         # Check JSON configuration files
@@ -415,7 +417,7 @@ class ImportDialog(QDialog):
         config = self._configs[self._selected_file_type]
         
         logger.debug("Creating worker thread")
-        self._worker_thread = ImportWorkerThread(config, self._input_path, self._output_path)
+        self._worker_thread = _ImportWorkerThread(config, self._input_path, self._output_path)
         
         # Connect signals directly to the thread
         self._worker_thread.log_signal.connect(self._log_message)

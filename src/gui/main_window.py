@@ -2,10 +2,11 @@ import sqlite3
 from pathlib import Path
 from PyQt6.QtWidgets import QMainWindow, QMenuBar, QMenu, QApplication, QFileDialog, QMessageBox
 from PyQt6.QtGui import QAction
-from PyQt6.QtCore import pyqtSignal, QTimer  # Added QTimer for splash screen delay
+from PyQt6.QtCore import QTimer  # Added QTimer for splash screen delay
 from .time_space_plot_widget import TimeSpacePlotWidget
 from .import_dialog import ImportDialog
 from .about_dialog import AboutDialog
+from .export_dialog import ExportDialog
 
 class MainWindow(QMainWindow):
     """Main window for the Trajectory Tools application.
@@ -20,6 +21,7 @@ class MainWindow(QMainWindow):
         _db_connection (sqlite3.Connection): Current database connection.
         _plot_widget (TimeSpacePlotWidget): Plot widget for displaying trajectory data.
         _splash_dialog (AboutDialog): Splash screen dialog instance.
+        _selected_export_columns (list): List of selected column names for export.
     """
 
     def __init__(self, show_splash=True):
@@ -36,6 +38,7 @@ class MainWindow(QMainWindow):
         self._plot_widget = None
         self._import_dialog = None
         self._splash_dialog = None
+        self._selected_export_columns = []  # Initially empty list of selected export columns
         self._setup_ui()
         self._load_settings()
         
@@ -82,8 +85,8 @@ class MainWindow(QMainWindow):
         export_all_action.triggered.connect(self._export_all)
         self._export_menu.addAction(export_all_action)
 
-        export_select_action = QAction("Export &Select...", self)
-        export_select_action.triggered.connect(self._export_select)
+        export_select_action = QAction("Export &Selected...", self)  # Updated label
+        export_select_action.triggered.connect(self._export_selected)
         self._export_menu.addAction(export_select_action)
 
         file_menu.addSeparator()
@@ -335,13 +338,35 @@ class MainWindow(QMainWindow):
 
     def _export_all(self):
         """Handle the Export All menu action."""
-        # To be implemented: Show export all dialog
-        pass
+        if not self._db_connection:
+            QMessageBox.warning(self, "Warning", "No database is currently open.")
+            return
+            
+        dialog = ExportDialog(parent=self, db_connection=self._db_connection, selected_columns=None)
+        dialog.setModal(True)
+        dialog.export_finished.connect(self._handle_export_finished)
+        dialog.exec()
 
-    def _export_select(self):
-        """Handle the Export Select menu action."""
-        # To be implemented: Show export select dialog
-        pass
+    def _export_selected(self):
+        """Handle the Export Selected menu action."""
+        if not self._db_connection:
+            QMessageBox.warning(self, "Warning", "No database is currently open.")
+            return
+            
+        dialog = ExportDialog(parent=self, db_connection=self._db_connection, 
+                            selected_columns=self._selected_export_columns.copy())
+        dialog.setModal(True)
+        dialog.export_finished.connect(self._handle_export_finished)
+        dialog.exec()
+
+    def _handle_export_finished(self, selected_columns: list):
+        """Handle the export finished signal from ExportDialog.
+
+        Args:
+            selected_columns (list): List of selected column names for future exports.
+        """
+        # Update the selected export columns list
+        self._selected_export_columns = selected_columns.copy() if selected_columns else []
 
     def _show_about(self):
         """Handle the About menu action by showing the AboutDialog."""

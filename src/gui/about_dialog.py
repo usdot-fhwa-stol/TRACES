@@ -1,8 +1,7 @@
 from pathlib import Path
 from PyQt6.QtWidgets import QDialog, QVBoxLayout, QTextBrowser, QPushButton, QHBoxLayout
 from PyQt6.QtCore import QTimer, pyqtSignal
-from PyQt6.QtGui import QFont
-
+from utils import get_resource_path
 
 class AboutDialog(QDialog):
     """About dialog that displays HTML content and can function as a splash screen.
@@ -69,7 +68,8 @@ class AboutDialog(QDialog):
     
     def _load_content(self):
         """Load HTML content from trajectory_tools.html file."""
-        html_path = Path("trajectory_tools.html")
+        # Use get_resource_path to handle both development and PyInstaller environments
+        html_path = Path(get_resource_path("trajectory_tools.html"))
         
         if html_path.exists():
             try:
@@ -80,6 +80,9 @@ class AboutDialog(QDialog):
                 # Fallback content if file can't be read
                 print(e)
                 self._text_browser.setHtml("<html><body></body></html>")
+        else:
+            # Fallback content if file doesn't exist
+            self._text_browser.setHtml("<html><body><h2>Trajectory Tools</h2><p>About information not available.</p></body></html>")
     
     def _setup_positioning(self):
         """Position the dialog centered within the parent window."""
