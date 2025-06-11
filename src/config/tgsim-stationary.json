@@ -2,14 +2,14 @@
   "col_defs": 
   {
     "veh_id": {"src_col": 0},
-    "event_time": {"src_col": 1}, 
+    "veh_time": {"src_col": 1}, 
     "x_map_loc": {"src_col": 2},
     "y_map_loc": {"src_col": 3},
     "lane_id": {"func": "tgsim_lane", "parms": [11, 4]},
     "veh_speed": {"src_col": 5},
-    "veh_acceleration": {"src_col": 6},
+    "veh_accel": {"src_col": 6},
     "veh_length": {"src_col": 7},
-    "veh_automated": {"func":"tgsim_automated", "parms": [10]},
+    "veh_automation": {"func":"tgsim_automated", "parms": [10]},
     "veh_width": {"src_col": 8},
     "event_id": {"src_col": 11}
   }

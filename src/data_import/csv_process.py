@@ -65,7 +65,7 @@ class CsvProcess(BaseProcess):
             worker.log_signal.emit("Error: 'col_defs' must be an object or array.", False)
             return 1
 
-        required_cols = {"event_id", "veh_id", "event_time", "lane_id", "x_map_loc", "y_map_loc"}
+        required_cols = {"event_id", "veh_id", "veh_time", "lane_id", "x_map_loc", "y_map_loc"}
         seen_keys = set()
 
         for i, col_def_set in enumerate(self._col_defs):
@@ -292,10 +292,10 @@ class CsvProcess(BaseProcess):
 
         # Prepare insert query
         columns = [
-            "event_id", "veh_id", "event_time", "lane_id", "x_map_loc", "y_map_loc",
-            "x_frenet", "y_frenet", "x_map_origin", "y_map_origin", "veh_lat", "veh_lon",
-            "veh_speed", "veh_acceleration", "veh_length", "veh_width", "veh_automated",
-            "osm_way_id", "osm_speed_limit", "osm_traffic_control", "preceding_veh_id", "veh_dist"
+            "event_id", "veh_id", "veh_time", "lane_id", "x_map_loc", "y_map_loc",
+            "x_frenet_loc", "y_frenet_loc", "x_map_origin", "y_map_origin", "veh_lat", "veh_lon",
+            "veh_speed", "veh_accel", "veh_length", "veh_width", "veh_automation",
+            "osm_way_id", "osm_speed_limit", "osm_traffic_control", "preceding_veh_id", "veh_dist_trav"
         ]
         insert_query = f"INSERT OR IGNORE INTO events ({', '.join(columns)}) VALUES ({', '.join(['?'] * len(columns))})"
         default_record = {col: None for col in columns}

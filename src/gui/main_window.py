@@ -1,9 +1,10 @@
 import sqlite3
 from pathlib import Path
-from PyQt6.QtWidgets import QMainWindow, QMenuBar, QMenu, QApplication, QFileDialog, QMessageBox
+from PyQt6.QtWidgets import QMainWindow, QMenuBar, QMenu, QApplication, QFileDialog, QMessageBox, QDialog
 from PyQt6.QtGui import QAction
 from PyQt6.QtCore import QTimer  # Added QTimer for splash screen delay
 from .time_space_plot_widget import TimeSpacePlotWidget
+from .time_space_plot_settings_dialog import TimeSpacePlotSettingsDialog
 from .import_dialog import ImportDialog
 from .about_dialog import AboutDialog
 from .export_dialog import ExportDialog
@@ -222,26 +223,26 @@ class MainWindow(QMainWindow):
             expected_columns = {
                 "event_id": "INTEGER",
                 "veh_id": "INTEGER",
-                "event_time": "REAL",
+                "veh_time": "REAL",
                 "lane_id": "INTEGER",
                 "x_map_loc": "REAL",
                 "y_map_loc": "REAL",
-                "x_frenet": "REAL",
-                "y_frenet": "REAL",
+                "x_frenet_loc": "REAL",
+                "y_frenet_loc": "REAL",
                 "x_map_origin": "REAL",
                 "y_map_origin": "REAL",
                 "veh_lat": "REAL",
                 "veh_lon": "REAL",
                 "veh_speed": "REAL",
-                "veh_acceleration": "REAL",
+                "veh_accel": "REAL",
                 "veh_length": "REAL",
                 "veh_width": "REAL",
-                "veh_automated": "INTEGER",
+                "veh_automation": "INTEGER",
                 "osm_way_id": "INTEGER",
                 "osm_speed_limit": "INTEGER",
                 "osm_traffic_control": "INTEGER",
                 "preceding_veh_id": "INTEGER",
-                "veh_dist": "REAL"
+                "veh_dist_trav": "REAL"
             }
 
             cursor.execute("PRAGMA table_info(events)")
@@ -282,11 +283,18 @@ class MainWindow(QMainWindow):
         if file_path and self._check_database(file_path):
             self.add_recent_file(file_path)
             self.setWindowTitle(f"Trajectory Tools - {file_path}")
-            if not self._plot_widget:
-                self._plot_widget = TimeSpacePlotWidget()
-                self.setCentralWidget(self._plot_widget)
-            self._plot_widget.set_database(file_path, self._db_connection)
-            self._export_menu.setEnabled(True)
+            
+            # Show settings dialog before creating plot widget
+            settings_dialog = TimeSpacePlotSettingsDialog(parent=self, db_connection=self._db_connection)
+            settings_dialog.settings_applied.connect(self._create_plot_widget)
+            
+            result = settings_dialog.exec()
+            if result == QDialog.DialogCode.Accepted:
+                # Plot widget will be created in _create_plot_widget callback
+                self._export_menu.setEnabled(True)
+            else:
+                # User cancelled settings dialog, close database and reset window
+                self._close_database_and_reset()
 
     def _open_recent_file(self, file_path: str):
         """Open a file from the recent files list.
@@ -303,11 +311,18 @@ class MainWindow(QMainWindow):
         if self._check_database(file_path):
             self.add_recent_file(file_path)
             self.setWindowTitle(f"Trajectory Tools - {file_path}")
-            if not self._plot_widget:
-                self._plot_widget = TimeSpacePlotWidget()
-                self.setCentralWidget(self._plot_widget)
-            self._plot_widget.set_database(file_path, self._db_connection)
-            self._export_menu.setEnabled(True)
+            
+            # Show settings dialog before creating plot widget
+            settings_dialog = TimeSpacePlotSettingsDialog(parent=self, db_connection=self._db_connection)
+            settings_dialog.settings_applied.connect(self._create_plot_widget)
+            
+            result = settings_dialog.exec()
+            if result == QDialog.DialogCode.Accepted:
+                # Plot widget will be created in _create_plot_widget callback
+                self._export_menu.setEnabled(True)
+            else:
+                # User cancelled settings dialog, close database and reset window
+                self._close_database_and_reset()
 
     def _import_file(self):
         """Handle the Import menu action."""
@@ -328,13 +343,65 @@ class MainWindow(QMainWindow):
             print(output_path)
             self.add_recent_file(output_path)
             self.setWindowTitle(f"Trajectory Tools - {output_path}")
-            if not self._plot_widget:
-                self._plot_widget = TimeSpacePlotWidget()
-                self.setCentralWidget(self._plot_widget)
-            self._plot_widget.set_database(output_path, self._db_connection)
-            self._export_menu.setEnabled(True)
+            
+            # Use QTimer to delay showing settings dialog to allow import dialog to close
+            QTimer.singleShot(200, lambda: self._show_settings_for_imported_file())
 
         self._import_dialog = None
+
+    def _show_settings_for_imported_file(self):
+        """Show the settings dialog for the imported file after import dialog closes."""
+        if self._db_connection:
+            # Show settings dialog before creating plot widget
+            settings_dialog = TimeSpacePlotSettingsDialog(parent=self, db_connection=self._db_connection)
+            settings_dialog.settings_applied.connect(self._create_plot_widget)
+            
+            result = settings_dialog.exec()
+            if result == QDialog.DialogCode.Accepted:
+                # Plot widget will be created in _create_plot_widget callback
+                self._export_menu.setEnabled(True)
+            else:
+                # User cancelled settings dialog, close database and reset window
+                self._close_database_and_reset()
+
+    def _close_database_and_reset(self):
+        """Close the current database connection and reset the window state."""
+        # Close database connection
+        if self._db_connection:
+            self._db_connection.close()
+            self._db_connection = None
+        
+        # Reset window title
+        self.setWindowTitle("Trajectory Tools")
+        
+        # Remove plot widget if it exists
+        if self._plot_widget:
+            self._plot_widget.setParent(None)
+            self._plot_widget.deleteLater()
+            self._plot_widget = None
+        
+        # Disable export menu
+        self._export_menu.setEnabled(False)
+
+    def _create_plot_widget(self, event_id: int, time_min: float, time_max: float, 
+                           dist_min: float, dist_max: float):
+        """Create and configure the plot widget with settings from the dialog.
+        
+        Args:
+            event_id (int): Selected event ID.
+            time_min (float): Minimum time value.
+            time_max (float): Maximum time value.
+            dist_min (float): Minimum distance value.
+            dist_max (float): Maximum distance value.
+        """
+        if not self._plot_widget:
+            self._plot_widget = TimeSpacePlotWidget()
+            self.setCentralWidget(self._plot_widget)
+        
+        # Set database connection and apply settings
+        db_path = self.windowTitle().split(" - ")[-1] if " - " in self.windowTitle() else ""
+        self._plot_widget.set_database(db_path, self._db_connection)
+        self._plot_widget._apply_settings(event_id, time_min, time_max, dist_min, dist_max)
 
     def _export_all(self):
         """Handle the Export All menu action."""

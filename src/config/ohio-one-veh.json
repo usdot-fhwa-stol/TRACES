@@ -5,20 +5,20 @@
   {
     "event_id": {"func": "group", "parms": [49, 50, 53]},
     "veh_id": {"type": "int", "parms": ["1"]},
-    "event_time": {"src_col": 1, "units": "s"},
+    "veh_time": {"src_col": 1, "units": "s"},
     "lane_id": {"src_col": 43, "type": "int"},
     "x_map_loc": {"src_col": 5, "units": "m"},
     "y_map_loc": {"src_col": 6, "units": "m"},
-    "x_frenet": {"src_col": 3},
-    "y_frenet": {"src_col": 4},
+    "x_frenet_loc": {"src_col": 3},
+    "y_frenet_loc": {"src_col": 4},
     "x_map_origin": {"src_col": 35},
     "y_map_origin": {"src_col": 36},
     "veh_lat": {"func": "utm_lat", "parms": [35, 36, 5, 6]},
     "veh_lon": {"func": "utm_lon", "parms": [35, 36, 5, 6]},
     "veh_speed": {"src_col": 11, "units": "m/s"},
-    "veh_acceleration": {"src_col": 12, "units": "m/s^2"},
+    "veh_accel": {"src_col": 12, "units": "m/s^2"},
     "veh_length": {"src_col": 8, "units": "m"},
-    "veh_automated": {"type": "int", "parms": ["1"]},
+    "veh_automation": {"type": "int", "parms": ["1"]},
     "veh_width": {"src_col": 9, "units": "m"}
   }
 }

@@ -1,0 +1,365 @@
+import sqlite3
+import logging
+from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton, 
+                           QLabel, QComboBox, QWidget)
+from PyQt6.QtCore import pyqtSignal, Qt
+from superqt import QLabeledRangeSlider
+
+# Set up logger
+logger = logging.getLogger(__name__)
+
+
+class TimeSpacePlotSettingsDialog(QDialog):
+    """Modal dialog for configuring time-space plot settings.
+    
+    The dialog allows users to select an event and configure time and distance ranges
+    for plotting trajectory data. It provides real-time feedback on the number of
+    records that will be displayed and enforces a maximum record limit.
+    
+    Attributes:
+        _db_connection (sqlite3.Connection): Database connection for querying.
+        _event_combobox (QComboBox): Combobox for selecting event ID.
+        _lane_count_label (QLabel): Label displaying number of lanes.
+        _veh_count_label (QLabel): Label displaying number of vehicles.
+        _time_slider (QLabeledRangeSlider): Slider for time range selection.
+        _dist_slider (QLabeledRangeSlider): Slider for distance range selection.
+        _record_count_label (QLabel): Label displaying current record count.
+        _apply_button (QPushButton): Button to apply settings.
+        _current_event_id (int): Currently selected event ID.
+        _record_limit (int): Maximum allowed records (1,000,000).
+    """
+    
+    # Signal emitted when settings are applied
+    settings_applied = pyqtSignal(int, float, float, float, float)  # event_id, time_min, time_max, dist_min, dist_max
+    
+    def __init__(self, parent=None, db_connection: sqlite3.Connection = None):
+        """Initialize the TimeSpacePlotSettingsDialog.
+        
+        Args:
+            parent: Parent widget (typically MainWindow or TimeSpacePlotWidget).
+            db_connection (sqlite3.Connection): Database connection for querying.
+        """
+        super().__init__(parent)
+        self._db_connection = db_connection
+        self._event_combobox = None
+        self._lane_count_label = None
+        self._veh_count_label = None
+        self._time_slider = None
+        self._dist_slider = None
+        self._record_count_label = None
+        self._apply_button = None
+        self._current_event_id = None
+        self._record_limit = 1000000
+        
+        logger.debug("TimeSpacePlotSettingsDialog initialized")
+        
+        self._setup_ui()
+        self._center_dialog()
+        self._populate_events()
+        
+    def _setup_ui(self):
+        """Set up the dialog UI components."""
+        self.setWindowTitle("Time Space Plot Settings")
+        self.setFixedSize(500, 300)
+        
+        # Create main layout
+        layout = QVBoxLayout(self)
+        
+        # Top control set with centered elements
+        top_layout = QHBoxLayout()
+        
+        top_layout.addStretch()  # Left spacer
+        
+        # Event combobox
+        self._event_combobox = QComboBox()
+        self._event_combobox.currentIndexChanged.connect(self._on_event_changed)
+        top_layout.addWidget(self._event_combobox)
+        
+        top_layout.addStretch()
+        
+        # Lane count
+        top_layout.addWidget(QLabel("Lane Count:"))
+        self._lane_count_label = QLabel("0")
+        top_layout.addWidget(self._lane_count_label)
+        
+        top_layout.addStretch()
+        
+        # Vehicle count
+        top_layout.addWidget(QLabel("Veh Count:"))
+        self._veh_count_label = QLabel("0")
+        top_layout.addWidget(self._veh_count_label)
+        
+        top_layout.addStretch()  # Right spacer
+        
+        layout.addLayout(top_layout)
+        
+        # Distance slider section with widget container
+        dist_widget = QWidget()
+        dist_layout = QVBoxLayout(dist_widget)
+        dist_layout.setSpacing(0)
+
+        self._dist_slider = QLabeledRangeSlider()
+        self._dist_slider.setOrientation(Qt.Orientation.Horizontal)
+        # Connect to mouse release event for interrelated operations
+        self._dist_slider.sliderReleased.connect(self._on_dist_slider_released)
+        dist_layout.addWidget(self._dist_slider)
+        
+        dist_label = QLabel("Dist (m)")
+        dist_label.setStyleSheet("font-weight: bold;")
+        dist_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        dist_layout.addWidget(dist_label)
+        
+        layout.addWidget(dist_widget)
+        
+        # Time slider section with widget container
+        time_widget = QWidget()
+        time_layout = QVBoxLayout(time_widget)
+        time_layout.setSpacing(0)
+        
+        self._time_slider = QLabeledRangeSlider()
+        self._time_slider.setOrientation(Qt.Orientation.Horizontal)
+        # Connect to mouse release event for interrelated operations
+        self._time_slider.sliderReleased.connect(self._on_time_slider_released)
+        time_layout.addWidget(self._time_slider)
+        
+        time_label = QLabel("Time (s)")
+        time_label.setStyleSheet("font-weight: bold;")
+        time_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        time_layout.addWidget(time_label)
+        
+        layout.addWidget(time_widget)
+        
+        # Bottom control set with centered elements
+        bottom_layout = QHBoxLayout()
+        
+        bottom_layout.addStretch()  # Left spacer
+        
+        # Record count label
+        self._record_count_label = QLabel(f"0 records of {self._record_limit:,} limit")
+        bottom_layout.addWidget(self._record_count_label)
+        
+        bottom_layout.addStretch()
+        
+        # Apply button
+        self._apply_button = QPushButton("Apply")
+        self._apply_button.clicked.connect(self._on_apply)
+        self._apply_button.setEnabled(False)
+        bottom_layout.addWidget(self._apply_button)
+        
+        bottom_layout.addStretch()  # Right spacer
+        
+        layout.addLayout(bottom_layout)
+        
+    def _center_dialog(self):
+        """Center the dialog within the parent window."""
+        if self.parent():
+            parent_rect = self.parent().geometry()
+            dialog_rect = self.geometry()
+            x = parent_rect.x() + (parent_rect.width() - dialog_rect.width()) // 2
+            y = parent_rect.y() + (parent_rect.height() - dialog_rect.height()) // 2
+            self.move(x, y)
+            
+    def _populate_events(self):
+        """Populate the event combobox with distinct event IDs from the database."""
+        if not self._db_connection:
+            logger.warning("No database connection available")
+            return
+            
+        try:
+            cursor = self._db_connection.cursor()
+            cursor.execute("SELECT DISTINCT event_id FROM events ORDER BY event_id")
+            events = cursor.fetchall()
+            
+            self._event_combobox.clear()
+            for event in events:
+                event_id = event[0]
+                self._event_combobox.addItem(f"Event {event_id:3d}", event_id)
+                
+            if events:
+                self._current_event_id = events[0][0]
+                self._update_event_data()
+                
+        except sqlite3.Error as e:
+            logger.error(f"Error populating events: {e}")
+            
+    def _on_event_changed(self, index: int):
+        """Handle event combobox selection change.
+        
+        Args:
+            index (int): Selected combobox index.
+        """
+        if index >= 0:
+            self._current_event_id = self._event_combobox.itemData(index)
+            self._update_event_data()
+            
+    def _update_event_data(self):
+        """Update all event-dependent data (lane count, vehicle count, sliders, record count)."""
+        if not self._db_connection or self._current_event_id is None:
+            return
+            
+        try:
+            cursor = self._db_connection.cursor()
+            
+            # Update lane count
+            cursor.execute("""
+                SELECT COUNT(DISTINCT lane_id) 
+                FROM events 
+                WHERE event_id = ?
+            """, (self._current_event_id,))
+            lane_count = cursor.fetchone()[0]
+            self._lane_count_label.setText(str(lane_count))
+            
+            # Update vehicle count
+            cursor.execute("""
+                SELECT COUNT(DISTINCT veh_id) 
+                FROM events 
+                WHERE event_id = ?
+            """, (self._current_event_id,))
+            veh_count = cursor.fetchone()[0]
+            self._veh_count_label.setText(str(veh_count))
+            
+            # Update slider ranges and initial values
+            cursor.execute("""
+                SELECT MIN(veh_time), MAX(veh_time), MIN(veh_dist_trav), MAX(veh_dist_trav)
+                FROM events 
+                WHERE event_id = ?
+            """, (self._current_event_id,))
+            result = cursor.fetchone()
+            
+            if result and all(x is not None for x in result):
+                time_min, time_max, dist_min, dist_max = result
+                
+                # Set time slider range and values
+                self._time_slider.setRange(time_min, time_max)
+                self._time_slider.setValue([time_min, time_max])
+                
+                # Set distance slider range and values
+                self._dist_slider.setRange(dist_min, dist_max)
+                self._dist_slider.setValue([dist_min, dist_max])
+                
+                # Update record count
+                self._update_record_count()
+            else:
+                logger.warning(f"No valid data found for event {self._current_event_id}")
+                
+        except sqlite3.Error as e:
+            logger.error(f"Error updating event data: {e}")
+            
+    def _on_time_slider_released(self):
+        """Handle time slider mouse release to update distance slider and record count."""
+        if not self._db_connection or self._current_event_id is None:
+            return
+            
+        try:
+            time_min, time_max = self._time_slider.value()
+            
+            cursor = self._db_connection.cursor()
+            cursor.execute("""
+                SELECT MIN(veh_dist_trav), MAX(veh_dist_trav)
+                FROM events 
+                WHERE event_id = ? AND veh_time BETWEEN ? AND ?
+            """, (self._current_event_id, time_min, time_max))
+            
+            result = cursor.fetchone()
+            if result and all(x is not None for x in result):
+                dist_min, dist_max = result
+                
+                # Adjust distance slider handle values within its range
+                current_dist_min, current_dist_max = self._dist_slider.minimum(), self._dist_slider.maximum()
+                adjusted_dist_min = max(dist_min, current_dist_min)
+                adjusted_dist_max = min(dist_max, current_dist_max)
+                
+                self._dist_slider.setValue([adjusted_dist_min, adjusted_dist_max])
+                
+            self._update_record_count()
+            
+        except sqlite3.Error as e:
+            logger.error(f"Error updating distance slider from time selection: {e}")
+            
+    def _on_dist_slider_released(self):
+        """Handle distance slider mouse release to update time slider and record count."""
+        if not self._db_connection or self._current_event_id is None:
+            return
+            
+        try:
+            dist_min, dist_max = self._dist_slider.value()
+            
+            cursor = self._db_connection.cursor()
+            cursor.execute("""
+                SELECT MIN(veh_time), MAX(veh_time)
+                FROM events 
+                WHERE event_id = ? AND veh_dist_trav BETWEEN ? AND ?
+            """, (self._current_event_id, dist_min, dist_max))
+            
+            result = cursor.fetchone()
+            if result and all(x is not None for x in result):
+                time_min, time_max = result
+                
+                # Adjust time slider handle values within its range
+                current_time_min, current_time_max = self._time_slider.minimum(), self._time_slider.maximum()
+                adjusted_time_min = max(time_min, current_time_min)
+                adjusted_time_max = min(time_max, current_time_max)
+                
+                self._time_slider.setValue([adjusted_time_min, adjusted_time_max])
+                
+            self._update_record_count()
+            
+        except sqlite3.Error as e:
+            logger.error(f"Error updating time slider from distance selection: {e}")
+            
+    def _update_record_count(self):
+        """Update the record count label and enable/disable Apply button."""
+        if not self._db_connection or self._current_event_id is None:
+            return
+            
+        try:
+            time_min, time_max = self._time_slider.value()
+            dist_min, dist_max = self._dist_slider.value()
+            
+            cursor = self._db_connection.cursor()
+            cursor.execute("""
+                SELECT COUNT(*) 
+                FROM events 
+                WHERE event_id = ? 
+                AND veh_time BETWEEN ? AND ? 
+                AND veh_dist_trav BETWEEN ? AND ?
+            """, (self._current_event_id, time_min, time_max, dist_min, dist_max))
+            
+            record_count = cursor.fetchone()[0]
+            self._record_count_label.setText(f"{record_count:,} records of {self._record_limit:,} limit")
+            
+            # Color the label based on record limit
+            if record_count > self._record_limit:
+                self._record_count_label.setStyleSheet("color: red; font-weight: bold;")
+            else:
+                self._record_count_label.setStyleSheet("color: green; font-weight: bold;")
+            
+            # Enable/disable Apply button based on record limit
+            self._apply_button.setEnabled(record_count <= self._record_limit)
+            
+        except sqlite3.Error as e:
+            logger.error(f"Error updating record count: {e}")
+            
+    def _on_apply(self):
+        """Handle Apply button click by emitting settings and closing dialog."""
+        if self._current_event_id is not None:
+            time_min, time_max = self._time_slider.value()
+            dist_min, dist_max = self._dist_slider.value()
+            
+            logger.debug(f"Applying settings: event_id={self._current_event_id}, "
+                        f"time=[{time_min}, {time_max}], dist=[{dist_min}, {dist_max}]")
+            
+            self.settings_applied.emit(self._current_event_id, time_min, time_max, dist_min, dist_max)
+            self.accept()
+            
+    def get_current_settings(self) -> tuple:
+        """Get the current dialog settings.
+        
+        Returns:
+            tuple: (event_id, time_min, time_max, dist_min, dist_max) or None if no event selected.
+        """
+        if self._current_event_id is not None:
+            time_min, time_max = self._time_slider.value()
+            dist_min, dist_max = self._dist_slider.value()
+            return (self._current_event_id, time_min, time_max, dist_min, dist_max)
+        return None

@@ -79,27 +79,27 @@ class _ImportWorkerThread(QThread):
                 CREATE TABLE events (
                     event_id INTEGER NOT NULL,
                     veh_id INTEGER NOT NULL,
-                    event_time REAL NOT NULL,
+                    veh_time REAL NOT NULL,
                     lane_id INTEGER,
                     x_map_loc REAL,
                     y_map_loc REAL,
-                    x_frenet REAL,
-                    y_frenet REAL,
+                    x_frenet_loc REAL,
+                    y_frenet_loc REAL,
                     x_map_origin REAL,
                     y_map_origin REAL,
                     veh_lat REAL,
                     veh_lon REAL,
                     veh_speed REAL,
-                    veh_acceleration REAL,
+                    veh_accel REAL,
                     veh_length REAL,
                     veh_width REAL,
-                    veh_automated INTEGER,
+                    veh_automation INTEGER,
                     osm_way_id INTEGER,
                     osm_speed_limit INTEGER,
                     osm_traffic_control INTEGER,
                     preceding_veh_id INTEGER,
-                    veh_dist REAL,
-                    PRIMARY KEY (event_id, veh_id, event_time)
+                    veh_dist_trav REAL,
+                    PRIMARY KEY (event_id, veh_id, veh_time)
                 ) WITHOUT ROWID;
             """)
             self.db_connection.commit()
@@ -144,10 +144,10 @@ class _ImportWorkerThread(QThread):
                         break
                         
                     cursor.execute("""
-                        SELECT event_time, x_map_loc, y_map_loc
+                        SELECT veh_time, x_map_loc, y_map_loc
                         FROM events
                         WHERE event_id = ? AND veh_id = ?
-                        ORDER BY event_time
+                        ORDER BY veh_time
                     """, (event_id, veh_id))
                     points = cursor.fetchall()
                     
@@ -155,7 +155,7 @@ class _ImportWorkerThread(QThread):
                     prev_x_loc = None
                     prev_y_loc = None
                     
-                    for j, (event_time, x_map_loc, y_map_loc) in enumerate(points):
+                    for j, (veh_time, x_map_loc, y_map_loc) in enumerate(points):
                         if self.interrupt_flag:
                             logger.debug("Interrupt flag set during point processing")
                             break
@@ -165,9 +165,9 @@ class _ImportWorkerThread(QThread):
                             total_dist += dist
                         cursor.execute("""
                             UPDATE events
-                            SET veh_dist = ?
-                            WHERE event_id = ? AND veh_id = ? AND event_time = ?
-                        """, (total_dist, event_id, veh_id, event_time))
+                            SET veh_dist_trav = ?
+                            WHERE event_id = ? AND veh_id = ? AND veh_time = ?
+                        """, (total_dist, event_id, veh_id, veh_time))
                         prev_x_loc = x_map_loc
                         prev_y_loc = y_map_loc
                         
