@@ -432,8 +432,10 @@ class MainWindow(QMainWindow):
         Args:
             selected_columns (list): List of selected column names for future exports.
         """
-        # Update the selected export columns list
-        self._selected_export_columns = selected_columns.copy() if selected_columns else []
+        # Only update the selected export columns list if we received a non-empty list
+        # (i.e., only from Export Selected mode, not Export All mode)
+        if selected_columns:
+            self._selected_export_columns = selected_columns.copy()
 
     def _show_about(self):
         """Handle the About menu action by showing the AboutDialog."""
