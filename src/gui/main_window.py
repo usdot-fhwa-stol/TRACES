@@ -106,7 +106,7 @@ class MainWindow(QMainWindow):
         """Show the splash screen dialog."""
         self._splash_dialog = AboutDialog(parent=self, is_splash=True)
         self._splash_dialog.closed.connect(self._on_splash_closed)
-        self._splash_dialog.show()
+        self._splash_dialog.exec()
 
     def _on_splash_closed(self):
         """Handle splash screen being closed."""

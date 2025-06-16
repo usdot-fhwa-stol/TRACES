@@ -2,7 +2,7 @@ import sqlite3
 import logging
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton, 
                            QLabel, QComboBox, QWidget)
-from PyQt6.QtCore import pyqtSignal, Qt
+from PyQt6.QtCore import pyqtSignal, Qt, QTimer
 from superqt import QLabeledRangeSlider
 
 # Set up logger
@@ -18,6 +18,7 @@ class TimeSpacePlotSettingsDialog(QDialog):
     
     Attributes:
         _db_connection (sqlite3.Connection): Database connection for querying.
+        _defaults (dict): Control values when re-opened from plot widget.
         _event_combobox (QComboBox): Combobox for selecting event ID.
         _lane_count_label (QLabel): Label displaying number of lanes.
         _veh_count_label (QLabel): Label displaying number of vehicles.
@@ -32,7 +33,7 @@ class TimeSpacePlotSettingsDialog(QDialog):
     # Signal emitted when settings are applied
     settings_applied = pyqtSignal(int, float, float, float, float)  # event_id, time_min, time_max, dist_min, dist_max
     
-    def __init__(self, parent=None, db_connection: sqlite3.Connection = None):
+    def __init__(self, parent=None, db_connection: sqlite3.Connection = None, defaults: dict = None):
         """Initialize the TimeSpacePlotSettingsDialog.
         
         Args:
@@ -41,6 +42,7 @@ class TimeSpacePlotSettingsDialog(QDialog):
         """
         super().__init__(parent)
         self._db_connection = db_connection
+        self._defaults = defaults
         self._event_combobox = None
         self._lane_count_label = None
         self._veh_count_label = None
@@ -54,13 +56,14 @@ class TimeSpacePlotSettingsDialog(QDialog):
         logger.debug("TimeSpacePlotSettingsDialog initialized")
         
         self._setup_ui()
-        self._center_dialog()
         self._populate_events()
+        # Use QTimer to center dialog after it's been properly sized
+        QTimer.singleShot(0, self._center_dialog)
         
     def _setup_ui(self):
         """Set up the dialog UI components."""
         self.setWindowTitle("Time Space Plot Settings")
-        self.setFixedSize(500, 300)
+        self.setFixedWidth(600) # height sizes from content
         
         # Create main layout
         layout = QVBoxLayout(self)
@@ -176,9 +179,18 @@ class TimeSpacePlotSettingsDialog(QDialog):
                 self._event_combobox.addItem(f"Event {event_id:3d}", event_id)
                 
             if events:
-                self._current_event_id = events[0][0]
+                if self._defaults:
+                    event_id = self._defaults["event_id"]
+                    for i in range(self._event_combobox.count()):
+                        if self._event_combobox.itemData(i) == event_id:
+                            self._event_combobox.setCurrentIndex(i)
+
+                    self._current_event_id = event_id
+                else:
+                    self._current_event_id = events[0][0]
                 self._update_event_data()
-                
+                self._defaults = None # ignore for new dialog changes
+
         except sqlite3.Error as e:
             logger.error(f"Error populating events: {e}")
             
@@ -229,13 +241,17 @@ class TimeSpacePlotSettingsDialog(QDialog):
             if result and all(x is not None for x in result):
                 time_min, time_max, dist_min, dist_max = result
                 
-                # Set time slider range and values
-                self._time_slider.setRange(time_min, time_max)
-                self._time_slider.setValue([time_min, time_max])
-                
-                # Set distance slider range and values
+                # Set distance and time slider ranges
                 self._dist_slider.setRange(dist_min, dist_max)
-                self._dist_slider.setValue([dist_min, dist_max])
+                self._time_slider.setRange(time_min, time_max)
+                
+                # Set distance and time slider values
+                if self._defaults:
+                    self._dist_slider.setValue(self._defaults["dist_range"])
+                    self._time_slider.setValue(self._defaults["time_range"])
+                else:
+                    self._dist_slider.setValue([dist_min, dist_max])
+                    self._time_slider.setValue([time_min, time_max])
                 
                 # Update record count
                 self._update_record_count()

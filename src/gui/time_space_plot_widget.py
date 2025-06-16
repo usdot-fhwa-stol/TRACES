@@ -1,8 +1,9 @@
 import sqlite3
 import logging
+from pathlib import Path
 from PyQt6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QPushButton, 
                            QLabel, QComboBox, QDialog)
-from PyQt6.QtCore import pyqtSignal, Qt
+from PyQt6.QtCore import Qt
 import pyqtgraph as pg
 from superqt import QLabeledRangeSlider
 from .time_space_plot_settings_dialog import TimeSpacePlotSettingsDialog
@@ -63,16 +64,17 @@ class TimeSpacePlotWidget(QWidget):
         
         # Left side: scatter plot
         self._scatter_plot = pg.PlotWidget()
+        self._scatter_plot.setBackground('w')
+        self._scatter_plot.showGrid(x=True, y=True)
         self._scatter_plot.setLabel('left', 'Distance (m)')
         self._scatter_plot.setLabel('bottom', 'Time (s)')
-        self._scatter_plot.setTitle('Time-Space Plot')
         main_layout.addWidget(self._scatter_plot, stretch=1)  # Stretch to fill available space
         
         # Right side: control set
         control_layout = QVBoxLayout()
         
         # Event button
-        self._event_button = QPushButton("Event   0")
+        self._event_button = QPushButton(" ")
         self._event_button.clicked.connect(self._open_settings_dialog)
         control_layout.addWidget(self._event_button)
         
@@ -83,6 +85,7 @@ class TimeSpacePlotWidget(QWidget):
         # Distance slider section
         dist_label = QLabel("Dist (m)")
         dist_label.setStyleSheet("font-weight: bold;")
+        dist_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         control_layout.addWidget(dist_label)
         
         self._dist_slider = QLabeledRangeSlider()
@@ -92,6 +95,7 @@ class TimeSpacePlotWidget(QWidget):
         # Time slider section
         time_label = QLabel("Time (s)")
         time_label.setStyleSheet("font-weight: bold;")
+        time_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         control_layout.addWidget(time_label)
         
         self._time_slider = QLabeledRangeSlider()
@@ -99,7 +103,7 @@ class TimeSpacePlotWidget(QWidget):
         control_layout.addWidget(self._time_slider, stretch=1)  # Stretch to fill available space
         
         # Export button (initially disabled)
-        self._export_button = QPushButton("Export")
+        self._export_button = QPushButton("Export...")
         self._export_button.setEnabled(False)
         control_layout.addWidget(self._export_button)
         
@@ -119,6 +123,7 @@ class TimeSpacePlotWidget(QWidget):
         """
         self._db_path = db_path
         self._db_connection = db_connection
+        self._scatter_plot.setTitle(Path(db_path).name)
         logger.debug(f"Database set: {db_path}")
         
     def _open_settings_dialog(self):
@@ -126,10 +131,13 @@ class TimeSpacePlotWidget(QWidget):
         if not self._db_connection:
             logger.warning("No database connection available for settings dialog")
             return
-            
-        settings_dialog = TimeSpacePlotSettingsDialog(parent=self, db_connection=self._db_connection)
+
+        settings_dialog = TimeSpacePlotSettingsDialog(parent=self, db_connection=self._db_connection, 
+            defaults = {"event_id": self._current_event_id, 
+                "dist_range": self._dist_range, 
+                "time_range": self._time_range})
         settings_dialog.settings_applied.connect(self._apply_settings)
-        
+
         # Show dialog modally
         result = settings_dialog.exec()
         if result == QDialog.DialogCode.Accepted:
@@ -152,18 +160,23 @@ class TimeSpacePlotWidget(QWidget):
                     f"time=[{time_min}, {time_max}], dist=[{dist_min}, {dist_max}]")
         
         self._current_event_id = event_id
-        self._time_range = (time_min, time_max)
         self._dist_range = (dist_min, dist_max)
+        self._time_range = (time_min, time_max)
         
         # Update event button label
         self._event_button.setText(f"Event {event_id:3d}")
         
         # Update lane combobox
         self._populate_lane_combobox()
-        
-        # Update sliders
-        self._update_sliders()
-        
+
+        # Set distance slider range and values
+        self._dist_slider.setRange(dist_min, dist_max)
+        self._dist_slider.setValue(self._dist_range)
+
+        # Set time slider range and values
+        self._time_slider.setRange(time_min, time_max)
+        self._time_slider.setValue(self._time_range)
+
         # TODO: Update plot data
         # self._update_plot_data()
         
@@ -194,37 +207,7 @@ class TimeSpacePlotWidget(QWidget):
                 
         except sqlite3.Error as e:
             logger.error(f"Error populating lane combobox: {e}")
-            
-    def _update_sliders(self):
-        """Update the slider ranges and handle values based on current settings."""
-        if not self._db_connection or self._current_event_id is None:
-            return
-            
-        try:
-            cursor = self._db_connection.cursor()
-            
-            # Get full ranges for the event
-            cursor.execute("""
-                SELECT MIN(veh_time), MAX(veh_time), MIN(veh_dist_trav), MAX(veh_dist_trav)
-                FROM events 
-                WHERE event_id = ?
-            """, (self._current_event_id,))
-            
-            result = cursor.fetchone()
-            if result and all(x is not None for x in result):
-                full_time_min, full_time_max, full_dist_min, full_dist_max = result
-                
-                # Set time slider range and values
-                self._time_slider.setRange(full_time_min, full_time_max)
-                self._time_slider.setValue([self._time_range[0], self._time_range[1]])
-                
-                # Set distance slider range and values
-                self._dist_slider.setRange(full_dist_min, full_dist_max)
-                self._dist_slider.setValue([self._dist_range[0], self._dist_range[1]])
-                
-        except sqlite3.Error as e:
-            logger.error(f"Error updating sliders: {e}")
-            
+
     def get_current_event_id(self) -> int:
         """Get the currently selected event ID.
         
