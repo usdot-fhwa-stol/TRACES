@@ -28,7 +28,7 @@ class _ImportWorkerThread(QThread):
         logger.debug(f"ImportWorkerThread initialized with input: {input_path}, output: {output_path}")
 
     def run(self):
-        """Execute the import process and update vehicle distances."""
+        """Execute the import process and update vehicle distance traveled."""
         logger.debug("ImportWorkerThread.run() started")
         try:
             # CRITICAL FIX: Close any existing database connection first
@@ -123,7 +123,7 @@ class _ImportWorkerThread(QThread):
 
             if error_count == 0 and not self.interrupt_flag:
                 logger.debug("Starting vehicle distance calculation")
-                self.log_signal.emit("Updating vehicle distances", True)
+                self.log_signal.emit("Updating vehicle distance traveled", True)
                 
                 # Calculate total records for progress
                 cursor = self.db_connection.cursor()
@@ -138,6 +138,7 @@ class _ImportWorkerThread(QThread):
                 batch_size = 1000
                 
                 logger.debug(f"Processing {len(pairs)} vehicle pairs")
+                self.log_signal.emit(f"Processing {len(pairs)} vehicle pairs", True)
                 for i, (event_id, veh_id) in enumerate(pairs):
                     if self.interrupt_flag:
                         logger.debug("Interrupt flag set, breaking distance calculation loop")
@@ -175,12 +176,10 @@ class _ImportWorkerThread(QThread):
                             self.db_connection.commit()
                             processed_records += min(batch_size, len(points) - j)
                             if total_records > 0:
-                                progress = int((processed_records / total_records) * 100)
+                                progress = int((i / len(pairs)) * 100)
                                 self.progress_signal.emit(progress)
-                    
-                    if i % 100 == 0:  # Log progress every 100 pairs
-                        logger.debug(f"Processed {i}/{len(pairs)} vehicle pairs")
-                
+                                logger.debug(f"Processed {i}/{len(pairs)} vehicle pairs")
+
                 if not self.interrupt_flag:
                     logger.debug("Committing final database changes")
                     self.db_connection.commit()

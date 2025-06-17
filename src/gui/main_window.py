@@ -399,8 +399,7 @@ class MainWindow(QMainWindow):
             self.setCentralWidget(self._plot_widget)
         
         # Set database connection and apply settings
-        db_path = self.windowTitle().split(" - ")[-1] if " - " in self.windowTitle() else ""
-        self._plot_widget.set_database(db_path, self._db_connection)
+        self._plot_widget.set_database(self._db_connection)
         self._plot_widget._apply_settings(event_id, time_min, time_max, dist_min, dist_max)
 
     def _export_all(self):

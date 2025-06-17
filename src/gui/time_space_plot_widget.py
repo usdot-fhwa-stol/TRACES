@@ -1,6 +1,6 @@
 import sqlite3
 import logging
-from pathlib import Path
+import numpy as np
 from PyQt6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QPushButton, 
                            QLabel, QComboBox, QDialog)
 from PyQt6.QtCore import Qt
@@ -19,7 +19,6 @@ class TimeSpacePlotWidget(QWidget):
     interactive controls on the right for filtering and manipulating the data view.
     
     Attributes:
-        _db_path (str): Path to the SQLite database file.
         _db_connection (sqlite3.Connection): Database connection for querying.
         _scatter_plot (pg.PlotWidget): PyQtGraph scatter plot widget.
         _event_button (QPushButton): Button to open settings dialog.
@@ -31,7 +30,16 @@ class TimeSpacePlotWidget(QWidget):
         _current_event_id (int): Currently selected event ID.
         _time_range (tuple): Current time range (min, max).
         _dist_range (tuple): Current distance range (min, max).
+        _series (list): List of dictionaries containing vehicle series data.
     """
+    
+    # Static list of HTML hex colors for series
+    series_color = [
+        '#e6194B', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', 
+        '#42d4f4', '#f032e6', '#bfef45', '#fabed4', '#469990', '#dcbeff', 
+        '#9A6324', '#fffac8', '#800000', '#aaffc3', '#808000', '#ffd8b1', 
+        '#000075', '#000000'
+    ]
     
     def __init__(self, parent=None):
         """Initialize the TimeSpacePlotWidget.
@@ -40,7 +48,6 @@ class TimeSpacePlotWidget(QWidget):
             parent: Parent widget (typically MainWindow).
         """
         super().__init__(parent)
-        self._db_path = ""
         self._db_connection = None
         self._scatter_plot = None
         self._event_button = None
@@ -52,6 +59,7 @@ class TimeSpacePlotWidget(QWidget):
         self._current_event_id = None
         self._time_range = (0.0, 0.0)
         self._dist_range = (0.0, 0.0)
+        self._series = []
         
         logger.debug("TimeSpacePlotWidget initialized")
         
@@ -80,6 +88,7 @@ class TimeSpacePlotWidget(QWidget):
         
         # Lane combobox
         self._lane_combobox = QComboBox()
+        self._lane_combobox.currentIndexChanged.connect(self._on_lane_changed)
         control_layout.addWidget(self._lane_combobox)
         
         # Distance slider section
@@ -90,6 +99,7 @@ class TimeSpacePlotWidget(QWidget):
         
         self._dist_slider = QLabeledRangeSlider()
         self._dist_slider.setOrientation(Qt.Orientation.Vertical)
+        self._dist_slider.valueChanged.connect(self._on_slider_changed)
         control_layout.addWidget(self._dist_slider, stretch=1)  # Stretch to fill available space
         
         # Time slider section
@@ -100,6 +110,7 @@ class TimeSpacePlotWidget(QWidget):
         
         self._time_slider = QLabeledRangeSlider()
         self._time_slider.setOrientation(Qt.Orientation.Vertical)
+        self._time_slider.valueChanged.connect(self._on_slider_changed)
         control_layout.addWidget(self._time_slider, stretch=1)  # Stretch to fill available space
         
         # Export button (initially disabled)
@@ -114,17 +125,14 @@ class TimeSpacePlotWidget(QWidget):
         
         main_layout.addLayout(control_layout)
         
-    def set_database(self, db_path: str, db_connection: sqlite3.Connection):
-        """Set the database connection and path for the widget.
+    def set_database(self, db_connection: sqlite3.Connection):
+        """Set the database connection for the widget.
         
         Args:
-            db_path (str): Path to the SQLite database file.
             db_connection (sqlite3.Connection): Database connection for querying.
         """
-        self._db_path = db_path
         self._db_connection = db_connection
-        self._scatter_plot.setTitle(Path(db_path).name)
-        logger.debug(f"Database set: {db_path}")
+        logger.debug(f"Database connection set")
         
     def _open_settings_dialog(self):
         """Open the TimeSpacePlotSettingsDialog to configure plot settings."""
@@ -166,6 +174,9 @@ class TimeSpacePlotWidget(QWidget):
         # Update event button label
         self._event_button.setText(f"Event {event_id:3d}")
         
+        # Initialize series for the new event
+        self._initialize_series()
+        
         # Update lane combobox
         self._populate_lane_combobox()
 
@@ -176,10 +187,43 @@ class TimeSpacePlotWidget(QWidget):
         # Set time slider range and values
         self._time_slider.setRange(time_min, time_max)
         self._time_slider.setValue(self._time_range)
-
-        # TODO: Update plot data
-        # self._update_plot_data()
         
+    def _initialize_series(self):
+        """Initialize the _series list with unique vehicle IDs for the current event."""
+        if not self._db_connection or self._current_event_id is None:
+            return
+            
+        try:
+            cursor = self._db_connection.cursor()
+            cursor.execute("""
+                SELECT DISTINCT veh_id 
+                FROM events 
+                WHERE event_id = ? 
+                ORDER BY veh_id
+            """, (self._current_event_id,))
+            
+            vehicle_ids = cursor.fetchall()
+            
+            # Clear existing series
+            self._series = []
+            
+            # Create series dictionaries for each vehicle
+            for i, (veh_id,) in enumerate(vehicle_ids):
+                color_index = i % len(self.series_color)
+                series_dict = {
+                    'veh_id': veh_id,
+                    'color': self.series_color[color_index],
+                    'plot_item': None,
+                    'veh_time': None,
+                    'veh_dist_trav': None
+                }
+                self._series.append(series_dict)
+                
+            logger.debug(f"Initialized {len(self._series)} vehicle series for event {self._current_event_id}")
+                
+        except sqlite3.Error as e:
+            logger.error(f"Error initializing series: {e}")
+            
     def _populate_lane_combobox(self):
         """Populate the lane combobox with distinct lane IDs for the current event."""
         if not self._db_connection or self._current_event_id is None:
@@ -201,17 +245,124 @@ class TimeSpacePlotWidget(QWidget):
                 lane_id = lane[0]
                 self._lane_combobox.addItem(f"Lane {lane_id:2d}", lane_id)
                 
-            # Default to first item
+            # Default to first item and update plot
             if lanes:
                 self._lane_combobox.setCurrentIndex(0)
+                self._update_plot_data()
                 
         except sqlite3.Error as e:
             logger.error(f"Error populating lane combobox: {e}")
-
-    def get_current_event_id(self) -> int:
-        """Get the currently selected event ID.
+            
+    def _on_lane_changed(self, index: int):
+        """Handle lane combobox selection change.
         
-        Returns:
-            int: Current event ID or None if no event selected.
+        Args:
+            index (int): Selected combobox index.
         """
-        return self._current_event_id
+        if index >= 0:
+            self._update_plot_data()
+            
+    def _update_plot_data(self):
+        """Update the plot data for the current event and lane."""
+        if not self._db_connection or self._current_event_id is None or self._lane_combobox.count() == 0:
+            return
+            
+        current_lane_id = self._lane_combobox.currentData()
+        if current_lane_id is None:
+            return
+            
+        try:
+            # Clear existing plot items
+            self._scatter_plot.clear()
+            
+            # Reset plot_item, veh_time, and veh_dist_trav for each series
+            for series in self._series:
+                series['plot_item'] = None
+                series['veh_time'] = None
+                series['veh_dist_trav'] = None
+            
+            cursor = self._db_connection.cursor()
+            cursor.execute("""
+                SELECT veh_id, veh_time, veh_dist_trav 
+                FROM events 
+                WHERE event_id = ? AND lane_id = ? 
+                ORDER BY veh_id, veh_time
+            """, (self._current_event_id, current_lane_id))
+            
+            results = cursor.fetchall()
+            
+            # Group data by vehicle ID
+            vehicle_data = {}
+            for veh_id, veh_time, veh_dist_trav in results:
+                if veh_id not in vehicle_data:
+                    vehicle_data[veh_id] = {'times': [], 'distances': []}
+                vehicle_data[veh_id]['times'].append(veh_time)
+                vehicle_data[veh_id]['distances'].append(veh_dist_trav)
+            
+            # Create scatter plots for each vehicle in the series
+            for series in self._series:
+                veh_id = series['veh_id']
+                if veh_id in vehicle_data:
+                    # Convert to numpy arrays
+                    times = np.array(vehicle_data[veh_id]['times'])
+                    distances = np.array(vehicle_data[veh_id]['distances'])
+                    
+                    # Store arrays in series
+                    series['veh_time'] = times
+                    series['veh_dist_trav'] = distances
+                    
+                    # Apply current slider filters
+                    time_min, time_max = self._time_slider.value()
+                    dist_min, dist_max = self._dist_slider.value()
+                    
+                    time_filter = (times >= time_min) & (times <= time_max)
+                    dist_filter = (distances >= dist_min) & (distances <= dist_max)
+                    combined_filter = time_filter & dist_filter
+                    
+                    # Apply filter to get filtered arrays for display
+                    filtered_times = times[combined_filter]
+                    filtered_distances = distances[combined_filter]
+                    
+                    # Create scatter plot item with filtered data
+                    scatter_item = pg.ScatterPlotItem(
+                        x=filtered_times, 
+                        y=filtered_distances, 
+                        pen=pg.mkPen(color=series['color']), 
+                        brush=pg.mkBrush(color=series['color']), 
+                        size=4
+                    )
+                    
+                    # Add to plot and store reference
+                    self._scatter_plot.addItem(scatter_item)
+                    series['plot_item'] = scatter_item
+                    
+            logger.debug(f"Updated plot data for event {self._current_event_id}, lane {current_lane_id}")
+                    
+        except sqlite3.Error as e:
+            logger.error(f"Error updating plot data: {e}")
+            
+    def _on_slider_changed(self):
+        """Handle changes to distance or time sliders by filtering the plot data."""
+        if not self._series:
+            return
+            
+        # Get current slider ranges
+        time_min, time_max = self._time_slider.value()
+        dist_min, dist_max = self._dist_slider.value()
+        
+        # Update each series with filtered data
+        for series in self._series:
+            if series['plot_item'] is not None and series['veh_time'] is not None and series['veh_dist_trav'] is not None:
+                # Create numpy filter for time and distance ranges
+                time_filter = (series['veh_time'] >= time_min) & (series['veh_time'] <= time_max)
+                dist_filter = (series['veh_dist_trav'] >= dist_min) & (series['veh_dist_trav'] <= dist_max)
+                combined_filter = time_filter & dist_filter
+                
+                # Apply filter to get filtered arrays
+                filtered_times = series['veh_time'][combined_filter]
+                filtered_distances = series['veh_dist_trav'][combined_filter]
+                
+                # Update the scatter plot item with filtered data
+                series['plot_item'].setData(x=filtered_times, y=filtered_distances)
+                
+        logger.debug(f"Applied slider filters: time=[{time_min}, {time_max}], dist=[{dist_min}, {dist_max}]")

@@ -140,4 +140,21 @@ class CsvAlgorithms:
                 self._group_dict[key] = len(self._group_dict)
             return self._group_dict[key]
         except (IndexError, TypeError):
-            return None
+            return 0
+
+    def tgsim_automated(self, row: List[str], col_def: Dict[str, Any]) -> int:
+        """Check if the source column value equals 'yes' (case-insensitive).
+
+        Args:
+            row (List[str]): CSV row data.
+            col_def (Dict[str, Any]): Column definition with src_col.
+
+        Returns:
+            int: 1 if the source column value is 'yes' (case-insensitive), 0 otherwise.
+        """
+        src_col = col_def.get("src_col", -1)
+        
+        if src_col < 0 or src_col >= len(row) or not row[src_col]:
+            return 0
+        
+        return 1 if row[src_col].lower() == "yes" else 0
