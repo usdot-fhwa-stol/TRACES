@@ -1,6 +1,7 @@
-import sqlite3
 import logging
+import time
 import numpy as np
+import sqlite3
 from PyQt6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QPushButton, 
                            QLabel, QComboBox, QDialog)
 from PyQt6.QtCore import Qt
@@ -31,9 +32,12 @@ class TimeSpacePlotWidget(QWidget):
         _time_range (tuple): Current time range (min, max).
         _dist_range (tuple): Current distance range (min, max).
         _series (list): List of dictionaries containing vehicle series data.
+        _tooltip (QLabel): Tooltip for displaying point information.
+        _last_queried_point (tuple): Tracks tooltip point to reduce queries.
+        series_color (list): Static list of HTML hex colors for series.
+        text_color (list): Static list of text colors for tooltip content.
     """
     
-    # Static list of HTML hex colors for series
     series_color = [
         '#e6194B', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', 
         '#42d4f4', '#f032e6', '#bfef45', '#fabed4', '#469990', '#dcbeff', 
@@ -41,6 +45,13 @@ class TimeSpacePlotWidget(QWidget):
         '#000075', '#000000'
     ]
     
+    text_color = [
+        "#ffffff", "#ffffff", "#000000", "#ffffff", "#ffffff", "#ffffff", 
+        "#000000", "#ffffff", "#000000", "#000000", "#ffffff", "#000000", 
+        "#ffffff", "#000000", "#ffffff", "#000000", "#ffffff", "#000000", 
+        "#ffffff", "#ffffff"
+    ]
+
     def __init__(self, parent=None):
         """Initialize the TimeSpacePlotWidget.
         
@@ -60,7 +71,10 @@ class TimeSpacePlotWidget(QWidget):
         self._time_range = (0.0, 0.0)
         self._dist_range = (0.0, 0.0)
         self._series = []
-        
+        self._tooltip = None
+        self._last_queried_point = None
+        self._last_tooltip_data = None
+
         logger.debug("TimeSpacePlotWidget initialized")
         
         self._setup_ui()
@@ -76,6 +90,7 @@ class TimeSpacePlotWidget(QWidget):
         self._scatter_plot.showGrid(x=True, y=True)
         self._scatter_plot.setLabel('left', 'Distance (m)')
         self._scatter_plot.setLabel('bottom', 'Time (s)')
+        self._scatter_plot.scene().sigMouseMoved.connect(self._handle_mouse_moved)
         main_layout.addWidget(self._scatter_plot, stretch=1)  # Stretch to fill available space
         
         # Right side: control set
@@ -124,6 +139,8 @@ class TimeSpacePlotWidget(QWidget):
         control_layout.addWidget(self._hide_show_button)
         
         main_layout.addLayout(control_layout)
+        self._tooltip = QLabel(self._scatter_plot)
+        self._tooltip.setStyleSheet("QLabel { padding: 5px; }")
         
     def set_database(self, db_connection: sqlite3.Connection):
         """Set the database connection for the widget.
@@ -132,7 +149,7 @@ class TimeSpacePlotWidget(QWidget):
             db_connection (sqlite3.Connection): Database connection for querying.
         """
         self._db_connection = db_connection
-        logger.debug(f"Database connection set")
+        logger.debug("Database connection set")
         
     def _open_settings_dialog(self):
         """Open the TimeSpacePlotSettingsDialog to configure plot settings."""
@@ -209,10 +226,10 @@ class TimeSpacePlotWidget(QWidget):
             
             # Create series dictionaries for each vehicle
             for i, (veh_id,) in enumerate(vehicle_ids):
-                color_index = i % len(self.series_color)
                 series_dict = {
                     'veh_id': veh_id,
-                    'color': self.series_color[color_index],
+                    'series_idx': i,
+                    'color': self.series_color[i % len(self.series_color)],
                     'plot_item': None,
                     'veh_time': None,
                     'veh_dist_trav': None
@@ -335,9 +352,9 @@ class TimeSpacePlotWidget(QWidget):
                     # Add to plot and store reference
                     self._scatter_plot.addItem(scatter_item)
                     series['plot_item'] = scatter_item
-                    
+
             logger.debug(f"Updated plot data for event {self._current_event_id}, lane {current_lane_id}")
-                    
+
         except sqlite3.Error as e:
             logger.error(f"Error updating plot data: {e}")
             
@@ -366,3 +383,96 @@ class TimeSpacePlotWidget(QWidget):
                 series['plot_item'].setData(x=filtered_times, y=filtered_distances)
                 
         logger.debug(f"Applied slider filters: time=[{time_min}, {time_max}], dist=[{dist_min}, {dist_max}]")
+
+    def _handle_mouse_moved(self, pos):
+        """Handle mouse movement for showing tooltips with hysteresis.
+    
+        Args:
+            pos (QPointF): Mouse position in scene coordinates.
+        """
+        if not self._series:
+            return
+    
+        # Debounce to limit processing frequency
+        current_time = time.time()
+        if hasattr(self, '_last_mouse_move_time') and (current_time - self._last_mouse_move_time) < 0.05:  # 50ms debounce
+            return
+        self._last_mouse_move_time = current_time
+    
+        view_box = self._scatter_plot.getViewBox()
+        mouse_point = view_box.mapSceneToView(pos)
+        mx, my = mouse_point.x(), mouse_point.y()
+    
+        min_dist = float('inf')
+        closest_data = None
+        time_tolerance = 0.05  # Time tolerance in seconds
+        pixel_tolerance_show = 10  # Pixel distance to show tooltip
+        pixel_tolerance_hide = 15  # Pixel distance to hide tooltip (hysteresis)
+    
+        for i, series in enumerate(self._series):
+            if series["plot_item"]:
+                mask = (series["veh_time"] >= mx - time_tolerance) & (series["veh_time"] <= mx + time_tolerance)
+                x_filtered = series["veh_time"][mask]
+                y_filtered = series["veh_dist_trav"][mask]
+                
+                if len(x_filtered) > 0:
+                    distances = np.abs(y_filtered - my)
+                    min_idx = np.argmin(distances)
+                    if distances[min_idx] < min_dist:
+                        min_dist = distances[min_idx]
+                        closest_data = (series["veh_id"], x_filtered[min_idx], y_filtered[min_idx], i)
+    
+        # Initialize last queried point if not exists
+        if not hasattr(self, '_last_queried_point'):
+            self._last_queried_point = None
+    
+        if closest_data and min_dist < pixel_tolerance_show:
+            veh_id, veh_time, veh_dist_trav, series_idx = closest_data
+    
+            # Check if the point is the same as the last queried point
+            current_point = (veh_id, veh_time, self._current_event_id)
+            if self._last_queried_point != current_point:
+                # Query database for new point
+                cursor = self._db_connection.cursor()
+                cursor.execute("""
+                    SELECT veh_speed, veh_accel, veh_automation, veh_length
+                    FROM events
+                    WHERE event_id = ? AND veh_id = ? AND veh_time = ?
+                """, (self._current_event_id, veh_id, veh_time))
+                row = cursor.fetchone()
+                
+                if row:
+                    veh_speed = f"{row[0]:.2f}" if row[0] is not None else " "
+                    veh_accel = f"{row[1]:.2f}" if row[1] is not None else " "
+                    veh_auto = f"{row[2]:d}" if row[2] is not None else " "
+                    veh_length = f"{row[3]:.2f}" if row[3] is not None else " "
+    
+                    tooltip_text = (
+                        f"Vehicle ID: {veh_id}\n"
+                        f"Time: {veh_time:.2f} s\n"
+                        f"Distance: {veh_dist_trav:.2f} m\n"
+                        f"Speed: {veh_speed} m/s\n"
+                        f"Acceleration: {veh_accel} m/s²\n"
+                        f"Automation: {veh_auto}\n"
+                        f"Length: {veh_length} m"
+                    )
+                    self._tooltip.setText(tooltip_text)
+                    self._last_queried_point = current_point
+                else:
+                    self._tooltip.hide()
+                    self._last_queried_point = None
+                    return
+    
+            # Update tooltip style and position
+            color = self.series_color[series_idx % len(self.series_color)]
+            text_color = self.text_color[series_idx % len(self.text_color)]
+            self._tooltip.setStyleSheet(
+                f"QLabel {{ background-color: {color}; color: {text_color}; padding: 5px; }}"
+            )
+            self._tooltip.move(int(pos.x()) + 10, int(pos.y()) + 10)
+            self._tooltip.show()
+        else:
+            # Only hide tooltip if distance exceeds hide tolerance (hysteresis)
+            if min_dist > pixel_tolerance_hide or not closest_data:
+                self._tooltip.hide()
+                self._last_queried_point = None
