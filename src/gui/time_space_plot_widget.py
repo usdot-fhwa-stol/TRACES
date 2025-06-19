@@ -26,12 +26,10 @@ class TimeSpacePlotWidget(QWidget):
         _lane_combobox (QComboBox): Combobox for lane selection.
         _dist_slider (QLabeledRangeSlider): Vertical slider for distance filtering.
         _time_slider (QLabeledRangeSlider): Vertical slider for time filtering.
-        _export_button (QPushButton): Button for exporting data (initially disabled).
-        _hide_show_button (QPushButton): Button for hide/show functionality (initially disabled).
         _current_event_id (int): Currently selected event ID.
         _time_range (tuple): Current time range (min, max).
         _dist_range (tuple): Current distance range (min, max).
-        _series (list): List of dictionaries containing vehicle series data.
+        _series (dict): dictionary of vehicle series data by veh_id.
         _tooltip (QLabel): Tooltip for displaying point information.
         _last_queried_point (tuple): Tracks tooltip point to reduce queries.
         series_color (list): Static list of HTML hex colors for series.
@@ -65,15 +63,15 @@ class TimeSpacePlotWidget(QWidget):
         self._lane_combobox = None
         self._dist_slider = None
         self._time_slider = None
-        self._export_button = None
-        self._hide_show_button = None
         self._current_event_id = None
         self._time_range = (0.0, 0.0)
         self._dist_range = (0.0, 0.0)
-        self._series = []
+        self._series = None
         self._tooltip = None
         self._last_queried_point = None
         self._last_tooltip_data = None
+        self._selected_series = set()
+        self._last_mouse_move_time = 0.0
 
         logger.debug("TimeSpacePlotWidget initialized")
         
@@ -128,19 +126,11 @@ class TimeSpacePlotWidget(QWidget):
         self._time_slider.valueChanged.connect(self._on_slider_changed)
         control_layout.addWidget(self._time_slider, stretch=1)  # Stretch to fill available space
         
-        # Export button (initially disabled)
-        self._export_button = QPushButton("Export...")
-        self._export_button.setEnabled(False)
-        control_layout.addWidget(self._export_button)
-        
-        # Hide/Show button (initially disabled with space label)
-        self._hide_show_button = QPushButton(" ")
-        self._hide_show_button.setEnabled(False)
-        control_layout.addWidget(self._hide_show_button)
-        
         main_layout.addLayout(control_layout)
         self._tooltip = QLabel(self._scatter_plot)
         self._tooltip.setStyleSheet("QLabel { padding: 5px; }")
+
+        self._scatter_plot.scene().sigMouseClicked.connect(self._handle_mouse_clicked)
         
     def set_database(self, db_connection: sqlite3.Connection):
         """Set the database connection for the widget.
@@ -187,7 +177,8 @@ class TimeSpacePlotWidget(QWidget):
         self._current_event_id = event_id
         self._dist_range = (dist_min, dist_max)
         self._time_range = (time_min, time_max)
-        
+        self._selected_series.clear()
+
         # Update event button label
         self._event_button.setText(f"Event {event_id:3d}")
         
@@ -222,20 +213,20 @@ class TimeSpacePlotWidget(QWidget):
             vehicle_ids = cursor.fetchall()
             
             # Clear existing series
-            self._series = []
+            self._series = {}
             
             # Create series dictionaries for each vehicle
-            for i, (veh_id,) in enumerate(vehicle_ids):
+            for (veh_id,) in vehicle_ids:
                 series_dict = {
                     'veh_id': veh_id,
-                    'series_idx': i,
-                    'color': self.series_color[i % len(self.series_color)],
+                    'color': self.series_color[veh_id % len(self.series_color)],
+                    'text_color': self.text_color[veh_id % len(self.text_color)],
                     'plot_item': None,
                     'veh_time': None,
                     'veh_dist_trav': None
                 }
-                self._series.append(series_dict)
-                
+                self._series[veh_id] = series_dict
+
             logger.debug(f"Initialized {len(self._series)} vehicle series for event {self._current_event_id}")
                 
         except sqlite3.Error as e:
@@ -293,7 +284,7 @@ class TimeSpacePlotWidget(QWidget):
             self._scatter_plot.clear()
             
             # Reset plot_item, veh_time, and veh_dist_trav for each series
-            for series in self._series:
+            for series in self._series.values():
                 series['plot_item'] = None
                 series['veh_time'] = None
                 series['veh_dist_trav'] = None
@@ -317,7 +308,7 @@ class TimeSpacePlotWidget(QWidget):
                 vehicle_data[veh_id]['distances'].append(veh_dist_trav)
             
             # Create scatter plots for each vehicle in the series
-            for series in self._series:
+            for series in self._series.values():
                 veh_id = series['veh_id']
                 if veh_id in vehicle_data:
                     # Convert to numpy arrays
@@ -339,15 +330,19 @@ class TimeSpacePlotWidget(QWidget):
                     # Apply filter to get filtered arrays for display
                     filtered_times = times[combined_filter]
                     filtered_distances = distances[combined_filter]
+
+                    # MODIFIED: Set color based on _selected_series
+                    color = series['color'] if veh_id in self._selected_series or not self._selected_series else '#a9a9a9'
                     
                     # Create scatter plot item with filtered data
                     scatter_item = pg.ScatterPlotItem(
                         x=filtered_times, 
                         y=filtered_distances, 
-                        pen=pg.mkPen(color=series['color']), 
-                        brush=pg.mkBrush(color=series['color']), 
+                        pen=pg.mkPen(color=color), 
+                        brush=pg.mkBrush(color=color), 
                         size=4
                     )
+                    scatter_item.veh_id = veh_id
                     
                     # Add to plot and store reference
                     self._scatter_plot.addItem(scatter_item)
@@ -368,7 +363,7 @@ class TimeSpacePlotWidget(QWidget):
         dist_min, dist_max = self._dist_slider.value()
         
         # Update each series with filtered data
-        for series in self._series:
+        for series in self._series.values():
             if series['plot_item'] is not None and series['veh_time'] is not None and series['veh_dist_trav'] is not None:
                 # Create numpy filter for time and distance ranges
                 time_filter = (series['veh_time'] >= time_min) & (series['veh_time'] <= time_max)
@@ -395,7 +390,7 @@ class TimeSpacePlotWidget(QWidget):
     
         # Debounce to limit processing frequency
         current_time = time.time()
-        if hasattr(self, '_last_mouse_move_time') and (current_time - self._last_mouse_move_time) < 0.05:  # 50ms debounce
+        if (current_time - self._last_mouse_move_time) < 0.05:  # 50ms debounce
             return
         self._last_mouse_move_time = current_time
     
@@ -409,7 +404,7 @@ class TimeSpacePlotWidget(QWidget):
         pixel_tolerance_show = 10  # Pixel distance to show tooltip
         pixel_tolerance_hide = 15  # Pixel distance to hide tooltip (hysteresis)
     
-        for i, series in enumerate(self._series):
+        for series in self._series.values():
             if series["plot_item"]:
                 mask = (series["veh_time"] >= mx - time_tolerance) & (series["veh_time"] <= mx + time_tolerance)
                 x_filtered = series["veh_time"][mask]
@@ -420,14 +415,14 @@ class TimeSpacePlotWidget(QWidget):
                     min_idx = np.argmin(distances)
                     if distances[min_idx] < min_dist:
                         min_dist = distances[min_idx]
-                        closest_data = (series["veh_id"], x_filtered[min_idx], y_filtered[min_idx], i)
+                        closest_data = (series["veh_id"], series["color"], series["text_color"], x_filtered[min_idx], y_filtered[min_idx])
     
         # Initialize last queried point if not exists
         if not hasattr(self, '_last_queried_point'):
             self._last_queried_point = None
     
         if closest_data and min_dist < pixel_tolerance_show:
-            veh_id, veh_time, veh_dist_trav, series_idx = closest_data
+            veh_id, color, text_color, veh_time, veh_dist_trav = closest_data
     
             # Check if the point is the same as the last queried point
             current_point = (veh_id, veh_time, self._current_event_id)
@@ -452,7 +447,7 @@ class TimeSpacePlotWidget(QWidget):
                         f"Time: {veh_time:.2f} s\n"
                         f"Distance: {veh_dist_trav:.2f} m\n"
                         f"Speed: {veh_speed} m/s\n"
-                        f"Acceleration: {veh_accel} m/s²\n"
+                        f"Acceleration: {veh_accel} m/s^2\n"
                         f"Automation: {veh_auto}\n"
                         f"Length: {veh_length} m"
                     )
@@ -464,8 +459,6 @@ class TimeSpacePlotWidget(QWidget):
                     return
     
             # Update tooltip style and position
-            color = self.series_color[series_idx % len(self.series_color)]
-            text_color = self.text_color[series_idx % len(self.text_color)]
             self._tooltip.setStyleSheet(
                 f"QLabel {{ background-color: {color}; color: {text_color}; padding: 5px; }}"
             )
@@ -476,3 +469,58 @@ class TimeSpacePlotWidget(QWidget):
             if min_dist > pixel_tolerance_hide or not closest_data:
                 self._tooltip.hide()
                 self._last_queried_point = None
+
+    def _handle_mouse_clicked(self, event):
+        """Handle mouse click to toggle vehicle selection."""
+        # Handle single left-click
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+            
+        pos = event.scenePos()
+        view_box = self._scatter_plot.getViewBox()
+        mouse_point = view_box.mapSceneToView(pos)
+        mx, my = mouse_point.x(), mouse_point.y()
+        
+        # Find closest point
+        min_dist = float('inf')
+        closest_veh_id = None
+        time_tolerance = 0.05  # Time tolerance in seconds
+        pixel_tolerance = 10   # Pixel distance to register click
+        
+        for series in self._series.values():
+            if series["plot_item"]:
+                mask = (series["veh_time"] >= mx - time_tolerance) & (series["veh_time"] <= mx + time_tolerance)
+                x_filtered = series["veh_time"][mask]
+                y_filtered = series["veh_dist_trav"][mask]
+                
+                if len(x_filtered) > 0:
+                    distances = np.abs(y_filtered - my)
+                    min_idx = np.argmin(distances)
+                    if distances[min_idx] < pixel_tolerance and distances[min_idx] < min_dist:
+                        min_dist = distances[min_idx]
+                        closest_veh_id = series["veh_id"]
+        
+        if closest_veh_id is not None:
+            # Toggle veh_id in selected_series
+            if closest_veh_id in self._selected_series:
+                self._selected_series.remove(closest_veh_id)
+            else:
+                self._selected_series.add(closest_veh_id)
+                # Clear selected_series if it contains all vehicles
+                if len(self._selected_series) == len(self._series):
+                    self._selected_series.clear()
+            
+            # Update plot colors
+            self._update_plot_colors()
+            logger.debug(f"Toggled veh_id {closest_veh_id}, selected_series: {self._selected_series}")
+    
+    def _update_plot_colors(self):
+        """Update scatter plot item colors based on _selected_series."""
+        # Update colors for all series
+        for series in self._series.values():
+            if series['plot_item'] is not None:
+                veh_id = series['veh_id']
+                color = series['color'] if veh_id in self._selected_series or not self._selected_series else '#a9a9a9'
+                series['plot_item'].setPen(pg.mkPen(color=color))
+                series['plot_item'].setBrush(pg.mkBrush(color=color))
+        logger.debug("Updated plot colors based on selected series")
