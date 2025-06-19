@@ -4,7 +4,8 @@ import numpy as np
 import sqlite3
 from PyQt6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QPushButton, 
                            QLabel, QComboBox, QDialog)
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QPointF, QEvent
+from PyQt6.QtGui import QKeyEvent, QMouseEvent
 import pyqtgraph as pg
 from superqt import QLabeledRangeSlider
 from .time_space_plot_settings_dialog import TimeSpacePlotSettingsDialog
@@ -12,6 +13,104 @@ from .time_space_plot_settings_dialog import TimeSpacePlotSettingsDialog
 # Set up logger
 logger = logging.getLogger(__name__)
 
+class CustomViewBox(pg.ViewBox):
+    """Custom ViewBox that handles selection box drawing when Shift is held."""
+    
+    def __init__(self, parent_widget, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.parent_widget = parent_widget
+        self._selection_start = None
+        self._is_selecting = False
+        self._selection_box = None
+
+    def mousePressEvent(self, ev):
+        if ev.button() == Qt.MouseButton.LeftButton and ev.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+            # Start selection
+            self._selection_start = self.mapSceneToView(ev.scenePos())
+            self._is_selecting = True
+            
+            # Create selection box
+            self._selection_box = pg.RectROI(
+                pos=[self._selection_start.x(), self._selection_start.y()],
+                size=[0, 0],
+                pen=pg.mkPen(color='red', width=2, style=Qt.PenStyle.DashLine),
+                removable=False
+            )
+            
+            # Disable handles
+            for handle in self._selection_box.getHandles():
+                handle.hide()
+            
+            # Add to parent plot
+            self.parent_widget._scatter_plot.addItem(self._selection_box)
+            ev.accept()
+            return
+        
+        # For non-shift clicks, use default behavior
+        super().mousePressEvent(ev)
+
+    def mouseMoveEvent(self, ev):
+        if self._is_selecting and self._selection_box:
+            # Update selection box
+            current_pos = self.mapSceneToView(ev.scenePos())
+            
+            x0, y0 = self._selection_start.x(), self._selection_start.y()
+            x1, y1 = current_pos.x(), current_pos.y()
+            
+            # Update selection box position and size
+            self._selection_box.setPos(min(x0, x1), min(y0, y1))
+            self._selection_box.setSize([abs(x1 - x0), abs(y1 - y0)])
+            ev.accept()
+            return
+        
+        # For non-selection moves, use default behavior
+        super().mouseMoveEvent(ev)
+
+    def mouseReleaseEvent(self, ev):
+        if ev.button() == Qt.MouseButton.LeftButton and self._is_selecting:
+            # Complete selection
+            end_pos = self.mapSceneToView(ev.scenePos())
+            
+            x0, y0 = self._selection_start.x(), self._selection_start.y()
+            x1, y1 = end_pos.x(), end_pos.y()
+            
+            # Get selection box bounds
+            x_min, x_max = min(x0, x1), max(x0, x1)
+            y_min, y_max = min(y0, y1), max(y0, y1)
+            
+            # Find vehicles with points in the selection box
+            selected_vehicles = set()
+            for series in self.parent_widget._series.values():
+                if series['veh_time'] is not None and series['veh_dist_trav'] is not None:
+                    mask = (series['veh_time'] >= x_min) & (series['veh_time'] <= x_max) & \
+                           (series['veh_dist_trav'] >= y_min) & (series['veh_dist_trav'] <= y_max)
+                    if np.any(mask):
+                        selected_vehicles.add(series['veh_id'])
+            
+            # Update selected_series
+            self.parent_widget._selected_series.update(selected_vehicles)
+            # Clear selected_series if all vehicles are selected
+            if len(self.parent_widget._selected_series) == len(self.parent_widget._series):
+                self.parent_widget._selected_series.clear()
+            
+            # Update plot colors
+            self.parent_widget._update_plot_colors()
+            
+            # Clear selection box
+            self._clear_selection_box()
+            ev.accept()
+            return
+        
+        # For non-shift releases, use default behavior
+        super().mouseReleaseEvent(ev)
+
+    def _clear_selection_box(self):
+        """Remove the selection box from the plot."""
+        if self._selection_box:
+            self.parent_widget._scatter_plot.removeItem(self._selection_box)
+            self._selection_box = None
+            self._is_selecting = False
+            self._selection_start = None
 
 class TimeSpacePlotWidget(QWidget):
     """Widget for displaying time-space trajectory plots with interactive controls.
@@ -29,9 +128,14 @@ class TimeSpacePlotWidget(QWidget):
         _current_event_id (int): Currently selected event ID.
         _time_range (tuple): Current time range (min, max).
         _dist_range (tuple): Current distance range (min, max).
-        _series (dict): dictionary of vehicle series data by veh_id.
+        _series (dict): Dictionary of vehicle series data by veh_id.
         _tooltip (QLabel): Tooltip for displaying point information.
         _last_queried_point (tuple): Tracks tooltip point to reduce queries.
+        _selected_series (set): Set of selected vehicle IDs.
+        _last_mouse_move_time (float): Timestamp of last mouse move for debouncing.
+        _selection_box (pg.RectROI): Selection box for group selection.
+        _is_selecting (bool): Flag indicating if selection box is active.
+        _selection_start (QPointF): Starting point of selection box in view coordinates.
         series_color (list): Static list of HTML hex colors for series.
         text_color (list): Static list of text colors for tooltip content.
     """
@@ -69,9 +173,11 @@ class TimeSpacePlotWidget(QWidget):
         self._series = None
         self._tooltip = None
         self._last_queried_point = None
-        self._last_tooltip_data = None
         self._selected_series = set()
         self._last_mouse_move_time = 0.0
+        self._selection_box = None
+        self._is_selecting = False
+        self._selection_start = None
 
         logger.debug("TimeSpacePlotWidget initialized")
         
@@ -82,14 +188,16 @@ class TimeSpacePlotWidget(QWidget):
         # Create main horizontal layout
         main_layout = QHBoxLayout(self)
         
-        # Left side: scatter plot
-        self._scatter_plot = pg.PlotWidget()
+        # Left side: scatter plot - pass self to CustomViewBox
+        custom_viewbox = CustomViewBox(parent_widget=self)
+        self._scatter_plot = pg.PlotWidget(viewBox=custom_viewbox)
         self._scatter_plot.setBackground('w')
         self._scatter_plot.showGrid(x=True, y=True)
         self._scatter_plot.setLabel('left', 'Distance (m)')
         self._scatter_plot.setLabel('bottom', 'Time (s)')
         self._scatter_plot.scene().sigMouseMoved.connect(self._handle_mouse_moved)
-        main_layout.addWidget(self._scatter_plot, stretch=1)  # Stretch to fill available space
+        self._scatter_plot.scene().sigMouseClicked.connect(self._handle_mouse_clicked)
+        main_layout.addWidget(self._scatter_plot, stretch=1)
         
         # Right side: control set
         control_layout = QVBoxLayout()
@@ -113,7 +221,7 @@ class TimeSpacePlotWidget(QWidget):
         self._dist_slider = QLabeledRangeSlider()
         self._dist_slider.setOrientation(Qt.Orientation.Vertical)
         self._dist_slider.valueChanged.connect(self._on_slider_changed)
-        control_layout.addWidget(self._dist_slider, stretch=1)  # Stretch to fill available space
+        control_layout.addWidget(self._dist_slider, stretch=1)
         
         # Time slider section
         time_label = QLabel("Time (s)")
@@ -124,13 +232,15 @@ class TimeSpacePlotWidget(QWidget):
         self._time_slider = QLabeledRangeSlider()
         self._time_slider.setOrientation(Qt.Orientation.Vertical)
         self._time_slider.valueChanged.connect(self._on_slider_changed)
-        control_layout.addWidget(self._time_slider, stretch=1)  # Stretch to fill available space
+        control_layout.addWidget(self._time_slider, stretch=1)
         
         main_layout.addLayout(control_layout)
         self._tooltip = QLabel(self._scatter_plot)
         self._tooltip.setStyleSheet("QLabel { padding: 5px; }")
-
-        self._scatter_plot.scene().sigMouseClicked.connect(self._handle_mouse_clicked)
+        
+        # Keep default PanMode to allow panning when Shift is not held
+        view_box = self._scatter_plot.getViewBox()
+        view_box.setMouseMode(view_box.PanMode)
         
     def set_database(self, db_connection: sqlite3.Connection):
         """Set the database connection for the widget.
@@ -178,6 +288,7 @@ class TimeSpacePlotWidget(QWidget):
         self._dist_range = (dist_min, dist_max)
         self._time_range = (time_min, time_max)
         self._selected_series.clear()
+        self._clear_selection_box()
 
         # Update event button label
         self._event_button.setText(f"Event {event_id:3d}")
@@ -268,6 +379,7 @@ class TimeSpacePlotWidget(QWidget):
             index (int): Selected combobox index.
         """
         if index >= 0:
+            self._clear_selection_box()
             self._update_plot_data()
             
     def _update_plot_data(self):
@@ -275,13 +387,10 @@ class TimeSpacePlotWidget(QWidget):
         if not self._db_connection or self._current_event_id is None or self._lane_combobox.count() == 0:
             return
             
-        current_lane_id = self._lane_combobox.currentData()
-        if current_lane_id is None:
-            return
-            
         try:
-            # Clear existing plot items
+            # Clear existing plot items and selection box
             self._scatter_plot.clear()
+            self._clear_selection_box()
             
             # Reset plot_item, veh_time, and veh_dist_trav for each series
             for series in self._series.values():
@@ -295,7 +404,7 @@ class TimeSpacePlotWidget(QWidget):
                 FROM events 
                 WHERE event_id = ? AND lane_id = ? 
                 ORDER BY veh_id, veh_time
-            """, (self._current_event_id, current_lane_id))
+            """, (self._current_event_id, self._lane_combobox.currentData()))
             
             results = cursor.fetchall()
             
@@ -330,8 +439,8 @@ class TimeSpacePlotWidget(QWidget):
                     # Apply filter to get filtered arrays for display
                     filtered_times = times[combined_filter]
                     filtered_distances = distances[combined_filter]
-
-                    # MODIFIED: Set color based on _selected_series
+                    
+                    # Set color based on _selected_series
                     color = series['color'] if veh_id in self._selected_series or not self._selected_series else '#a9a9a9'
                     
                     # Create scatter plot item with filtered data
@@ -348,7 +457,7 @@ class TimeSpacePlotWidget(QWidget):
                     self._scatter_plot.addItem(scatter_item)
                     series['plot_item'] = scatter_item
 
-            logger.debug(f"Updated plot data for event {self._current_event_id}, lane {current_lane_id}")
+            logger.debug(f"Updated plot data for event {self._current_event_id}, lane {self._lane_combobox.currentData()}")
 
         except sqlite3.Error as e:
             logger.error(f"Error updating plot data: {e}")
@@ -358,6 +467,9 @@ class TimeSpacePlotWidget(QWidget):
         if not self._series:
             return
             
+        # Clear selection box
+        self._clear_selection_box()
+        
         # Get current slider ranges
         time_min, time_max = self._time_slider.value()
         dist_min, dist_max = self._dist_slider.value()
@@ -470,10 +582,27 @@ class TimeSpacePlotWidget(QWidget):
                 self._tooltip.hide()
                 self._last_queried_point = None
 
+    def _clear_selection_box(self):
+        """Remove the selection box from the plot."""
+        view_box = self._scatter_plot.getViewBox()
+        if hasattr(view_box, '_clear_selection_box'):
+            view_box._clear_selection_box()
+
+    def keyPressEvent(self, event: QKeyEvent):
+        """Handle key press events, clearing selection on Escape key."""
+        if event.key() == Qt.Key.Key_Escape:
+            self._selected_series.clear()
+            self._update_plot_colors()
+            self._clear_selection_box()
+            logger.debug("Cleared selected series on Escape key")
+            event.accept()
+        else:
+            super().keyPressEvent(event)
+
     def _handle_mouse_clicked(self, event):
         """Handle mouse click to toggle vehicle selection."""
-        # Handle single left-click
-        if event.button() != Qt.MouseButton.LeftButton:
+        # Handle single left-click without Shift modifier
+        if event.button() != Qt.MouseButton.LeftButton or event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
             return
             
         pos = event.scenePos()
