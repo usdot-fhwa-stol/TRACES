@@ -29,10 +29,12 @@ class TimeSpacePlotSettingsDialog(QDialog):
         _apply_button (QPushButton): Button to apply settings.
         _current_event_id (int): Currently selected event ID.
         _record_limit (int): Maximum allowed records (100,000).
+        _current_lane_ids (list): List of lane IDs for current event.
+        _current_veh_ids (list): List of vehicle IDs for current event.
     """
     
-    # Signal emitted when settings are applied
-    settings_applied = pyqtSignal(int, float, float, float, float)  # event_id, time_min, time_max, dist_min, dist_max
+    # Signal emitted when settings are applied - now includes lane_ids and veh_ids
+    settings_applied = pyqtSignal(int, float, float, float, float, list, list)  # event_id, time_min, time_max, dist_min, dist_max, lane_ids, veh_ids
     
     def __init__(self, parent=None, db_connection: sqlite3.Connection = None, defaults: dict = None):
         """Initialize the TimeSpacePlotSettingsDialog.
@@ -54,6 +56,8 @@ class TimeSpacePlotSettingsDialog(QDialog):
         self._apply_button = None
         self._current_event_id = None
         self._record_limit = 100000
+        self._current_lane_ids = []
+        self._current_veh_ids = []
         
         logger.debug("TimeSpacePlotSettingsDialog initialized")
         
@@ -228,12 +232,16 @@ class TimeSpacePlotSettingsDialog(QDialog):
                 logger.error(f"Error parsing summary JSON for event {self._current_event_id}: {e}")
                 return
             
+            # Extract and store lane_ids and veh_ids from summary
+            self._current_lane_ids = summary.get("lane_id", [])
+            self._current_veh_ids = summary.get("veh_id", [])
+            
             # Update lane count from summary
-            lane_count = len(summary.get("lane_id", []))
+            lane_count = len(self._current_lane_ids)
             self._lane_count_label.setText(str(lane_count))
             
             # Update vehicle count from summary
-            veh_count = len(summary.get("veh_id", []))
+            veh_count = len(self._current_veh_ids)
             self._veh_count_label.setText(str(veh_count))
             
             # Update slider ranges from summary
@@ -367,19 +375,10 @@ class TimeSpacePlotSettingsDialog(QDialog):
             dist_min, dist_max = self._dist_slider.value()
             
             logger.debug(f"Applying settings: event_id={self._current_event_id}, "
-                        f"time=[{time_min}, {time_max}], dist=[{dist_min}, {dist_max}]")
+                        f"time=[{time_min}, {time_max}], dist=[{dist_min}, {dist_max}], "
+                        f"lanes={len(self._current_lane_ids)}, vehicles={len(self._current_veh_ids)}")
             
-            self.settings_applied.emit(self._current_event_id, time_min, time_max, dist_min, dist_max)
+            # Emit signal with lane_ids and veh_ids included
+            self.settings_applied.emit(self._current_event_id, time_min, time_max, dist_min, dist_max, 
+                                     self._current_lane_ids, self._current_veh_ids)
             self.accept()
-            
-    def get_current_settings(self) -> tuple:
-        """Get the current dialog settings.
-        
-        Returns:
-            tuple: (event_id, time_min, time_max, dist_min, dist_max) or None if no event selected.
-        """
-        if self._current_event_id is not None:
-            time_min, time_max = self._time_slider.value()
-            dist_min, dist_max = self._dist_slider.value()
-            return (self._current_event_id, time_min, time_max, dist_min, dist_max)
-        return None

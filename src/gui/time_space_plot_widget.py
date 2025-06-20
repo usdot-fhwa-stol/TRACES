@@ -136,6 +136,8 @@ class TimeSpacePlotWidget(QWidget):
         _selection_box (pg.RectROI): Selection box for group selection.
         _is_selecting (bool): Flag indicating if selection box is active.
         _selection_start (QPointF): Starting point of selection box in view coordinates.
+        _lane_ids (list): List of available lane IDs for current event.
+        _veh_ids (list): List of available vehicle IDs for current event.
         series_color (list): Static list of HTML hex colors for series.
         text_color (list): Static list of text colors for tooltip content.
     """
@@ -178,6 +180,8 @@ class TimeSpacePlotWidget(QWidget):
         self._selection_box = None
         self._is_selecting = False
         self._selection_start = None
+        self._lane_ids = []
+        self._veh_ids = []
 
         logger.debug("TimeSpacePlotWidget initialized")
         
@@ -271,7 +275,7 @@ class TimeSpacePlotWidget(QWidget):
             logger.debug("Settings dialog cancelled")
             
     def _apply_settings(self, event_id: int, time_min: float, time_max: float, 
-                       dist_min: float, dist_max: float):
+                       dist_min: float, dist_max: float, lane_ids: list, veh_ids: list):
         """Apply settings from the settings dialog.
         
         Args:
@@ -280,24 +284,29 @@ class TimeSpacePlotWidget(QWidget):
             time_max (float): Maximum time value.
             dist_min (float): Minimum distance value.
             dist_max (float): Maximum distance value.
+            lane_ids (list): List of available lane IDs for this event.
+            veh_ids (list): List of available vehicle IDs for this event.
         """
         logger.debug(f"Applying settings: event_id={event_id}, "
-                    f"time=[{time_min}, {time_max}], dist=[{dist_min}, {dist_max}]")
+                    f"time=[{time_min}, {time_max}], dist=[{dist_min}, {dist_max}], "
+                    f"lanes={len(lane_ids)}, vehicles={len(veh_ids)}")
         
         self._current_event_id = event_id
         self._dist_range = (dist_min, dist_max)
         self._time_range = (time_min, time_max)
+        self._lane_ids = lane_ids
+        self._veh_ids = veh_ids
         self._selected_series.clear()
         self._clear_selection_box()
 
         # Update event button label
         self._event_button.setText(f"Event {event_id:3d}")
         
-        # Initialize series for the new event
-        self._initialize_series()
+        # Initialize series for the new event using provided veh_ids
+        self._initialize_series_from_ids()
         
-        # Update lane combobox
-        self._populate_lane_combobox()
+        # Update lane combobox using provided lane_ids
+        self._populate_lane_combobox_from_ids()
 
         # Set distance slider range and values
         self._dist_slider.setRange(dist_min, dist_max)
@@ -307,8 +316,46 @@ class TimeSpacePlotWidget(QWidget):
         self._time_slider.setRange(time_min, time_max)
         self._time_slider.setValue(self._time_range)
         
+    def _initialize_series_from_ids(self):
+        """Initialize the _series dictionary using the provided vehicle IDs."""
+        # Clear existing series
+        self._series = {}
+        
+        # Create series dictionaries for each vehicle using provided veh_ids
+        for index, veh_id in enumerate(self._veh_ids):
+            series_dict = {
+                'veh_id': veh_id,
+                'color': self.series_color[index % len(self.series_color)],
+                'text_color': self.text_color[index % len(self.text_color)],
+                'plot_item': None,
+                'veh_time': None,
+                'veh_dist_trav': None
+            }
+            self._series[veh_id] = series_dict
+
+        logger.debug(f"Initialized {len(self._series)} vehicle series for event {self._current_event_id}")
+        
+    def _populate_lane_combobox_from_ids(self):
+        """Populate the lane combobox using the provided lane IDs."""
+        self._lane_combobox.clear()
+        
+        # Populate combobox with provided lane_ids
+        for lane_id in self._lane_ids:
+            self._lane_combobox.addItem(f"Lane {lane_id:2d}", lane_id)
+            
+        # Default to first item and update plot
+        if self._lane_ids:
+            self._lane_combobox.setCurrentIndex(0)
+            self._update_plot_data()
+            
+        logger.debug(f"Populated lane combobox with {len(self._lane_ids)} lanes")
+        
     def _initialize_series(self):
-        """Initialize the _series list with unique vehicle IDs for the current event."""
+        """Initialize the _series list with unique vehicle IDs for the current event.
+        
+        This method is kept for backward compatibility but should not be called
+        when using the optimized approach with provided IDs.
+        """
         if not self._db_connection or self._current_event_id is None:
             return
             
@@ -344,7 +391,11 @@ class TimeSpacePlotWidget(QWidget):
             logger.error(f"Error initializing series: {e}")
             
     def _populate_lane_combobox(self):
-        """Populate the lane combobox with distinct lane IDs for the current event."""
+        """Populate the lane combobox with distinct lane IDs for the current event.
+        
+        This method is kept for backward compatibility but should not be called
+        when using the optimized approach with provided IDs.
+        """
         if not self._db_connection or self._current_event_id is None:
             return
             

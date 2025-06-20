@@ -384,7 +384,7 @@ class MainWindow(QMainWindow):
         self._export_menu.setEnabled(False)
 
     def _create_plot_widget(self, event_id: int, time_min: float, time_max: float, 
-                           dist_min: float, dist_max: float):
+                           dist_min: float, dist_max: float, lane_ids: list, veh_ids: list):
         """Create and configure the plot widget with settings from the dialog.
         
         Args:
@@ -393,14 +393,16 @@ class MainWindow(QMainWindow):
             time_max (float): Maximum time value.
             dist_min (float): Minimum distance value.
             dist_max (float): Maximum distance value.
+            lane_ids (list): List of available lane IDs for this event.
+            veh_ids (list): List of available vehicle IDs for this event.
         """
         if not self._plot_widget:
             self._plot_widget = TimeSpacePlotWidget()
             self.setCentralWidget(self._plot_widget)
         
-        # Set database connection and apply settings
+        # Set database connection and apply settings with all parameters
         self._plot_widget.set_database(self._db_connection)
-        self._plot_widget._apply_settings(event_id, time_min, time_max, dist_min, dist_max)
+        self._plot_widget._apply_settings(event_id, time_min, time_max, dist_min, dist_max, lane_ids, veh_ids)
 
     def _export_all(self):
         """Handle the Export All menu action."""
