@@ -4,7 +4,7 @@ import numpy as np
 import sqlite3
 from PyQt6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QPushButton, 
                            QLabel, QComboBox, QDialog)
-from PyQt6.QtCore import Qt, QPointF, QEvent
+from PyQt6.QtCore import Qt, QPointF, QEvent, QTimer
 from PyQt6.QtGui import QKeyEvent, QMouseEvent
 import pyqtgraph as pg
 from superqt import QLabeledRangeSlider
@@ -328,8 +328,8 @@ class TimeSpacePlotWidget(QWidget):
                 'color': self.series_color[index % len(self.series_color)],
                 'text_color': self.text_color[index % len(self.text_color)],
                 'plot_item': None,
-                'veh_time': None,
-                'veh_dist_trav': None
+                'veh_time': np.array([], dtype=np.float64),
+                'veh_dist_trav': np.array([], dtype=np.float64)
             }
             self._series[veh_id] = series_dict
 
@@ -346,82 +346,9 @@ class TimeSpacePlotWidget(QWidget):
         # Default to first item and update plot
         if self._lane_ids:
             self._lane_combobox.setCurrentIndex(0)
-            self._update_plot_data()
+            QTimer.singleShot(0, self._update_plot_data)
             
         logger.debug(f"Populated lane combobox with {len(self._lane_ids)} lanes")
-        
-    def _initialize_series(self):
-        """Initialize the _series list with unique vehicle IDs for the current event.
-        
-        This method is kept for backward compatibility but should not be called
-        when using the optimized approach with provided IDs.
-        """
-        if not self._db_connection or self._current_event_id is None:
-            return
-            
-        try:
-            cursor = self._db_connection.cursor()
-            cursor.execute("""
-                SELECT DISTINCT veh_id 
-                FROM events 
-                WHERE event_id = ? 
-                ORDER BY veh_id
-            """, (self._current_event_id,))
-            
-            vehicle_ids = cursor.fetchall()
-            
-            # Clear existing series
-            self._series = {}
-            
-            # Create series dictionaries for each vehicle
-            for index, (veh_id,) in enumerate(vehicle_ids):
-                series_dict = {
-                    'veh_id': veh_id,
-                    'color': self.series_color[index % len(self.series_color)],
-                    'text_color': self.text_color[index % len(self.text_color)],
-                    'plot_item': None,
-                    'veh_time': None,
-                    'veh_dist_trav': None
-                }
-                self._series[veh_id] = series_dict
-
-            logger.debug(f"Initialized {len(self._series)} vehicle series for event {self._current_event_id}")
-                
-        except sqlite3.Error as e:
-            logger.error(f"Error initializing series: {e}")
-            
-    def _populate_lane_combobox(self):
-        """Populate the lane combobox with distinct lane IDs for the current event.
-        
-        This method is kept for backward compatibility but should not be called
-        when using the optimized approach with provided IDs.
-        """
-        if not self._db_connection or self._current_event_id is None:
-            return
-            
-        try:
-            cursor = self._db_connection.cursor()
-            cursor.execute("""
-                SELECT DISTINCT lane_id 
-                FROM events 
-                WHERE event_id = ? 
-                ORDER BY lane_id
-            """, (self._current_event_id,))
-            
-            lanes = cursor.fetchall()
-            
-            self._lane_combobox.clear()
-            for lane in lanes:
-                lane_id = lane[0]
-                self._lane_combobox.addItem(f"Lane {lane_id:2d}", lane_id)
-                
-            # Default to first item and update plot
-            if lanes:
-                self._lane_combobox.setCurrentIndex(0)
-                self._update_plot_data()
-                
-        except sqlite3.Error as e:
-            logger.error(f"Error populating lane combobox: {e}")
             
     def _on_lane_changed(self, index: int):
         """Handle lane combobox selection change.
@@ -431,10 +358,63 @@ class TimeSpacePlotWidget(QWidget):
         """
         if index >= 0:
             self._clear_selection_box()
-            self._update_plot_data()
+            QTimer.singleShot(0, self._update_plot_data)
             
+    def _create_scatter_plot_for_vehicle(self, veh_id: int, times_list: list, distances_list: list, 
+                                        time_min: float, time_max: float, dist_min: float, dist_max: float):
+        """Create scatter plot for a vehicle with given data and filter ranges.
+        
+        Args:
+            veh_id (int): Vehicle ID.
+            times_list (list): List of time values.
+            distances_list (list): List of distance values.
+            time_min (float): Minimum time filter value.
+            time_max (float): Maximum time filter value.
+            dist_min (float): Minimum distance filter value.
+            dist_max (float): Maximum distance filter value.
+        """
+        if not times_list or veh_id not in self._series:
+            return
+            
+        # Convert to numpy arrays
+        times = np.array(times_list, dtype=np.float64)
+        distances = np.array(distances_list, dtype=np.float64)
+        
+        # Store arrays in series
+        series = self._series[veh_id]
+        series['veh_time'] = times
+        series['veh_dist_trav'] = distances
+        
+        # Apply current slider filters
+        time_filter = (times >= time_min) & (times <= time_max)
+        dist_filter = (distances >= dist_min) & (distances <= dist_max)
+        combined_filter = time_filter & dist_filter
+        
+        # Apply filter to get filtered arrays for display
+        filtered_times = times[combined_filter]
+        filtered_distances = distances[combined_filter]
+        
+        # Only create plot item if there are points to display
+        if len(filtered_times) > 0:
+            # Set color based on _selected_series
+            color = series['color'] if veh_id in self._selected_series or not self._selected_series else '#a9a9a9'
+            
+            # Create scatter plot item with filtered data
+            scatter_item = pg.ScatterPlotItem(
+                x=filtered_times, 
+                y=filtered_distances, 
+                pen=pg.mkPen(color=color), 
+                brush=pg.mkBrush(color=color), 
+                size=4
+            )
+            scatter_item.veh_id = veh_id
+            
+            # Add to plot and store reference
+            self._scatter_plot.addItem(scatter_item)
+            series['plot_item'] = scatter_item
+
     def _update_plot_data(self):
-        """Update the plot data for the current event and lane."""
+        """Update the plot data for the current event and lane using streaming approach."""
         if not self._db_connection or self._current_event_id is None or self._lane_combobox.count() == 0:
             return
             
@@ -443,11 +423,15 @@ class TimeSpacePlotWidget(QWidget):
             self._scatter_plot.clear()
             self._clear_selection_box()
             
-            # Reset plot_item, veh_time, and veh_dist_trav for each series
+            # Reset arrays for each series but keep the series structure
             for series in self._series.values():
                 series['plot_item'] = None
-                series['veh_time'] = None
-                series['veh_dist_trav'] = None
+                series['veh_time'] = np.array([], dtype=np.float64)
+                series['veh_dist_trav'] = np.array([], dtype=np.float64)
+            
+            # Get current slider ranges for filtering
+            time_min, time_max = self._time_slider.value()
+            dist_min, dist_max = self._dist_slider.value()
             
             cursor = self._db_connection.cursor()
             cursor.execute("""
@@ -457,56 +441,35 @@ class TimeSpacePlotWidget(QWidget):
                 ORDER BY veh_id, veh_time
             """, (self._current_event_id, self._lane_combobox.currentData()))
             
-            results = cursor.fetchall()
+            # Process records one by one using streaming approach
+            prev_veh_id = -1
+            current_times = []
+            current_distances = []
             
-            # Group data by vehicle ID
-            vehicle_data = {}
-            for veh_id, veh_time, veh_dist_trav in results:
-                if veh_id not in vehicle_data:
-                    vehicle_data[veh_id] = {'times': [], 'distances': []}
-                vehicle_data[veh_id]['times'].append(veh_time)
-                vehicle_data[veh_id]['distances'].append(veh_dist_trav)
+            # Stream through database results
+            for row in cursor:
+                veh_id, veh_time, veh_dist_trav = row
+                
+                # Check if we've moved to a new vehicle
+                if veh_id != prev_veh_id:
+                    # Create scatter plot for previous vehicle if we have data
+                    if prev_veh_id != -1 and current_times:
+                        self._create_scatter_plot_for_vehicle(prev_veh_id, current_times, current_distances,
+                                                            time_min, time_max, dist_min, dist_max)
+                    
+                    # Start collecting data for new vehicle
+                    prev_veh_id = veh_id
+                    current_times = []
+                    current_distances = []
+                
+                # Add current record to collections
+                current_times.append(veh_time)
+                current_distances.append(veh_dist_trav)
             
-            # Create scatter plots for each vehicle in the series
-            for series in self._series.values():
-                veh_id = series['veh_id']
-                if veh_id in vehicle_data:
-                    # Convert to numpy arrays
-                    times = np.array(vehicle_data[veh_id]['times'])
-                    distances = np.array(vehicle_data[veh_id]['distances'])
-                    
-                    # Store arrays in series
-                    series['veh_time'] = times
-                    series['veh_dist_trav'] = distances
-                    
-                    # Apply current slider filters
-                    time_min, time_max = self._time_slider.value()
-                    dist_min, dist_max = self._dist_slider.value()
-                    
-                    time_filter = (times >= time_min) & (times <= time_max)
-                    dist_filter = (distances >= dist_min) & (distances <= dist_max)
-                    combined_filter = time_filter & dist_filter
-                    
-                    # Apply filter to get filtered arrays for display
-                    filtered_times = times[combined_filter]
-                    filtered_distances = distances[combined_filter]
-                    
-                    # Set color based on _selected_series
-                    color = series['color'] if veh_id in self._selected_series or not self._selected_series else '#a9a9a9'
-                    
-                    # Create scatter plot item with filtered data
-                    scatter_item = pg.ScatterPlotItem(
-                        x=filtered_times, 
-                        y=filtered_distances, 
-                        pen=pg.mkPen(color=color), 
-                        brush=pg.mkBrush(color=color), 
-                        size=4
-                    )
-                    scatter_item.veh_id = veh_id
-                    
-                    # Add to plot and store reference
-                    self._scatter_plot.addItem(scatter_item)
-                    series['plot_item'] = scatter_item
+            # Handle the last vehicle after loop ends
+            if prev_veh_id != -1 and current_times:
+                self._create_scatter_plot_for_vehicle(prev_veh_id, current_times, current_distances,
+                                                    time_min, time_max, dist_min, dist_max)
 
             logger.debug(f"Updated plot data for event {self._current_event_id}, lane {self._lane_combobox.currentData()}")
 
@@ -527,7 +490,7 @@ class TimeSpacePlotWidget(QWidget):
         
         # Update each series with filtered data
         for series in self._series.values():
-            if series['plot_item'] is not None and series['veh_time'] is not None and series['veh_dist_trav'] is not None:
+            if series['plot_item'] is not None and len(series['veh_time']) > 0 and len(series['veh_dist_trav']) > 0:
                 # Create numpy filter for time and distance ranges
                 time_filter = (series['veh_time'] >= time_min) & (series['veh_time'] <= time_max)
                 dist_filter = (series['veh_dist_trav'] >= dist_min) & (series['veh_dist_trav'] <= dist_max)
@@ -568,7 +531,7 @@ class TimeSpacePlotWidget(QWidget):
         pixel_tolerance_hide = 15  # Pixel distance to hide tooltip (hysteresis)
     
         for series in self._series.values():
-            if series["plot_item"]:
+            if series["plot_item"] and len(series["veh_time"]) > 0:
                 mask = (series["veh_time"] >= mx - time_tolerance) & (series["veh_time"] <= mx + time_tolerance)
                 x_filtered = series["veh_time"][mask]
                 y_filtered = series["veh_dist_trav"][mask]
