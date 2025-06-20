@@ -9,108 +9,11 @@ from PyQt6.QtGui import QKeyEvent, QMouseEvent
 import pyqtgraph as pg
 from superqt import QLabeledRangeSlider
 from .time_space_plot_settings_dialog import TimeSpacePlotSettingsDialog
+from .custom_view_box import CustomViewBox
 
 # Set up logger
 logger = logging.getLogger(__name__)
 
-class CustomViewBox(pg.ViewBox):
-    """Custom ViewBox that handles selection box drawing when Shift is held."""
-    
-    def __init__(self, parent_widget, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.parent_widget = parent_widget
-        self._selection_start = None
-        self._is_selecting = False
-        self._selection_box = None
-
-    def mousePressEvent(self, ev):
-        if ev.button() == Qt.MouseButton.LeftButton and ev.modifiers() & Qt.KeyboardModifier.ShiftModifier:
-            # Start selection
-            self._selection_start = self.mapSceneToView(ev.scenePos())
-            self._is_selecting = True
-            
-            # Create selection box
-            self._selection_box = pg.RectROI(
-                pos=[self._selection_start.x(), self._selection_start.y()],
-                size=[0, 0],
-                pen=pg.mkPen(color='red', width=2, style=Qt.PenStyle.DashLine),
-                removable=False
-            )
-            
-            # Disable handles
-            for handle in self._selection_box.getHandles():
-                handle.hide()
-            
-            # Add to parent plot
-            self.parent_widget._scatter_plot.addItem(self._selection_box)
-            ev.accept()
-            return
-        
-        # For non-shift clicks, use default behavior
-        super().mousePressEvent(ev)
-
-    def mouseMoveEvent(self, ev):
-        if self._is_selecting and self._selection_box:
-            # Update selection box
-            current_pos = self.mapSceneToView(ev.scenePos())
-            
-            x0, y0 = self._selection_start.x(), self._selection_start.y()
-            x1, y1 = current_pos.x(), current_pos.y()
-            
-            # Update selection box position and size
-            self._selection_box.setPos(min(x0, x1), min(y0, y1))
-            self._selection_box.setSize([abs(x1 - x0), abs(y1 - y0)])
-            ev.accept()
-            return
-        
-        # For non-selection moves, use default behavior
-        super().mouseMoveEvent(ev)
-
-    def mouseReleaseEvent(self, ev):
-        if ev.button() == Qt.MouseButton.LeftButton and self._is_selecting:
-            # Complete selection
-            end_pos = self.mapSceneToView(ev.scenePos())
-            
-            x0, y0 = self._selection_start.x(), self._selection_start.y()
-            x1, y1 = end_pos.x(), end_pos.y()
-            
-            # Get selection box bounds
-            x_min, x_max = min(x0, x1), max(x0, x1)
-            y_min, y_max = min(y0, y1), max(y0, y1)
-            
-            # Find vehicles with points in the selection box
-            selected_vehicles = set()
-            for series in self.parent_widget._series.values():
-                if series['veh_time'] is not None and series['veh_dist_trav'] is not None:
-                    mask = (series['veh_time'] >= x_min) & (series['veh_time'] <= x_max) & \
-                           (series['veh_dist_trav'] >= y_min) & (series['veh_dist_trav'] <= y_max)
-                    if np.any(mask):
-                        selected_vehicles.add(series['veh_id'])
-            
-            # Update selected_series
-            self.parent_widget._selected_series.update(selected_vehicles)
-            # Clear selected_series if all vehicles are selected
-            if len(self.parent_widget._selected_series) == len(self.parent_widget._series):
-                self.parent_widget._selected_series.clear()
-            
-            # Update plot colors
-            self.parent_widget._update_plot_colors()
-            
-            # Clear selection box
-            self._clear_selection_box()
-            ev.accept()
-            return
-        
-        # For non-shift releases, use default behavior
-        super().mouseReleaseEvent(ev)
-
-    def _clear_selection_box(self):
-        """Remove the selection box from the plot."""
-        if self._selection_box:
-            self.parent_widget._scatter_plot.removeItem(self._selection_box)
-            self._selection_box = None
-            self._is_selecting = False
-            self._selection_start = None
 
 class TimeSpacePlotWidget(QWidget):
     """Widget for displaying time-space trajectory plots with interactive controls.
@@ -133,9 +36,6 @@ class TimeSpacePlotWidget(QWidget):
         _last_queried_point (tuple): Tracks tooltip point to reduce queries.
         _selected_series (set): Set of selected vehicle IDs.
         _last_mouse_move_time (float): Timestamp of last mouse move for debouncing.
-        _selection_box (pg.RectROI): Selection box for group selection.
-        _is_selecting (bool): Flag indicating if selection box is active.
-        _selection_start (QPointF): Starting point of selection box in view coordinates.
         _lane_ids (list): List of available lane IDs for current event.
         _veh_ids (list): List of available vehicle IDs for current event.
         series_color (list): Static list of HTML hex colors for series.
@@ -177,9 +77,6 @@ class TimeSpacePlotWidget(QWidget):
         self._last_queried_point = None
         self._selected_series = set()
         self._last_mouse_move_time = 0.0
-        self._selection_box = None
-        self._is_selecting = False
-        self._selection_start = None
         self._lane_ids = []
         self._veh_ids = []
 
