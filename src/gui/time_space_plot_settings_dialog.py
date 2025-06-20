@@ -1,5 +1,6 @@
 import sqlite3
 import logging
+import json
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton, 
                            QLabel, QComboBox, QWidget)
 from PyQt6.QtCore import pyqtSignal, Qt, QTimer
@@ -27,7 +28,7 @@ class TimeSpacePlotSettingsDialog(QDialog):
         _record_count_label (QLabel): Label displaying current record count.
         _apply_button (QPushButton): Button to apply settings.
         _current_event_id (int): Currently selected event ID.
-        _record_limit (int): Maximum allowed records (1,000,000).
+        _record_limit (int): Maximum allowed records (100,000).
     """
     
     # Signal emitted when settings are applied
@@ -39,6 +40,7 @@ class TimeSpacePlotSettingsDialog(QDialog):
         Args:
             parent: Parent widget (typically MainWindow or TimeSpacePlotWidget).
             db_connection (sqlite3.Connection): Database connection for querying.
+            defaults (dict): Default settings to restore when reopening dialog.
         """
         super().__init__(parent)
         self._db_connection = db_connection
@@ -51,7 +53,7 @@ class TimeSpacePlotSettingsDialog(QDialog):
         self._record_count_label = None
         self._apply_button = None
         self._current_event_id = None
-        self._record_limit = 1000000
+        self._record_limit = 100000
         
         logger.debug("TimeSpacePlotSettingsDialog initialized")
         
@@ -81,14 +83,14 @@ class TimeSpacePlotSettingsDialog(QDialog):
         top_layout.addStretch()
         
         # Lane count
-        top_layout.addWidget(QLabel("Lane Count:"))
+        top_layout.addWidget(QLabel("Lanes:"))
         self._lane_count_label = QLabel("0")
         top_layout.addWidget(self._lane_count_label)
         
         top_layout.addStretch()
         
         # Vehicle count
-        top_layout.addWidget(QLabel("Veh Count:"))
+        top_layout.addWidget(QLabel("Vehicles:"))
         self._veh_count_label = QLabel("0")
         top_layout.addWidget(self._veh_count_label)
         
@@ -163,14 +165,14 @@ class TimeSpacePlotSettingsDialog(QDialog):
             self.move(x, y)
             
     def _populate_events(self):
-        """Populate the event combobox with distinct event IDs from the database."""
+        """Populate the event combobox with event IDs from the ranges table."""
         if not self._db_connection:
             logger.warning("No database connection available")
             return
             
         try:
             cursor = self._db_connection.cursor()
-            cursor.execute("SELECT DISTINCT event_id FROM events ORDER BY event_id")
+            cursor.execute("SELECT event_id FROM ranges ORDER BY event_id")
             events = cursor.fetchall()
             
             self._event_combobox.clear()
@@ -179,18 +181,20 @@ class TimeSpacePlotSettingsDialog(QDialog):
                 self._event_combobox.addItem(f"Event {event_id:3d}", event_id)
                 
             if events:
-                if self._defaults:
+                # Set default selection
+                if self._defaults and "event_id" in self._defaults:
                     event_id = self._defaults["event_id"]
                     for i in range(self._event_combobox.count()):
                         if self._event_combobox.itemData(i) == event_id:
                             self._event_combobox.setCurrentIndex(i)
-
+                            break
                     self._current_event_id = event_id
                 else:
                     self._current_event_id = events[0][0]
-                self._update_event_data()
-                self._defaults = None # ignore for new dialog changes
-
+                    
+                # Use QTimer to update event data after UI is fully constructed
+                QTimer.singleShot(0, self._update_event_data)
+                
         except sqlite3.Error as e:
             logger.error(f"Error populating events: {e}")
             
@@ -211,44 +215,44 @@ class TimeSpacePlotSettingsDialog(QDialog):
             
         try:
             cursor = self._db_connection.cursor()
-            
-            # Update lane count
-            cursor.execute("""
-                SELECT COUNT(DISTINCT lane_id) 
-                FROM events 
-                WHERE event_id = ?
-            """, (self._current_event_id,))
-            lane_count = cursor.fetchone()[0]
-            self._lane_count_label.setText(str(lane_count))
-            
-            # Update vehicle count
-            cursor.execute("""
-                SELECT COUNT(DISTINCT veh_id) 
-                FROM events 
-                WHERE event_id = ?
-            """, (self._current_event_id,))
-            veh_count = cursor.fetchone()[0]
-            self._veh_count_label.setText(str(veh_count))
-            
-            # Update slider ranges and initial values
-            cursor.execute("""
-                SELECT MIN(veh_time), MAX(veh_time), MIN(veh_dist_trav), MAX(veh_dist_trav)
-                FROM events 
-                WHERE event_id = ?
-            """, (self._current_event_id,))
+            cursor.execute("SELECT summary_json FROM ranges WHERE event_id = ?", (self._current_event_id,))
             result = cursor.fetchone()
             
-            if result and all(x is not None for x in result):
-                time_min, time_max, dist_min, dist_max = result
+            if not result:
+                logger.warning(f"No summary data found for event {self._current_event_id}")
+                return
                 
-                # Set distance and time slider ranges
+            try:
+                summary = json.loads(result[0])
+            except json.JSONDecodeError as e:
+                logger.error(f"Error parsing summary JSON for event {self._current_event_id}: {e}")
+                return
+            
+            # Update lane count from summary
+            lane_count = len(summary.get("lane_id", []))
+            self._lane_count_label.setText(str(lane_count))
+            
+            # Update vehicle count from summary
+            veh_count = len(summary.get("veh_id", []))
+            self._veh_count_label.setText(str(veh_count))
+            
+            # Update slider ranges from summary
+            time_range = summary.get("veh_time", [0, 0])
+            dist_range = summary.get("veh_dist_trav", [0, 0])
+            
+            if len(time_range) >= 2 and len(dist_range) >= 2:
+                time_min, time_max = time_range[0], time_range[1]
+                dist_min, dist_max = dist_range[0], dist_range[1]
+                
+                # Set slider ranges
                 self._dist_slider.setRange(dist_min, dist_max)
                 self._time_slider.setRange(time_min, time_max)
                 
-                # Set distance and time slider values
+                # Set slider values
                 if self._defaults:
                     self._dist_slider.setValue(self._defaults["dist_range"])
                     self._time_slider.setValue(self._defaults["time_range"])
+                    self._defaults = None  # Clear defaults after first use
                 else:
                     self._dist_slider.setValue([dist_min, dist_max])
                     self._time_slider.setValue([time_min, time_max])
@@ -256,7 +260,7 @@ class TimeSpacePlotSettingsDialog(QDialog):
                 # Update record count
                 self._update_record_count()
             else:
-                logger.warning(f"No valid data found for event {self._current_event_id}")
+                logger.warning(f"Invalid time or distance range in summary for event {self._current_event_id}")
                 
         except sqlite3.Error as e:
             logger.error(f"Error updating event data: {e}")

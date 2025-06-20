@@ -1,6 +1,7 @@
 import json
 import sqlite3
 import logging
+import math
 from datetime import datetime
 from pathlib import Path
 from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QProgressBar, QTextEdit, QFileDialog, QMessageBox
@@ -102,6 +103,15 @@ class _ImportWorkerThread(QThread):
                     PRIMARY KEY (event_id, veh_id, veh_time)
                 ) WITHOUT ROWID;
             """)
+            
+            # Create ranges table for event summaries
+            self.db_connection.execute("""
+                CREATE TABLE ranges (
+                    event_id INTEGER PRIMARY KEY,
+                    summary_json TEXT NOT NULL
+                );
+            """)
+            
             self.db_connection.commit()
             logger.debug("Database setup completed")
 
@@ -175,12 +185,80 @@ class _ImportWorkerThread(QThread):
                         if (j + 1) % batch_size == 0 or j == len(points) - 1:
                             self.db_connection.commit()
                             processed_records += min(batch_size, len(points) - j)
-                            if total_records > 0:
-                                progress = int((i / len(pairs)) * 100)
-                                self.progress_signal.emit(progress)
-                                logger.debug(f"Processed {i}/{len(pairs)} vehicle pairs")
+                    
+                    # Update progress after completing each vehicle pair
+                    if (i + 1) % 100 == 0 or i == len(pairs) - 1:
+                        progress = int(((i + 1) / len(pairs)) * 100)
+                        self.progress_signal.emit(progress)
+                        logger.debug(f"Processed {i + 1}/{len(pairs)} vehicle pairs")
 
                 if not self.interrupt_flag:
+                    logger.debug("Creating event summaries")
+                    self.log_signal.emit("Creating event summaries", True)
+                    
+                    # Get distinct event IDs
+                    cursor.execute("SELECT DISTINCT event_id FROM events ORDER BY event_id")
+                    event_ids = [row[0] for row in cursor.fetchall()]
+                    
+                    logger.debug(f"Creating summaries for {len(event_ids)} events")
+                    self.log_signal.emit(f"Creating summaries for {len(event_ids)} events", True)
+                    
+                    for i, event_id in enumerate(event_ids):
+                        if self.interrupt_flag:
+                            logger.debug("Interrupt flag set during event summary creation")
+                            break
+                        
+                        # Get time and distance ranges
+                        cursor.execute("""
+                            SELECT MIN(veh_time), MAX(veh_time), MIN(veh_dist_trav), MAX(veh_dist_trav)
+                            FROM events
+                            WHERE event_id = ?
+                        """, (event_id,))
+                        time_min, time_max, dist_min, dist_max = cursor.fetchone()
+                        
+                        # Get unique lane IDs
+                        cursor.execute("""
+                            SELECT DISTINCT lane_id FROM events
+                            WHERE event_id = ?
+                            ORDER BY lane_id
+                        """, (event_id,))
+                        lane_ids = [row[0] for row in cursor.fetchall() if row[0] is not None]
+                        
+                        # Get unique vehicle IDs
+                        cursor.execute("""
+                            SELECT DISTINCT veh_id FROM events
+                            WHERE event_id = ?
+                            ORDER BY veh_id
+                        """, (event_id,))
+                        veh_ids = [row[0] for row in cursor.fetchall()]
+                        
+                        # Create summary JSON
+                        summary = {
+                            "veh_time": [math.floor(time_min) if time_min is not None else 0, 
+                                        math.ceil(time_max) if time_max is not None else 0],
+                            "veh_dist_trav": [math.floor(dist_min) if dist_min is not None else 0, 
+                                            math.ceil(dist_max) if dist_max is not None else 0],
+                            "lane_id": lane_ids,
+                            "veh_id": veh_ids
+                        }
+                        
+                        # Insert summary into ranges table
+                        cursor.execute("""
+                            INSERT INTO ranges (event_id, summary_json)
+                            VALUES (?, ?)
+                        """, (event_id, json.dumps(summary)))
+                        
+                        # Update progress bar based on event processing
+                        if len(event_ids) > 0:
+                            progress = int(((i + 1) / len(event_ids)) * 100)
+                            self.progress_signal.emit(progress)
+                            logger.debug(f"Processed event summary {i + 1}/{len(event_ids)}")
+                        
+                        # Check for interrupt after each event
+                        if self.interrupt_flag:
+                            logger.debug("Interrupt flag set after event summary processing")
+                            break
+                    
                     logger.debug("Committing final database changes")
                     self.db_connection.commit()
                     self.log_signal.emit(f"{self.input_path} successfully imported", True)

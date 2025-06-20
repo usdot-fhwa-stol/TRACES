@@ -29,7 +29,7 @@ class AboutDialog(QDialog):
         super().__init__(parent)
         self._is_splash = is_splash
         self._countdown_timer = None
-        self._countdown_value = 6
+        self._countdown_value = 5
         self._close_button = None
         
         self._setup_ui()

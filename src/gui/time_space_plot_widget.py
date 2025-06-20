@@ -327,11 +327,11 @@ class TimeSpacePlotWidget(QWidget):
             self._series = {}
             
             # Create series dictionaries for each vehicle
-            for (veh_id,) in vehicle_ids:
+            for index, (veh_id,) in enumerate(vehicle_ids):
                 series_dict = {
                     'veh_id': veh_id,
-                    'color': self.series_color[veh_id % len(self.series_color)],
-                    'text_color': self.text_color[veh_id % len(self.text_color)],
+                    'color': self.series_color[index % len(self.series_color)],
+                    'text_color': self.text_color[index % len(self.text_color)],
                     'plot_item': None,
                     'veh_time': None,
                     'veh_dist_trav': None
