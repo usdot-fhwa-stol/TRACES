@@ -225,8 +225,8 @@ class TimeSpacePlotWidget(QWidget):
                 'color': self.series_color[index % len(self.series_color)],
                 'text_color': self.text_color[index % len(self.text_color)],
                 'plot_item': None,
-                'veh_time': np.array([], dtype=np.float64),
-                'veh_dist_trav': np.array([], dtype=np.float64)
+                'veh_time': np.array([], dtype=np.float32),
+                'veh_dist_trav': np.array([], dtype=np.float32)
             }
             self._series[veh_id] = series_dict
 
@@ -274,8 +274,8 @@ class TimeSpacePlotWidget(QWidget):
             return
             
         # Convert to numpy arrays
-        times = np.array(times_list, dtype=np.float64)
-        distances = np.array(distances_list, dtype=np.float64)
+        times = np.array(times_list, dtype=np.float32)
+        distances = np.array(distances_list, dtype=np.float32)
         
         # Store arrays in series
         series = self._series[veh_id]
@@ -323,8 +323,8 @@ class TimeSpacePlotWidget(QWidget):
             # Reset arrays for each series but keep the series structure
             for series in self._series.values():
                 series['plot_item'] = None
-                series['veh_time'] = np.array([], dtype=np.float64)
-                series['veh_dist_trav'] = np.array([], dtype=np.float64)
+                series['veh_time'] = np.array([], dtype=np.float32)
+                series['veh_dist_trav'] = np.array([], dtype=np.float32)
             
             # Get current slider ranges for filtering
             time_min, time_max = self._time_slider.value()
