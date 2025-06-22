@@ -225,8 +225,8 @@ class TimeSpacePlotWidget(QWidget):
                 'color': self.series_color[index % len(self.series_color)],
                 'text_color': self.text_color[index % len(self.text_color)],
                 'plot_item': None,
-                'veh_time': np.array([], dtype=np.float32),
-                'veh_dist_trav': np.array([], dtype=np.float32)
+                'veh_time': np.array([], dtype=np.float64),
+                'veh_dist_trav': np.array([], dtype=np.float64)
             }
             self._series[veh_id] = series_dict
 
@@ -274,8 +274,8 @@ class TimeSpacePlotWidget(QWidget):
             return
             
         # Convert to numpy arrays
-        times = np.array(times_list, dtype=np.float32)
-        distances = np.array(distances_list, dtype=np.float32)
+        times = np.array(times_list, dtype=np.float64)
+        distances = np.array(distances_list, dtype=np.float64)
         
         # Store arrays in series
         series = self._series[veh_id]
@@ -323,8 +323,8 @@ class TimeSpacePlotWidget(QWidget):
             # Reset arrays for each series but keep the series structure
             for series in self._series.values():
                 series['plot_item'] = None
-                series['veh_time'] = np.array([], dtype=np.float32)
-                series['veh_dist_trav'] = np.array([], dtype=np.float32)
+                series['veh_time'] = np.array([], dtype=np.float64)
+                series['veh_dist_trav'] = np.array([], dtype=np.float64)
             
             # Get current slider ranges for filtering
             time_min, time_max = self._time_slider.value()
@@ -424,8 +424,8 @@ class TimeSpacePlotWidget(QWidget):
         min_dist = float('inf')
         closest_data = None
         time_tolerance = 0.05  # Time tolerance in seconds
-        pixel_tolerance_show = 10  # Pixel distance to show tooltip
-        pixel_tolerance_hide = 15  # Pixel distance to hide tooltip (hysteresis)
+        pixel_tolerance_show = 5  # Pixel distance to show tooltip
+        pixel_tolerance_hide = 10  # Pixel distance to hide tooltip (hysteresis)
     
         for series in self._series.values():
             if series["plot_item"] and len(series["veh_time"]) > 0:
@@ -470,7 +470,7 @@ class TimeSpacePlotWidget(QWidget):
                         f"Time: {veh_time:.2f} s\n"
                         f"Distance: {veh_dist_trav:.2f} m\n"
                         f"Speed: {veh_speed} m/s\n"
-                        f"Acceleration: {veh_accel} m/s^2\n"
+                        f"Acceleration: {veh_accel} m/s²\n"
                         f"Automation: {veh_auto}\n"
                         f"Length: {veh_length} m"
                     )
@@ -525,7 +525,7 @@ class TimeSpacePlotWidget(QWidget):
         min_dist = float('inf')
         closest_veh_id = None
         time_tolerance = 0.05  # Time tolerance in seconds
-        pixel_tolerance = 10   # Pixel distance to register click
+        pixel_tolerance = 5   # Pixel distance to register click
         
         for series in self._series.values():
             if series["plot_item"]:

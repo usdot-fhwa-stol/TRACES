@@ -10,7 +10,7 @@ This module provides a CustomViewBox class that extends pyqtgraph's ViewBox to a
 import logging
 import numpy as np
 from PyQt6.QtWidgets import QMenu, QDialog, QVBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView
-from PyQt6.QtCore import Qt, QPointF, QTimer
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QAction
 import pyqtgraph as pg
 
@@ -53,51 +53,10 @@ class CustomViewBox(pg.ViewBox):
         # Context menu registry - list of dictionaries with keys: filter, label, callback
         # Filter string contains combinations of: A (all), S (selected), O (series)
         self._context_menu_registry = [
-            {
-                'filter': 'A',
-                'label': 'Select All Vehicles',
-                'callback': self._select_all_vehicles
-            },
-            {
-                'filter': 'AS',
-                'label': 'Clear Selection',
-                'callback': self._clear_selection
-            },
-            {
-                'filter': 'S',
-                'label': 'Invert Selection',
-                'callback': self._invert_selection
-            },
-            {
-                'filter': 'S',
-                'label': 'Export Selected Data',
-                'callback': self._export_selected_data
-            },
-            {
-                'filter': 'O',
-                'label': 'Select This Vehicle Only',
-                'callback': self._select_vehicle_only
-            },
-            {
-                'filter': 'O',
-                'label': 'Toggle Vehicle Selection',
-                'callback': self._toggle_vehicle_selection
-            },
-            {
-                'filter': 'O',
-                'label': 'Hide This Vehicle',
-                'callback': self._hide_vehicle
-            },
-            {
-                'filter': 'ASO',
-                'label': 'Statistics',
-                'callback': self._generate_statistics
-            },
-            {
-                'filter': 'ASO',
-                'label': 'Reset View',
-                'callback': self._reset_view
-            }
+            {'filter': 'SO', 'label': 'Speed-Time Diagram', 'callback': self._do_nothing},
+            {'filter': 'SO', 'label': 'Accel-Time Diagram', 'callback': self._do_nothing},
+            {'filter': 'ASO', 'label': 'Export...', 'callback': self._do_nothing},
+            {'filter': 'ASO', 'label': 'Statistics', 'callback': self._generate_statistics}
         ]
 
     def mousePressEvent(self, ev):
@@ -133,23 +92,25 @@ class CustomViewBox(pg.ViewBox):
 
     def mouseMoveEvent(self, ev):
         """Handle mouse move events for selection box resizing.
-        
+
         Args:
             ev: Mouse event containing position information
         """
         if self._is_selecting and self._selection_box:
             # Update selection box
             current_pos = self.mapSceneToView(ev.scenePos())
-            
+
             x0, y0 = self._selection_start.x(), self._selection_start.y()
             x1, y1 = current_pos.x(), current_pos.y()
-            
+
             # Update selection box position and size
             self._selection_box.setPos(min(x0, x1), min(y0, y1))
             self._selection_box.setSize([abs(x1 - x0), abs(y1 - y0)])
             ev.accept()
+            # Still call super to ensure proper event propagation
+            super().mouseMoveEvent(ev)
             return
-        
+
         # For non-selection moves, use default behavior
         super().mouseMoveEvent(ev)
 
@@ -303,6 +264,9 @@ class CustomViewBox(pg.ViewBox):
             self._selection_start = None
 
     # Context menu callback methods
+    def _do_nothing(self):
+        pass
+
     def _select_all_vehicles(self):
         """Select all vehicles."""
         self.parent_widget._selected_series = set(self.parent_widget._series.keys())
@@ -326,8 +290,8 @@ class CustomViewBox(pg.ViewBox):
         self.parent_widget._update_plot_colors()
         logger.debug("Inverted vehicle selection")
     
-    def _export_selected_data(self):
-        """Export data for selected vehicles."""
+    def _export_data(self):
+        """Export data for vehicles."""
         if not self.parent_widget._selected_series:
             logger.warning("No vehicles selected for export")
             return
@@ -466,7 +430,7 @@ class StatisticsDialog(QDialog):
         self.table.setHorizontalHeaderLabels([
             'veh_id', 
             'min m/s', 'med m/s', 'max m/s', 'std dev',
-            'min m/s^2', 'med m/s^2', 'max m/s^2', 'std dev',
+            'min m/s²', 'med m/s²', 'max m/s²', 'std dev',
         ])
         
         # Configure table appearance
