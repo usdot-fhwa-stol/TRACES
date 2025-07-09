@@ -113,7 +113,7 @@ class TimeSpacePlotSettingsDialog(QDialog):
         self._dist_slider.sliderReleased.connect(self._on_dist_slider_released)
         dist_layout.addWidget(self._dist_slider)
         
-        dist_label = QLabel("Dist (m)")
+        dist_label = QLabel("Distance (m)")
         dist_label.setStyleSheet("font-weight: bold;")
         dist_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         dist_layout.addWidget(dist_label)
