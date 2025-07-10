@@ -6,7 +6,7 @@ from utils import get_resource_path
 class AboutDialog(QDialog):
     """About dialog that displays HTML content and can function as a splash screen.
     
-    The dialog reads content from trajectory_tools.html and displays it in a text browser.
+    The dialog reads content from about.html and displays it in a text browser.
     When used as a splash screen, it shows a countdown timer and auto-closes after 5 seconds.
     
     Attributes:
@@ -67,9 +67,9 @@ class AboutDialog(QDialog):
         layout.addLayout(button_layout)
     
     def _load_content(self):
-        """Load HTML content from trajectory_tools.html file."""
+        """Load HTML content from about.html file."""
         # Use get_resource_path to handle both development and PyInstaller environments
-        html_path = Path(get_resource_path("trajectory_tools.html"))
+        html_path = Path(get_resource_path("about.html"))
         
         if html_path.exists():
             try:

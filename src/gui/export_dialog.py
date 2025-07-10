@@ -1,12 +1,13 @@
 import csv
 import sqlite3
 import logging
+import json
 from pathlib import Path
 from queue import Queue, Empty
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton, 
                            QProgressBar, QLabel, QCheckBox, QComboBox, 
                            QFileDialog, QMessageBox, QGridLayout, QWidget)
-from PyQt6.QtCore import QThread, pyqtSignal, QTimer
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -142,6 +143,9 @@ class ExportDialog(QDialog):
         
         # Use QTimer to center dialog after it's been properly sized
         QTimer.singleShot(0, self._center_dialog)
+        if not self.is_export_all_mode:
+            # Use QTimer to update event data after UI is fully constructed
+            QTimer.singleShot(0, self._update_event_data)
 
     def _setup_ui(self):
         """Set up the dialog UI based on the mode."""
@@ -218,11 +222,15 @@ class ExportDialog(QDialog):
             checkbox_layout.addWidget(checkbox, row, col)
             
             col += 1
-            if col >= 3:  # Wrap to next row after 3 columns
+            if col >= 5:  # Wrap to next row
                 col = 0
                 row += 1
         
         layout.addWidget(checkbox_widget)
+
+        self._event_name = QLabel() # centered label to show event name
+        self._event_name.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        layout.addWidget(self._event_name)
 
     def _setup_button_controls(self, layout: QVBoxLayout):
         """Set up the button control area.
@@ -236,6 +244,7 @@ class ExportDialog(QDialog):
 
         if not self.is_export_all_mode:
             self._event_combobox = QComboBox()
+            self._event_combobox.currentIndexChanged.connect(self._on_event_changed)
             self._populate_event_combobox()
             button_layout.addWidget(self._event_combobox)
             button_layout.addStretch()
@@ -299,7 +308,7 @@ class ExportDialog(QDialog):
         """Populate the event combobox with distinct event IDs."""
         try:
             cursor = self.db_connection.cursor()
-            cursor.execute("SELECT DISTINCT event_id FROM events ORDER BY event_id")
+            cursor.execute("SELECT event_id FROM ranges ORDER BY event_id")
             event_ids = [row[0] for row in cursor.fetchall()]
             
             for event_id in event_ids:
@@ -307,6 +316,37 @@ class ExportDialog(QDialog):
                 
         except Exception as e:
             logger.error(f"Error populating event combobox: {e}")
+
+    def _on_event_changed(self, index: int):
+        """Handle event combobox selection change.
+        
+        Args:
+            index (int): Selected combobox index.
+        """
+        self._update_event_data()
+            
+    def _update_event_data(self):
+        """Update the event name label."""
+        try:
+            cursor = self.db_connection.cursor()
+            cursor.execute("SELECT summary_json FROM ranges WHERE event_id = ?", (self._get_selected_event_id(),))
+            result = cursor.fetchone()
+
+            if not result:
+                logger.warning(f"No summary data found for event {self._get_selected_event_id()}")
+                return
+                
+            try:
+                summary = json.loads(result[0])
+            except json.JSONDecodeError as e:
+                logger.error(f"Error parsing summary JSON for event {self._get_selected_event_id()}: {e}")
+                return
+            
+            # Update the event name label
+            self._event_name.setText(summary.get("event_name", f"Event {self._get_selected_event_id()}"))
+
+        except sqlite3.Error as e:
+            logger.error(f"Error updating event data: {e}")
 
     def _get_selected_columns(self) -> list:
         """Get the list of selected column names.

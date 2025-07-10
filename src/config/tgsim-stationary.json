@@ -9,8 +9,9 @@
     "veh_speed": {"src_col": 5},
     "veh_accel": {"src_col": 6},
     "veh_length": {"src_col": 7},
-    "veh_automation": {"func":"tgsim_automated", "parms": [10]},
+    "veh_automation": {"func": "tgsim_automated", "parms": [10]},
     "veh_width": {"src_col": 8},
-    "event_id": {"src_col": 11}
+    "event_id": {"src_col": 11},
+    "event_name": {"func": "event_name", "parms": [11, "run index: "]}
   }
 }

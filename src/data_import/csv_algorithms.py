@@ -142,6 +142,33 @@ class CsvAlgorithms:
         except (IndexError, TypeError):
             return 0
 
+    def event_name(self, row: List[str], col_def: Dict[str, Any]) -> int:
+        """Build an event name from concatenated unique strings and optional label.
+
+        Args:
+            row (List[str]): CSV row data.
+            col_def (Dict[str, Any]): Column definition with parms.
+
+        Returns:
+            str: Event name or None.
+        """
+        parms = col_def.get("parms", [])
+        if len(parms) == 0:
+            return None
+        
+        label = ""  # check for last element label
+        if isinstance(parms[-1], str):
+            label = parms[-1]
+            parms = parms[:-1]
+
+        try:
+            key = " ".join(str(row[i]) for i in parms if i < len(row) and row[i])
+            if not key:  # Return None if key is empty
+                return None
+            return label + key
+        except (IndexError, TypeError):
+            return None
+
     def tgsim_automated(self, row: List[str], col_def: Dict[str, Any]) -> int:
         """Check if the source column value equals 'yes' (case-insensitive).
 

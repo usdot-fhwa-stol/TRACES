@@ -3,7 +3,6 @@ import sqlite3
 import io
 import os
 from typing import Dict, Any, Callable
-from pathlib import Path
 from .base_process import BaseProcess
 from .csv_algorithms import CsvAlgorithms
 
@@ -295,7 +294,7 @@ class CsvProcess(BaseProcess):
             "event_id", "veh_id", "veh_time", "lane_id", "x_map_loc", "y_map_loc",
             "x_frenet_loc", "y_frenet_loc", "x_map_origin", "y_map_origin", "veh_lat", "veh_lon",
             "veh_speed", "veh_accel", "veh_length", "veh_width", "veh_automation",
-            "osm_way_id", "osm_speed_limit", "osm_traffic_control", "preceding_veh_id", "veh_dist_trav"
+            "osm_way_id", "osm_speed_limit", "osm_traffic_control", "preceding_veh_id", "veh_dist_trav", "event_name"
         ]
         insert_query = f"INSERT OR IGNORE INTO events ({', '.join(columns)}) VALUES ({', '.join(['?'] * len(columns))})"
         default_record = {col: None for col in columns}

@@ -19,6 +19,7 @@
     "veh_accel": {"src_col": 12, "units": "m/s^2"},
     "veh_length": {"src_col": 8, "units": "m"},
     "veh_automation": {"type": "int", "parms": ["1"]},
-    "veh_width": {"src_col": 9, "units": "m"}
+    "veh_width": {"src_col": 9, "units": "m"},
+    "event_name": {"func": "event_name", "parms": [54, 55, "OD: "]}
   }
 }

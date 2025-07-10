@@ -100,6 +100,7 @@ class _ImportWorkerThread(QThread):
                     osm_traffic_control INTEGER,
                     preceding_veh_id INTEGER,
                     veh_dist_trav REAL,
+                    event_name TEXT,
                     PRIMARY KEY (event_id, veh_id, veh_time)
                 ) WITHOUT ROWID;
             """)
@@ -208,6 +209,13 @@ class _ImportWorkerThread(QThread):
                             logger.debug("Interrupt flag set during event summary creation")
                             break
                         
+                        # Get event name
+                        cursor.execute("""
+                            SELECT DISTINCT event_name FROM events
+                            WHERE event_id = ?
+                        """, (event_id,))
+                        event_name, = cursor.fetchone()
+                        
                         # Get time and distance ranges
                         cursor.execute("""
                             SELECT MIN(veh_time), MAX(veh_time), MIN(veh_dist_trav), MAX(veh_dist_trav)
@@ -234,6 +242,7 @@ class _ImportWorkerThread(QThread):
                         
                         # Create summary JSON
                         summary = {
+                            "event_name": event_name,
                             "veh_time": [math.floor(time_min) if time_min is not None else 0, 
                                         math.ceil(time_max) if time_max is not None else 0],
                             "veh_dist_trav": [math.floor(dist_min) if dist_min is not None else 0, 

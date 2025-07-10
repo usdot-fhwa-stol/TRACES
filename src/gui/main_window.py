@@ -242,7 +242,8 @@ class MainWindow(QMainWindow):
                 "osm_speed_limit": "INTEGER",
                 "osm_traffic_control": "INTEGER",
                 "preceding_veh_id": "INTEGER",
-                "veh_dist_trav": "REAL"
+                "veh_dist_trav": "REAL",
+                "event_name": "TEXT"
             }
 
             cursor.execute("PRAGMA table_info(events)")
