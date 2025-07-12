@@ -4,8 +4,8 @@ import numpy as np
 import sqlite3
 from PyQt6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QPushButton, 
                            QLabel, QComboBox, QDialog)
-from PyQt6.QtCore import Qt, QPointF, QEvent, QTimer
-from PyQt6.QtGui import QKeyEvent, QMouseEvent
+from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QKeyEvent
 import pyqtgraph as pg
 from superqt import QLabeledRangeSlider
 from .time_space_plot_settings_dialog import TimeSpacePlotSettingsDialog
@@ -172,7 +172,7 @@ class TimeSpacePlotWidget(QWidget):
             logger.debug("Settings dialog cancelled")
             
     def _apply_settings(self, event_id: int, time_min: float, time_max: float, 
-                       dist_min: float, dist_max: float, lane_ids: list, veh_ids: list):
+                       dist_min: float, dist_max: float, event_summary: dict):
         """Apply settings from the settings dialog.
         
         Args:
@@ -181,20 +181,21 @@ class TimeSpacePlotWidget(QWidget):
             time_max (float): Maximum time value.
             dist_min (float): Minimum distance value.
             dist_max (float): Maximum distance value.
-            lane_ids (list): List of available lane IDs for this event.
-            veh_ids (list): List of available vehicle IDs for this event.
+            event_summary (dict): dictonary object of summary data for event
         """
         logger.debug(f"Applying settings: event_id={event_id}, "
-                    f"time=[{time_min}, {time_max}], dist=[{dist_min}, {dist_max}], "
-                    f"lanes={len(lane_ids)}, vehicles={len(veh_ids)}")
+                    f"time=[{time_min}, {time_max}], dist=[{dist_min}, {dist_max}]")
         
         self._current_event_id = event_id
         self._dist_range = (dist_min, dist_max)
         self._time_range = (time_min, time_max)
-        self._lane_ids = lane_ids
-        self._veh_ids = veh_ids
+        self._lane_ids = event_summary.get('lane_id', [])
+        self._veh_ids = event_summary.get('veh_id', [])
         self._selected_series.clear()
         self._clear_selection_box()
+
+        # Update plot title
+        self._scatter_plot.setTitle(event_summary.get('event_name', f"Event {event_id}"))
 
         # Update event button label
         self._event_button.setText(f"Event {event_id:3d}")

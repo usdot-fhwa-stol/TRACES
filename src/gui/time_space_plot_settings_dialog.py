@@ -29,13 +29,13 @@ class TimeSpacePlotSettingsDialog(QDialog):
         _apply_button (QPushButton): Button to apply settings.
         _current_event_id (int): Currently selected event ID.
         _record_limit (int): Maximum allowed records (100,000).
-        _current_lane_ids (list): List of lane IDs for current event.
-        _current_veh_ids (list): List of vehicle IDs for current event.
+        _current_event_summary (dict): dictonary of rollups for current event.
     """
     
-    # Signal emitted when settings are applied - now includes lane_ids and veh_ids
-    settings_applied = pyqtSignal(int, float, float, float, float, list, list)  # event_id, time_min, time_max, dist_min, dist_max, lane_ids, veh_ids
-    
+    # Signal emitted when settings are applied
+    # event_id, time_min, time_max, dist_min, dist_max, event_summary
+    settings_applied = pyqtSignal(int, float, float, float, float, dict)
+
     def __init__(self, parent=None, db_connection: sqlite3.Connection = None, defaults: dict = None):
         """Initialize the TimeSpacePlotSettingsDialog.
         
@@ -56,8 +56,7 @@ class TimeSpacePlotSettingsDialog(QDialog):
         self._apply_button = None
         self._current_event_id = None
         self._record_limit = 50
-        self._current_lane_ids = []
-        self._current_veh_ids = []
+        self._current_event_summary = {}
         
         logger.debug("TimeSpacePlotSettingsDialog initialized")
         
@@ -78,7 +77,7 @@ class TimeSpacePlotSettingsDialog(QDialog):
         self._event_name.setAlignment(Qt.AlignmentFlag.AlignCenter)
         # Calculate the height using font metrics
         self._event_name.setWordWrap(True)
-        self._event_name.setMinimumHeight(self._event_name.fontMetrics().height() * 5 / 2)
+        self._event_name.setMinimumHeight(int(self._event_name.fontMetrics().height() * 2.5))
         layout.addWidget(self._event_name)
 
         # Top control set with centered elements
@@ -239,20 +238,17 @@ class TimeSpacePlotSettingsDialog(QDialog):
                 logger.error(f"Error parsing summary JSON for event {self._current_event_id}: {e}")
                 return
             
-            # Set event name
+            # Persist summary and set event name
+            self._current_event_summary = summary
             self._event_name.setText(summary.get("event_name", ""))
 
-            # Extract and store lane_ids and veh_ids from summary
-            self._current_lane_ids = summary.get("lane_id", [])
-            self._current_veh_ids = summary.get("veh_id", [])
-
             # Update lane list from summary
-            lanes = ', '.join(map(str, self._current_lane_ids))
-            self._lane_count_label.setText(lanes)
+            lane_ids = summary.get("lane_id", [])
+            self._lane_count_label.setText(', '.join(map(str, lane_ids)))
 
             # Update vehicle count from summary
-            veh_count = len(self._current_veh_ids)
-            self._veh_count_label.setText(str(veh_count))
+            veh_ids = summary.get("veh_id", [])
+            self._veh_count_label.setText(str(len(veh_ids)))
             
             # Update slider ranges from summary
             time_range = summary.get("veh_time", [0, 0])
@@ -385,10 +381,8 @@ class TimeSpacePlotSettingsDialog(QDialog):
             dist_min, dist_max = self._dist_slider.value()
             
             logger.debug(f"Applying settings: event_id={self._current_event_id}, "
-                        f"time=[{time_min}, {time_max}], dist=[{dist_min}, {dist_max}], "
-                        f"lanes={len(self._current_lane_ids)}, vehicles={len(self._current_veh_ids)}")
-            
+                f"time=[{time_min}, {time_max}], dist=[{dist_min}, {dist_max}]")
             # Emit signal with lane_ids and veh_ids included
-            self.settings_applied.emit(self._current_event_id, time_min, time_max, dist_min, dist_max, 
-                                     self._current_lane_ids, self._current_veh_ids)
+            self.settings_applied.emit(self._current_event_id, 
+                time_min, time_max, dist_min, dist_max, self._current_event_summary)
             self.accept()

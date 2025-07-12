@@ -232,7 +232,7 @@ class ExportDialog(QDialog):
         self._event_name.setAlignment(Qt.AlignmentFlag.AlignCenter)
         # Calculate the height using font metrics
         self._event_name.setWordWrap(True)
-        self._event_name.setMinimumHeight(self._event_name.fontMetrics().height() * 5 / 2)
+        self._event_name.setMinimumHeight(int(self._event_name.fontMetrics().height() * 2.5))
         layout.addWidget(self._event_name)
 
     def _setup_button_controls(self, layout: QVBoxLayout):
