@@ -55,7 +55,7 @@ class TimeSpacePlotSettingsDialog(QDialog):
         self._record_count_label = None
         self._apply_button = None
         self._current_event_id = None
-        self._record_limit = 100000
+        self._record_limit = 50
         self._current_lane_ids = []
         self._current_veh_ids = []
         
@@ -74,6 +74,13 @@ class TimeSpacePlotSettingsDialog(QDialog):
         # Create main layout
         layout = QVBoxLayout(self)
         
+        self._event_name = QLabel() # centered label to show event name
+        self._event_name.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # Calculate the height using font metrics
+        self._event_name.setWordWrap(True)
+        self._event_name.setMinimumHeight(self._event_name.fontMetrics().height() * 5 / 2)
+        layout.addWidget(self._event_name)
+
         # Top control set with centered elements
         top_layout = QHBoxLayout()
         
@@ -94,31 +101,13 @@ class TimeSpacePlotSettingsDialog(QDialog):
         top_layout.addStretch()
         
         # Vehicle count
-        top_layout.addWidget(QLabel("Vehicles:"))
+        top_layout.addWidget(QLabel("Total Vehicles:"))
         self._veh_count_label = QLabel("0")
         top_layout.addWidget(self._veh_count_label)
         
         top_layout.addStretch()  # Right spacer
         
         layout.addLayout(top_layout)
-        
-        # Distance slider section with widget container
-        dist_widget = QWidget()
-        dist_layout = QVBoxLayout(dist_widget)
-        dist_layout.setSpacing(0)
-
-        self._dist_slider = QLabeledRangeSlider()
-        self._dist_slider.setOrientation(Qt.Orientation.Horizontal)
-        # Connect to mouse release event for interrelated operations
-        self._dist_slider.sliderReleased.connect(self._on_dist_slider_released)
-        dist_layout.addWidget(self._dist_slider)
-        
-        dist_label = QLabel("Distance (m)")
-        dist_label.setStyleSheet("font-weight: bold;")
-        dist_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        dist_layout.addWidget(dist_label)
-        
-        layout.addWidget(dist_widget)
         
         # Time slider section with widget container
         time_widget = QWidget()
@@ -138,13 +127,31 @@ class TimeSpacePlotSettingsDialog(QDialog):
         
         layout.addWidget(time_widget)
         
+        # Distance slider section with widget container
+        dist_widget = QWidget()
+        dist_layout = QVBoxLayout(dist_widget)
+        dist_layout.setSpacing(0)
+
+        self._dist_slider = QLabeledRangeSlider()
+        self._dist_slider.setOrientation(Qt.Orientation.Horizontal)
+        # Connect to mouse release event for interrelated operations
+        self._dist_slider.sliderReleased.connect(self._on_dist_slider_released)
+        dist_layout.addWidget(self._dist_slider)
+        
+        dist_label = QLabel("Distance (m)")
+        dist_label.setStyleSheet("font-weight: bold;")
+        dist_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        dist_layout.addWidget(dist_label)
+        
+        layout.addWidget(dist_widget)
+        
         # Bottom control set with centered elements
         bottom_layout = QHBoxLayout()
         
         bottom_layout.addStretch()  # Left spacer
         
         # Record count label
-        self._record_count_label = QLabel(f"0 records of {self._record_limit:,} limit")
+        self._record_count_label = QLabel(f"0 of {self._record_limit} vehicle limit")
         bottom_layout.addWidget(self._record_count_label)
         
         bottom_layout.addStretch()
@@ -232,14 +239,17 @@ class TimeSpacePlotSettingsDialog(QDialog):
                 logger.error(f"Error parsing summary JSON for event {self._current_event_id}: {e}")
                 return
             
+            # Set event name
+            self._event_name.setText(summary.get("event_name", ""))
+
             # Extract and store lane_ids and veh_ids from summary
             self._current_lane_ids = summary.get("lane_id", [])
             self._current_veh_ids = summary.get("veh_id", [])
-            
-            # Update lane count from summary
-            lane_count = len(self._current_lane_ids)
-            self._lane_count_label.setText(str(lane_count))
-            
+
+            # Update lane list from summary
+            lanes = ', '.join(map(str, self._current_lane_ids))
+            self._lane_count_label.setText(lanes)
+
             # Update vehicle count from summary
             veh_count = len(self._current_veh_ids)
             self._veh_count_label.setText(str(veh_count))
@@ -346,7 +356,7 @@ class TimeSpacePlotSettingsDialog(QDialog):
             
             cursor = self._db_connection.cursor()
             cursor.execute("""
-                SELECT COUNT(*) 
+                SELECT COUNT(DISTINCT veh_id) 
                 FROM events 
                 WHERE event_id = ? 
                 AND veh_time BETWEEN ? AND ? 
@@ -354,7 +364,7 @@ class TimeSpacePlotSettingsDialog(QDialog):
             """, (self._current_event_id, time_min, time_max, dist_min, dist_max))
             
             record_count = cursor.fetchone()[0]
-            self._record_count_label.setText(f"{record_count:,} records of {self._record_limit:,} limit")
+            self._record_count_label.setText(f"{record_count} of {self._record_limit} vehicle limit")
             
             # Color the label based on record limit
             if record_count > self._record_limit:

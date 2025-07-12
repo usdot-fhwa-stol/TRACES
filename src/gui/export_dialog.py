@@ -222,14 +222,17 @@ class ExportDialog(QDialog):
             checkbox_layout.addWidget(checkbox, row, col)
             
             col += 1
-            if col >= 5:  # Wrap to next row
+            if col >= 4:  # Wrap to next row
                 col = 0
                 row += 1
         
         layout.addWidget(checkbox_widget)
 
         self._event_name = QLabel() # centered label to show event name
-        self._event_name.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        self._event_name.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # Calculate the height using font metrics
+        self._event_name.setWordWrap(True)
+        self._event_name.setMinimumHeight(self._event_name.fontMetrics().height() * 5 / 2)
         layout.addWidget(self._event_name)
 
     def _setup_button_controls(self, layout: QVBoxLayout):
