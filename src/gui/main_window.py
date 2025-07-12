@@ -1,13 +1,40 @@
 import sqlite3
 from pathlib import Path
 from PyQt6.QtWidgets import QMainWindow, QMenuBar, QMenu, QApplication, QFileDialog, QMessageBox, QDialog
+from PyQt6.QtWebEngineWidgets import QWebEngineView
+from PyQt6.QtWebChannel import QWebChannel
 from PyQt6.QtGui import QAction
-from PyQt6.QtCore import QTimer  # Added QTimer for splash screen delay
+from PyQt6.QtCore import QTimer, QObject, pyqtSlot
 from .time_space_plot_widget import TimeSpacePlotWidget
 from .time_space_plot_settings_dialog import TimeSpacePlotSettingsDialog
 from .import_dialog import ImportDialog
 from .about_dialog import AboutDialog
 from .export_dialog import ExportDialog
+from utils import get_resource_path
+
+class WebBridge(QObject):
+    """Bridge class to connect HTML page with MainWindow methods."""
+    
+    def __init__(self, main_window):
+        super().__init__()
+        self.main_window = main_window
+    
+    @pyqtSlot()
+    def openFile(self):
+        """Handle open file action from HTML page."""
+        self.main_window._open_file()
+    
+    @pyqtSlot()
+    def importFile(self):
+        """Handle import file action from HTML page."""
+        self.main_window._import_file()
+    
+    @pyqtSlot(str)
+    def openRecentFile(self, file_path):
+        """Handle recent file action from HTML page."""
+        # Convert forward slashes back to OS-specific separators
+        os_file_path = str(Path(file_path))
+        self.main_window._open_recent_file(os_file_path)
 
 class MainWindow(QMainWindow):
     """Main window for the Trajectory Tools application.
@@ -21,16 +48,14 @@ class MainWindow(QMainWindow):
         _export_menu (QMenu): Submenu for export options.
         _db_connection (sqlite3.Connection): Current database connection.
         _plot_widget (TimeSpacePlotWidget): Plot widget for displaying trajectory data.
-        _splash_dialog (AboutDialog): Splash screen dialog instance.
         _selected_export_columns (list): List of selected column names for export.
+        _web_view (QWebEngineView): Web view for displaying HTML home page.
+        _web_bridge (WebBridge): Bridge object for HTML-Python communication.
+        _web_channel (QWebChannel): Web channel for communication.
     """
 
-    def __init__(self, show_splash=True):
-        """Initialize the main window with menu bar and load settings.
-        
-        Args:
-            show_splash (bool): Whether to show splash screen on startup.
-        """
+    def __init__(self):
+        """Initialize the main window with menu bar and load settings."""
         super().__init__()
         self._recent_files = []
         self._recent_menu = None
@@ -38,14 +63,14 @@ class MainWindow(QMainWindow):
         self._db_connection = None
         self._plot_widget = None
         self._import_dialog = None
-        self._splash_dialog = None
         self._selected_export_columns = []  # Initially empty list of selected export columns
+        self._web_view = None
+        self._web_bridge = None
+        self._web_channel = None
+        
         self._setup_ui()
         self._load_settings()
-        
-        if show_splash:
-            # Use QTimer to show splash after main window is properly initialized
-            QTimer.singleShot(100, self._show_splash_screen)
+        self._setup_home_page()
 
     def _setup_ui(self):
         """Set up the main window UI including menu bar and initial settings."""
@@ -102,15 +127,57 @@ class MainWindow(QMainWindow):
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
 
-    def _show_splash_screen(self):
-        """Show the splash screen dialog."""
-        self._splash_dialog = AboutDialog(parent=self, is_splash=True)
-        self._splash_dialog.closed.connect(self._on_splash_closed)
-        self._splash_dialog.exec()
+    def _setup_home_page(self):
+        """Set up the HTML home page view."""
+        self._web_view = QWebEngineView()
+        self.setCentralWidget(self._web_view)
+        
+        # Set up web channel for communication between HTML and Python
+        self._web_bridge = WebBridge(self)
+        self._web_channel = QWebChannel()
+        self._web_channel.registerObject("bridge", self._web_bridge)
+        self._web_view.page().setWebChannel(self._web_channel)
+        
+        # Load the home page
+        self._load_home_page()
 
-    def _on_splash_closed(self):
-        """Handle splash screen being closed."""
-        self._splash_dialog = None
+    def _load_home_page(self):
+        """Load the HTML home page with dynamic content."""
+        html_path = Path(get_resource_path("home.html"))
+        
+        if html_path.exists():
+            try:
+                with html_path.open('r', encoding='utf-8') as f:
+                    template_content = f.read()
+                
+                # Generate recent files HTML
+                recent_files_html = self._generate_recent_files_html()
+                
+                # Replace placeholder with dynamic content
+                html_content = template_content.replace("{{RECENT_FILES}}", recent_files_html)
+                
+                # Load the HTML content
+                self._web_view.setHtml(html_content)
+                
+            except (IOError, UnicodeDecodeError) as e:
+                print(f"Error loading home.html: {e}")
+        else:
+            print("home.html file not found")
+
+    def _generate_recent_files_html(self):
+        """Generate HTML for recent files list."""
+        if not self._recent_files:
+            return "<p class='empty-state'>No recent files</p>"
+        
+        html_parts = ["<ul>"]
+        for file_path in self._recent_files:
+            file_name = Path(file_path).name
+            # Use forward slashes for HTML, will be converted back in the receiving method
+            html_file_path = file_path.replace('\\', '/')
+            html_parts.append(f'<li onclick="openRecentFile(\'{html_file_path}\')"><a href="#">{file_name}</a><div class="file-path">{html_file_path}</div></li>')
+        html_parts.append("</ul>")
+        
+        return "\n".join(html_parts)
 
     def _load_settings(self):
         """Load window settings and recent files from configuration file.
@@ -194,6 +261,10 @@ class MainWindow(QMainWindow):
             action.triggered.connect(lambda checked, path=file_path: self._open_recent_file(path))
             self._recent_menu.addAction(action)
         self._recent_menu.setEnabled(bool(self._recent_files))
+        
+        # Update home page to reflect changes in recent files
+        if self._web_view and self.centralWidget() == self._web_view:
+            self._load_home_page()
 
     def _check_database(self, file_path: str) -> bool:
         """Check if the file is a valid SQLite database with correct events table.
@@ -375,11 +446,15 @@ class MainWindow(QMainWindow):
         # Reset window title
         self.setWindowTitle("Trajectory Tools")
         
-        # Remove plot widget if it exists
+        # Remove plot widget if it exists and show home page
         if self._plot_widget:
             self._plot_widget.setParent(None)
             self._plot_widget.deleteLater()
             self._plot_widget = None
+        
+        # Show home page again
+        self.setCentralWidget(self._web_view)
+        self._load_home_page()
         
         # Disable export menu
         self._export_menu.setEnabled(False)
@@ -462,10 +537,6 @@ class MainWindow(QMainWindow):
         Args:
             event (QCloseEvent): The close event.
         """
-        # Close splash dialog if it's still open
-        if self._splash_dialog:
-            self._splash_dialog.close()
-            
         if self._db_connection:
             self._db_connection.close()
         self._save_settings()
