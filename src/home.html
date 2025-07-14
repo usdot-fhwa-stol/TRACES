@@ -81,8 +81,9 @@
         }
 
         .action-card .icon {
+            display: inline;
             font-size: 2em;
-            margin-bottom: 15px;
+            margin-right: 15px;
             color: #667eea;
         }
 
@@ -192,20 +193,18 @@
     <div class="container">
         <div class="actions">
             <div class="action-card" onclick="openFile()">
-                <div class="icon">&#128194;</div>
-                <h3>Open Database</h3>
+                <h3>&#128194; Open Database</h3>
                 <p>Open an existing SQLite database file containing trajectory data</p>
             </div>
 
             <div class="action-card" onclick="importFile()">
-                <div class="icon">&#128200;</div>
-                <h3>Import Data</h3>
+                <h3>&#128229; Import Data</h3>
                 <p>Import trajectory data from CSV or other supported file formats</p>
             </div>
         </div>
 
         <div class="recent-files">
-            <h3>Recent Files</h3>
+            <h3>&#128200; Recent Files</h3>
             <div id="recent-files-content">
                 {{RECENT_FILES}}
             </div>

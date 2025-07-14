@@ -13,6 +13,8 @@ from PyQt6.QtWidgets import QMenu, QDialog, QVBoxLayout, QTableWidget, QTableWid
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QAction
 import pyqtgraph as pg
+from .time_speed_dialog import TimeSpeedDialog
+from .time_accel_dialog import TimeAccelDialog
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -51,11 +53,10 @@ class CustomViewBox(pg.ViewBox):
         self._current_context_vehicle = None
         
         # Context menu registry - list of dictionaries with keys: filter, label, callback
-        # Filter string contains combinations of: A (all), S (selected), O (series)
+        # Filter string contains combinations of: A (all series), S (selected series), O (one series)
         self._context_menu_registry = [
-            {'filter': 'SO', 'label': 'Speed-Time Diagram', 'callback': self._do_nothing},
-            {'filter': 'SO', 'label': 'Accel-Time Diagram', 'callback': self._do_nothing},
-            {'filter': 'ASO', 'label': 'Export...', 'callback': self._do_nothing},
+            {'filter': 'O', 'label': 'Time-Speed Diagram', 'callback': self._show_time_speed_dialog},
+            {'filter': 'O', 'label': 'Time-Accel Diagram', 'callback': self._show_time_accel_dialog},
             {'filter': 'ASO', 'label': 'Statistics', 'callback': self._generate_statistics}
         ]
 
@@ -263,6 +264,36 @@ class CustomViewBox(pg.ViewBox):
             self._is_selecting = False
             self._selection_start = None
 
+    def _get_vehicle_data_for_context(self):
+        """Get vehicle data lists based on current context.
+        
+        Returns:
+            tuple: (veh_ids, series_colors, text_colors) for the current context
+        """
+        if self._current_context_vehicle is not None:
+            # Series context - only the clicked vehicle
+            veh_ids = [self._current_context_vehicle]
+        elif len(self.parent_widget._selected_series) > 0:
+            # Selected context - vehicles in selected series
+            veh_ids = list(self.parent_widget._selected_series)
+        else:
+            # All context - vehicles with plot items
+            veh_ids = [veh_id for veh_id, series in self.parent_widget._series.items() 
+                      if series['plot_item'] is not None]
+        
+        # Get corresponding colors for these vehicles
+        series_colors = []
+        text_colors = []
+        for veh_id in veh_ids:
+            if veh_id in self.parent_widget._series:
+                series_colors.append(self.parent_widget._series[veh_id]['color'])
+                text_colors.append(self.parent_widget._series[veh_id]['text_color'])
+            else:
+                series_colors.append('#000000')  # Default black
+                text_colors.append('#ffffff')    # Default white
+        
+        return veh_ids, series_colors, text_colors
+
     # Context menu callback methods
     def _do_nothing(self):
         pass
@@ -333,6 +364,56 @@ class CustomViewBox(pg.ViewBox):
         """Reset the plot view to show all data."""
         self.autoRange()
         logger.debug("Reset plot view")
+
+    def _show_time_speed_dialog(self):
+        """Show time-speed dialog for vehicles based on current context."""
+        if not self.parent_widget._db_connection or self.parent_widget._current_event_id is None:
+            logger.warning("No database connection or event ID available for time-speed dialog")
+            return
+        
+        # Get vehicle data for current context
+        veh_ids, series_colors, text_colors = self._get_vehicle_data_for_context()
+        
+        if not veh_ids:
+            logger.warning("No vehicles available for time-speed dialog")
+            return
+        
+        # Create and show time-speed dialog
+        dialog = TimeSpeedDialog(
+            parent=self.parent_widget,
+            db_connection=self.parent_widget._db_connection,
+            event_id=self.parent_widget._current_event_id,
+            veh_ids=veh_ids,
+            series_colors=series_colors,
+            text_colors=text_colors
+        )
+        dialog.show()
+        logger.debug(f"Opened time-speed dialog for {len(veh_ids)} vehicles")
+    
+    def _show_time_accel_dialog(self):
+        """Show time-acceleration dialog for vehicles based on current context."""
+        if not self.parent_widget._db_connection or self.parent_widget._current_event_id is None:
+            logger.warning("No database connection or event ID available for time-acceleration dialog")
+            return
+        
+        # Get vehicle data for current context
+        veh_ids, series_colors, text_colors = self._get_vehicle_data_for_context()
+        
+        if not veh_ids:
+            logger.warning("No vehicles available for time-acceleration dialog")
+            return
+        
+        # Create and show time-acceleration dialog
+        dialog = TimeAccelDialog(
+            parent=self.parent_widget,
+            db_connection=self.parent_widget._db_connection,
+            event_id=self.parent_widget._current_event_id,
+            veh_ids=veh_ids,
+            series_colors=series_colors,
+            text_colors=text_colors
+        )
+        dialog.show()
+        logger.debug(f"Opened time-acceleration dialog for {len(veh_ids)} vehicles")
     
     def _generate_statistics(self):
         """Generate and display statistics for vehicles based on current context."""
