@@ -425,8 +425,8 @@ class TimeSpacePlotWidget(QWidget):
         min_dist = float('inf')
         closest_data = None
         time_tolerance = 0.05  # Time tolerance in seconds
-        pixel_tolerance_show = 5  # Pixel distance to show tooltip
-        pixel_tolerance_hide = 10  # Pixel distance to hide tooltip (hysteresis)
+        pixel_tolerance_show = 3  # Pixel distance to show tooltip
+        pixel_tolerance_hide = 6  # Pixel distance to hide tooltip (hysteresis)
     
         for series in self._series.values():
             if series["plot_item"] and len(series["veh_time"]) > 0:
@@ -483,6 +483,8 @@ class TimeSpacePlotWidget(QWidget):
                     return
     
             # Update tooltip style and position
+            color = '#000'
+            text_color = '#fff'
             self._tooltip.setStyleSheet(
                 f"QLabel {{ background-color: {color}; color: {text_color}; padding: 5px; }}"
             )
@@ -526,7 +528,7 @@ class TimeSpacePlotWidget(QWidget):
         min_dist = float('inf')
         closest_veh_id = None
         time_tolerance = 0.05  # Time tolerance in seconds
-        pixel_tolerance = 5   # Pixel distance to register click
+        pixel_tolerance = 3   # Pixel distance to register click
         
         for series in self._series.values():
             if series["plot_item"]:

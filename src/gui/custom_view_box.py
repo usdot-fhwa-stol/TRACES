@@ -55,8 +55,8 @@ class CustomViewBox(pg.ViewBox):
         # Context menu registry - list of dictionaries with keys: filter, label, callback
         # Filter string contains combinations of: A (all series), S (selected series), O (one series)
         self._context_menu_registry = [
-            {'filter': 'O', 'label': 'Time-Speed Diagram', 'callback': self._show_time_speed_dialog},
-            {'filter': 'O', 'label': 'Time-Accel Diagram', 'callback': self._show_time_accel_dialog},
+            {'filter': 'SO', 'label': 'Time-Speed Diagram', 'callback': self._show_time_speed_dialog},
+            {'filter': 'SO', 'label': 'Time-Accel Diagram', 'callback': self._show_time_accel_dialog},
             {'filter': 'ASO', 'label': 'Statistics', 'callback': self._generate_statistics}
         ]
 
@@ -236,7 +236,7 @@ class CustomViewBox(pg.ViewBox):
             int or None: Vehicle ID if found, None otherwise
         """
         time_tolerance = 0.05  # Time tolerance in seconds
-        pixel_tolerance = 10   # Pixel distance to register click
+        pixel_tolerance = 3   # Pixel distance to register click
         
         min_dist = float('inf')
         closest_veh_id = None

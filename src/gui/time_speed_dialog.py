@@ -161,17 +161,25 @@ class TimeSpeedDialog(QDialog):
                     'color': color
                 }
                 
-                # Create scatter plot
-                scatter_item = pg.ScatterPlotItem(
+                # Create line plot connecting the points
+                line_item = pg.PlotDataItem(
                     x=times_array,
                     y=y_array,
-                    pen=pg.mkPen(color=color),
-                    brush=pg.mkBrush(color=color),
-                    size=4
+                    pen=pg.mkPen(color=color, width=2),
+                    symbol=None
                 )
-                scatter_item.veh_id = veh_id  # Store vehicle ID on plot item
-                
-                self._scatter_plot.addItem(scatter_item)
+                line_item.veh_id = veh_id  # Store vehicle ID on plot item
+                self._scatter_plot.addItem(line_item)
+
+#                scatter_item = pg.ScatterPlotItem(
+#                    x=times_array,
+#                    y=y_array,
+#                    pen=pg.mkPen(color=color),
+#                    brush=pg.mkBrush(color=color),
+#                    size=4
+#                )
+#                scatter_item.veh_id = veh_id  # Store vehicle ID on plot item                
+#                self._scatter_plot.addItem(scatter_item)
                 
                 logger.debug(f"Plotted {len(times)} {self.Y_COLUMN} points for vehicle {veh_id}")
             
@@ -293,13 +301,13 @@ class TimeSpeedDialog(QDialog):
                     return
             
             # Get colors for this vehicle
-            try:
-                veh_index = self.veh_ids.index(closest_vehicle)
-                series_color = self.series_colors[veh_index]
-                text_color = self.text_colors[veh_index]
-            except (ValueError, IndexError):
-                series_color = '#000000'
-                text_color = '#ffffff'
+#            try:
+#                veh_index = self.veh_ids.index(closest_vehicle)
+#                series_color = self.series_colors[veh_index]
+#                text_color = self.text_colors[veh_index]
+#            except (ValueError, IndexError):
+            series_color = '#000000'
+            text_color = '#ffffff'
             
             # Update tooltip style and position
             self._tooltip.setStyleSheet(

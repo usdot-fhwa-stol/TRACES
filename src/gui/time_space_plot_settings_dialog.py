@@ -55,7 +55,7 @@ class TimeSpacePlotSettingsDialog(QDialog):
         self._record_count_label = None
         self._apply_button = None
         self._current_event_id = None
-        self._record_limit = 50
+        self._record_limit = 500
         self._current_event_summary = {}
         
         logger.debug("TimeSpacePlotSettingsDialog initialized")

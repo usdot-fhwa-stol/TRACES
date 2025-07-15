@@ -137,7 +137,7 @@ class CsvAlgorithms:
             if not key:  # Return None if key is empty
                 return None
             if key not in self._group_dict:
-                self._group_dict[key] = len(self._group_dict)
+                self._group_dict[key] = len(self._group_dict) + 1
             return self._group_dict[key]
         except (IndexError, TypeError):
             return 0
