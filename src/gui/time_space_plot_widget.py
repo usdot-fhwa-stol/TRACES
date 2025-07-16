@@ -89,7 +89,10 @@ class TimeSpacePlotWidget(QWidget):
         # Create main horizontal layout
         main_layout = QHBoxLayout(self)
         
-        # Left side: scatter plot - pass self to CustomViewBox
+        # Left side: QVBoxLayout with plot on top and time controls below
+        left_layout = QVBoxLayout()
+        
+        # Plot widget - pass self to CustomViewBox
         custom_viewbox = CustomViewBox(parent_widget=self)
         self._scatter_plot = pg.PlotWidget(viewBox=custom_viewbox)
         self._scatter_plot.setBackground('w')
@@ -97,21 +100,40 @@ class TimeSpacePlotWidget(QWidget):
         self._scatter_plot.setLabel('left', 'Distance (m)')
         self._scatter_plot.setLabel('bottom', 'Time (s)')
         self._scatter_plot.scene().sigMouseMoved.connect(self._handle_mouse_moved)
-        self._scatter_plot.scene().sigMouseClicked.connect(self._handle_mouse_clicked)
-        main_layout.addWidget(self._scatter_plot, stretch=1)
         
-        # Right side: control set
+        # Disable auto-range button
+        self._scatter_plot.getViewBox().setMenuEnabled(False)
+        
+        # Disable default mouse interactions
+        self._scatter_plot.getViewBox().setMouseEnabled(x=False, y=False)
+        
+        left_layout.addWidget(self._scatter_plot, stretch=1)
+        
+        # Time controls below plot
+        time_layout = QHBoxLayout()
+        
+        # Time label
+        time_label = QLabel("Time (s)")
+        time_label.setStyleSheet("font-weight: bold;")
+        time_layout.addWidget(time_label)
+        
+        # Time slider
+        self._time_slider = QLabeledRangeSlider()
+        self._time_slider.setOrientation(Qt.Orientation.Horizontal)
+        self._time_slider.valueChanged.connect(self._on_slider_changed)
+        time_layout.addWidget(self._time_slider, stretch=1)
+        
+        left_layout.addLayout(time_layout)
+        
+        main_layout.addLayout(left_layout, stretch=1)
+        
+        # Right side: control set (rearranged)
         control_layout = QVBoxLayout()
         
         # Event button
         self._event_button = QPushButton(" ")
         self._event_button.clicked.connect(self._open_settings_dialog)
         control_layout.addWidget(self._event_button)
-        
-        # Lane combobox
-        self._lane_combobox = QComboBox()
-        self._lane_combobox.currentIndexChanged.connect(self._on_lane_changed)
-        control_layout.addWidget(self._lane_combobox)
         
         # Distance slider section
         dist_label = QLabel("Dist (m)")
@@ -124,24 +146,16 @@ class TimeSpacePlotWidget(QWidget):
         self._dist_slider.valueChanged.connect(self._on_slider_changed)
         control_layout.addWidget(self._dist_slider, stretch=1)
         
-        # Time slider section
-        time_label = QLabel("Time (s)")
-        time_label.setStyleSheet("font-weight: bold;")
-        time_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        control_layout.addWidget(time_label)
-        
-        self._time_slider = QLabeledRangeSlider()
-        self._time_slider.setOrientation(Qt.Orientation.Vertical)
-        self._time_slider.valueChanged.connect(self._on_slider_changed)
-        control_layout.addWidget(self._time_slider, stretch=1)
+        # Lane combobox at the bottom
+        self._lane_combobox = QComboBox()
+        self._lane_combobox.currentIndexChanged.connect(self._on_lane_changed)
+        control_layout.addWidget(self._lane_combobox)
         
         main_layout.addLayout(control_layout)
+        
+        # Create tooltip
         self._tooltip = QLabel(self._scatter_plot)
         self._tooltip.setStyleSheet("QLabel { padding: 5px; }")
-        
-        # Keep default PanMode to allow panning when Shift is not held
-        view_box = self._scatter_plot.getViewBox()
-        view_box.setMouseMode(view_box.PanMode)
         
     def set_database(self, db_connection: sqlite3.Connection):
         """Set the database connection for the widget.
@@ -193,10 +207,10 @@ class TimeSpacePlotWidget(QWidget):
         self._veh_ids = event_summary.get('veh_id', [])
         self._selected_series.clear()
         self._clear_selection_box()
-
+    
         # Update plot title
         self._scatter_plot.setTitle(event_summary.get('event_name', f"Event {event_id}"))
-
+    
         # Update event button label
         self._event_button.setText(f"Event {event_id:3d}")
         
@@ -205,14 +219,21 @@ class TimeSpacePlotWidget(QWidget):
         
         # Update lane combobox using provided lane_ids
         self._populate_lane_combobox_from_ids()
-
+    
         # Set distance slider range and values
         self._dist_slider.setRange(dist_min, dist_max)
         self._dist_slider.setValue(self._dist_range)
-
+    
         # Set time slider range and values
         self._time_slider.setRange(time_min, time_max)
         self._time_slider.setValue(self._time_range)
+        
+        # Set initial plot view to match slider ranges
+        self._scatter_plot.getViewBox().setRange(
+            xRange=[time_min, time_max],
+            yRange=[dist_min, dist_max],
+            padding=0
+        )
         
     def _initialize_series_from_ids(self):
         """Initialize the _series dictionary using the provided vehicle IDs."""
@@ -375,7 +396,7 @@ class TimeSpacePlotWidget(QWidget):
             logger.error(f"Error updating plot data: {e}")
             
     def _on_slider_changed(self):
-        """Handle changes to distance or time sliders by filtering the plot data."""
+        """Handle changes to distance or time sliders by filtering the plot data and updating view."""
         if not self._series:
             return
             
@@ -385,6 +406,13 @@ class TimeSpacePlotWidget(QWidget):
         # Get current slider ranges
         time_min, time_max = self._time_slider.value()
         dist_min, dist_max = self._dist_slider.value()
+        
+        # Update plot view to match slider ranges
+        self._scatter_plot.getViewBox().setRange(
+            xRange=[time_min, time_max],
+            yRange=[dist_min, dist_max],
+            padding=0
+        )
         
         # Update each series with filtered data
         for series in self._series.values():
@@ -512,50 +540,6 @@ class TimeSpacePlotWidget(QWidget):
             event.accept()
         else:
             super().keyPressEvent(event)
-
-    def _handle_mouse_clicked(self, event):
-        """Handle mouse click to toggle vehicle selection."""
-        # Handle single left-click without Shift modifier
-        if event.button() != Qt.MouseButton.LeftButton or event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
-            return
-            
-        pos = event.scenePos()
-        view_box = self._scatter_plot.getViewBox()
-        mouse_point = view_box.mapSceneToView(pos)
-        mx, my = mouse_point.x(), mouse_point.y()
-        
-        # Find closest point
-        min_dist = float('inf')
-        closest_veh_id = None
-        time_tolerance = 0.05  # Time tolerance in seconds
-        pixel_tolerance = 3   # Pixel distance to register click
-        
-        for series in self._series.values():
-            if series["plot_item"]:
-                mask = (series["veh_time"] >= mx - time_tolerance) & (series["veh_time"] <= mx + time_tolerance)
-                x_filtered = series["veh_time"][mask]
-                y_filtered = series["veh_dist_trav"][mask]
-                
-                if len(x_filtered) > 0:
-                    distances = np.abs(y_filtered - my)
-                    min_idx = np.argmin(distances)
-                    if distances[min_idx] < pixel_tolerance and distances[min_idx] < min_dist:
-                        min_dist = distances[min_idx]
-                        closest_veh_id = series["veh_id"]
-        
-        if closest_veh_id is not None:
-            # Toggle veh_id in selected_series
-            if closest_veh_id in self._selected_series:
-                self._selected_series.remove(closest_veh_id)
-            else:
-                self._selected_series.add(closest_veh_id)
-                # Clear selected_series if it contains all vehicles
-                if len(self._selected_series) == len(self._series):
-                    self._selected_series.clear()
-            
-            # Update plot colors
-            self._update_plot_colors()
-            logger.debug(f"Toggled veh_id {closest_veh_id}, selected_series: {self._selected_series}")
     
     def _update_plot_colors(self):
         """Update scatter plot item colors based on _selected_series."""

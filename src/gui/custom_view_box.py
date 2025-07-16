@@ -8,6 +8,7 @@ This module provides a CustomViewBox class that extends pyqtgraph's ViewBox to a
 """
 
 import logging
+import time
 import numpy as np
 from PyQt6.QtWidgets import QMenu, QDialog, QVBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView
 from PyQt6.QtCore import Qt, QTimer
@@ -61,101 +62,145 @@ class CustomViewBox(pg.ViewBox):
         ]
 
     def mousePressEvent(self, ev):
-        """Handle mouse press events for selection box creation.
-        
-        Args:
-            ev: Mouse event containing button and modifier information
-        """
-        if ev.button() == Qt.MouseButton.LeftButton and ev.modifiers() & Qt.KeyboardModifier.ShiftModifier:
-            # Start selection
+        """Handle mouse press events for selection box creation."""
+        if ev.button() == Qt.MouseButton.LeftButton:
+            # Store the press position and start time for click vs drag detection
+            self._press_pos = ev.scenePos()
+            self._press_time = time.time()
             self._selection_start = self.mapSceneToView(ev.scenePos())
-            self._is_selecting = True
-            
-            # Create selection box
-            self._selection_box = pg.RectROI(
-                pos=[self._selection_start.x(), self._selection_start.y()],
-                size=[0, 0],
-                pen=pg.mkPen(color='red', width=2, style=Qt.PenStyle.DashLine),
-                removable=False
-            )
-            
-            # Disable handles
-            for handle in self._selection_box.getHandles():
-                handle.hide()
-            
-            # Add to parent plot
-            self.parent_widget._scatter_plot.addItem(self._selection_box)
+            self._is_selecting = False  # Don't start selecting immediately
             ev.accept()
             return
         
-        # For non-shift clicks, use default behavior
+        # For non-left clicks, use default behavior
         super().mousePressEvent(ev)
-
+    
     def mouseMoveEvent(self, ev):
-        """Handle mouse move events for selection box resizing.
-
-        Args:
-            ev: Mouse event containing position information
-        """
-        if self._is_selecting and self._selection_box:
-            # Update selection box
-            current_pos = self.mapSceneToView(ev.scenePos())
-
-            x0, y0 = self._selection_start.x(), self._selection_start.y()
-            x1, y1 = current_pos.x(), current_pos.y()
-
-            # Update selection box position and size
-            self._selection_box.setPos(min(x0, x1), min(y0, y1))
-            self._selection_box.setSize([abs(x1 - x0), abs(y1 - y0)])
+        """Handle mouse move events for selection box resizing."""
+        if hasattr(self, '_press_pos') and self._press_pos is not None:
+            # Calculate distance moved since press
+            move_distance = (ev.scenePos() - self._press_pos).manhattanLength()
+            
+            # If we've moved enough distance, start selection box
+            if move_distance > 5 and not self._is_selecting:  # 5 pixel threshold
+                self._is_selecting = True
+                
+                # Create selection box
+                self._selection_box = pg.RectROI(
+                    pos=[self._selection_start.x(), self._selection_start.y()],
+                    size=[0, 0],
+                    pen=pg.mkPen(color='red', width=2, style=Qt.PenStyle.DashLine),
+                    removable=False
+                )
+                
+                # Disable handles
+                for handle in self._selection_box.getHandles():
+                    handle.hide()
+                
+                # Add to parent plot
+                self.parent_widget._scatter_plot.addItem(self._selection_box)
+            
+            # Update selection box if we're selecting
+            if self._is_selecting and self._selection_box:
+                current_pos = self.mapSceneToView(ev.scenePos())
+                x0, y0 = self._selection_start.x(), self._selection_start.y()
+                x1, y1 = current_pos.x(), current_pos.y()
+    
+                # Update selection box position and size
+                self._selection_box.setPos(min(x0, x1), min(y0, y1))
+                self._selection_box.setSize([abs(x1 - x0), abs(y1 - y0)])
+            
             ev.accept()
-            # Still call super to ensure proper event propagation
-            super().mouseMoveEvent(ev)
             return
-
+    
         # For non-selection moves, use default behavior
         super().mouseMoveEvent(ev)
-
+    
     def mouseReleaseEvent(self, ev):
-        """Handle mouse release events for selection box completion.
-        
-        Args:
-            ev: Mouse event containing button and position information
-        """
-        if ev.button() == Qt.MouseButton.LeftButton and self._is_selecting:
-            # Complete selection
-            end_pos = self.mapSceneToView(ev.scenePos())
+        """Handle mouse release events for selection box completion or single clicks."""
+        if ev.button() == Qt.MouseButton.LeftButton and hasattr(self, '_press_pos') and self._press_pos is not None:
+            # Calculate how much we moved and how long the press was
+            move_distance = (ev.scenePos() - self._press_pos).manhattanLength()
+            press_duration = time.time() - self._press_time
             
-            x0, y0 = self._selection_start.x(), self._selection_start.y()
-            x1, y1 = end_pos.x(), end_pos.y()
+            if self._is_selecting:
+                # Complete selection box
+                end_pos = self.mapSceneToView(ev.scenePos())
+                
+                x0, y0 = self._selection_start.x(), self._selection_start.y()
+                x1, y1 = end_pos.x(), end_pos.y()
+                
+                # Get selection box bounds
+                x_min, x_max = min(x0, x1), max(x0, x1)
+                y_min, y_max = min(y0, y1), max(y0, y1)
+                
+                # Find vehicles with points in the selection box
+                selected_vehicles = set()
+                for series in self.parent_widget._series.values():
+                    if series['veh_time'] is not None and series['veh_dist_trav'] is not None:
+                        mask = (series['veh_time'] >= x_min) & (series['veh_time'] <= x_max) & \
+                               (series['veh_dist_trav'] >= y_min) & (series['veh_dist_trav'] <= y_max)
+                        if np.any(mask):
+                            selected_vehicles.add(series['veh_id'])
+                
+                # Update selected_series
+                self.parent_widget._selected_series.update(selected_vehicles)
+                # Clear selected_series if all vehicles are selected
+                if len(self.parent_widget._selected_series) == len(self.parent_widget._series):
+                    self.parent_widget._selected_series.clear()
+                
+                # Update plot colors
+                self.parent_widget._update_plot_colors()
+                
+                # Clear selection box
+                self._clear_selection_box()
+                
+            elif move_distance < 5 and press_duration < 0.5:  # Short click with minimal movement
+                # Handle single click on series
+                mouse_point = self.mapSceneToView(ev.scenePos())
+                mx, my = mouse_point.x(), mouse_point.y()
+                
+                # Find closest point
+                min_dist = float('inf')
+                closest_veh_id = None
+                time_tolerance = 0.05  # Time tolerance in seconds
+                pixel_tolerance = 3   # Pixel distance to register click
+                
+                for series in self.parent_widget._series.values():
+                    if series["plot_item"] and len(series["veh_time"]) > 0:
+                        mask = (series["veh_time"] >= mx - time_tolerance) & (series["veh_time"] <= mx + time_tolerance)
+                        x_filtered = series["veh_time"][mask]
+                        y_filtered = series["veh_dist_trav"][mask]
+                        
+                        if len(x_filtered) > 0:
+                            distances = np.abs(y_filtered - my)
+                            min_idx = np.argmin(distances)
+                            if distances[min_idx] < pixel_tolerance and distances[min_idx] < min_dist:
+                                min_dist = distances[min_idx]
+                                closest_veh_id = series["veh_id"]
+                
+                if closest_veh_id is not None:
+                    # Toggle veh_id in selected_series
+                    if closest_veh_id in self.parent_widget._selected_series:
+                        self.parent_widget._selected_series.remove(closest_veh_id)
+                    else:
+                        self.parent_widget._selected_series.add(closest_veh_id)
+                        # Clear selected_series if it contains all vehicles
+                        if len(self.parent_widget._selected_series) == len(self.parent_widget._series):
+                            self.parent_widget._selected_series.clear()
+                    
+                    # Update plot colors
+                    self.parent_widget._update_plot_colors()
+                    logger.debug(f"Toggled veh_id {closest_veh_id}, selected_series: {self.parent_widget._selected_series}")
             
-            # Get selection box bounds
-            x_min, x_max = min(x0, x1), max(x0, x1)
-            y_min, y_max = min(y0, y1), max(y0, y1)
-            
-            # Find vehicles with points in the selection box
-            selected_vehicles = set()
-            for series in self.parent_widget._series.values():
-                if series['veh_time'] is not None and series['veh_dist_trav'] is not None:
-                    mask = (series['veh_time'] >= x_min) & (series['veh_time'] <= x_max) & \
-                           (series['veh_dist_trav'] >= y_min) & (series['veh_dist_trav'] <= y_max)
-                    if np.any(mask):
-                        selected_vehicles.add(series['veh_id'])
-            
-            # Update selected_series
-            self.parent_widget._selected_series.update(selected_vehicles)
-            # Clear selected_series if all vehicles are selected
-            if len(self.parent_widget._selected_series) == len(self.parent_widget._series):
-                self.parent_widget._selected_series.clear()
-            
-            # Update plot colors
-            self.parent_widget._update_plot_colors()
-            
-            # Clear selection box
-            self._clear_selection_box()
+            # Clean up
+            self._press_pos = None
+            self._press_time = None
+            self._is_selecting = False
             ev.accept()
             return
         
-        # For non-shift releases, use default behavior
+        # For non-left releases, use default behavior
         super().mouseReleaseEvent(ev)
     
     def mouseClickEvent(self, ev):
