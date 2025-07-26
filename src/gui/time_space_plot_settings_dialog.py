@@ -2,7 +2,7 @@ import sqlite3
 import logging
 import json
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton, 
-                           QLabel, QComboBox, QWidget)
+                           QLabel, QComboBox, QWidget, QSizePolicy)
 from PyQt6.QtCore import pyqtSignal, Qt, QTimer
 from superqt import QLabeledRangeSlider
 
@@ -151,6 +151,12 @@ class TimeSpacePlotSettingsDialog(QDialog):
         
         # Record count label
         self._record_count_label = QLabel(f"0 of {self._record_limit} vehicle limit")
+        self._record_count_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.MinimumExpanding)
+        self._record_count_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        font = self._record_count_label.font()
+        font.setPointSizeF(font.pointSizeF() * 1.3)
+        self._record_count_label.setFont(font)
+        self._record_count_label.setMinimumHeight(self._record_count_label.fontMetrics().height() + 6)
         bottom_layout.addWidget(self._record_count_label)
         
         bottom_layout.addStretch()
@@ -364,9 +370,9 @@ class TimeSpacePlotSettingsDialog(QDialog):
             
             # Color the label based on record limit
             if record_count > self._record_limit:
-                self._record_count_label.setStyleSheet("color: red; font-weight: bold;")
+                self._record_count_label.setStyleSheet("color: #F00; background-color: #000; font-weight: bold; padding: 2px; border-radius: 2px; border: 1px solid #999;")
             else:
-                self._record_count_label.setStyleSheet("color: green; font-weight: bold;")
+                self._record_count_label.setStyleSheet("color: #0F0; background-color: #000; font-weight: bold; padding: 2px; border-radius: 2px; border: 1px solid #999;")
             
             # Enable/disable Apply button based on record limit
             self._apply_button.setEnabled(record_count <= self._record_limit)

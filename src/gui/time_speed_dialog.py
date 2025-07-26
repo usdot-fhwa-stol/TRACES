@@ -9,8 +9,10 @@ import logging
 import time
 import numpy as np
 import sqlite3
-from PyQt6.QtWidgets import QDialog, QVBoxLayout, QLabel
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QDialog, QHBoxLayout, QVBoxLayout, QLabel
 import pyqtgraph as pg
+from superqt import QLabeledRangeSlider
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -19,7 +21,7 @@ logger = logging.getLogger(__name__)
 class TimeSpeedDialog(QDialog):
     """Base dialog class for displaying time-based plots for multiple vehicles.
     
-    This dialog creates a scatter plot showing vehicle data over time
+    This dialog creates a plot showing vehicle data over time
     with interactive tooltips that display detailed vehicle information.
     
     Attributes:
@@ -28,7 +30,7 @@ class TimeSpeedDialog(QDialog):
         veh_ids (list): List of vehicle IDs to display.
         series_colors (list): List of HTML hex colors for each series.
         text_colors (list): List of text colors for tooltips.
-        _scatter_plot (pg.PlotWidget): PyQtGraph scatter plot widget.
+        _plot (pg.PlotWidget): PyQtGraph plot widget.
         _tooltip (QLabel): Tooltip for displaying point information.
         _last_queried_point (tuple): Tracks tooltip point to reduce queries.
         _last_mouse_move_time (float): Timestamp of last mouse move for debouncing.
@@ -41,7 +43,7 @@ class TimeSpeedDialog(QDialog):
     PLOT_TITLE_SUFFIX = "Speed vs Time"
     TOLERANCE = 2.0  # Tolerance for point detection
     
-    def __init__(self, parent, db_connection, event_id, veh_ids, series_colors, text_colors):
+    def __init__(self, parent, db_connection, event_id, veh_ids, time_min, time_max, series_colors, text_colors):
         """Initialize the TimeSpeedDialog.
         
         Args:
@@ -70,30 +72,99 @@ class TimeSpeedDialog(QDialog):
         self.setWindowTitle(title)
         self.setModal(True)  # Do not allow interaction with parent window
         
-        # Set dialog size
-        self.resize(900, 600)
+        # Size dialog to 80% of parent size and center it
+        self._size_and_center_dialog()
         
-        self._setup_ui()
+        self._setup_ui(time_min, time_max)
         self._load_and_plot_data()
     
-    def _setup_ui(self):
+    def _size_and_center_dialog(self):
+        """Size the dialog to 80% of parent size and center it within the parent."""
+        if self.parent():
+            # Get parent geometry
+            parent_geometry = self.parent().geometry()
+            parent_width = parent_geometry.width()
+            parent_height = parent_geometry.height()
+            
+            # Calculate 80% of parent size
+            dialog_width = int(parent_width * 0.8)
+            dialog_height = int(parent_height * 0.8)
+            
+            # Calculate position to center the dialog
+            x = parent_geometry.x() + (parent_width - dialog_width) // 2
+            y = parent_geometry.y() + (parent_height - dialog_height) // 2
+            
+            # Set dialog geometry (position and size)
+            self.setGeometry(x, y, dialog_width, dialog_height)
+        else:
+            # Fallback to original fixed size if no parent
+            self.resize(900, 600)
+    
+    def _setup_ui(self, time_min, time_max):
         """Set up the dialog UI components."""
-        layout = QVBoxLayout(self)
+        # Create main horizontal layout
+        main_layout = QHBoxLayout(self)
         
-        # Create scatter plot
-        self._scatter_plot = pg.PlotWidget()
-        self._scatter_plot.setBackground('w')
-        self._scatter_plot.showGrid(x=True, y=True)
-        self._scatter_plot.setLabel('left', self.Y_LABEL)
-        self._scatter_plot.setLabel('bottom', 'Time (s)')
+        # Left side: QVBoxLayout with plot on top and time slider below
+        left_layout = QVBoxLayout()
+        
+        # Create plot
+        self._plot = pg.PlotWidget()
+        self._plot.setBackground('w')
+        self._plot.showGrid(x=True, y=True)
+        self._plot.setLabel('left', self.Y_LABEL)
+        self._plot.setLabel('bottom', 'Time (s)')
         
         # Connect mouse move event for tooltips
-        self._scatter_plot.scene().sigMouseMoved.connect(self._handle_mouse_moved)
+        self._plot.scene().sigMouseMoved.connect(self._handle_mouse_moved)
+                
+        # Disable auto-range button
+        self._plot.getViewBox().setMenuEnabled(False)
         
-        layout.addWidget(self._scatter_plot)
+        # Disable default mouse interactions
+        self._plot.getViewBox().setMouseEnabled(x=False, y=False)
+
+        left_layout.addWidget(self._plot, stretch=1)
         
+        # Time controls below plot
+        time_layout = QHBoxLayout()
+        
+        # Time label
+        time_label = QLabel("Time (s)")
+        time_label.setStyleSheet("font-weight: bold;")
+        time_layout.addWidget(time_label)
+        
+        # Time slider
+        self._time_slider = QLabeledRangeSlider()
+        self._time_slider.setOrientation(Qt.Orientation.Horizontal)
+        time_layout.addWidget(self._time_slider, stretch=1)
+        
+        # Set time slider range and values
+        self._time_slider.setRange(time_min, time_max)
+        self._time_slider.setValue((time_min, time_max))
+        left_layout.addLayout(time_layout)
+        main_layout.addLayout(left_layout, stretch=1)
+        
+        # Right side: control set (rearranged)
+        control_layout = QVBoxLayout()
+        
+        # y-axis slider section
+        y_label = QLabel(self.Y_LABEL)
+        y_label.setStyleSheet("font-weight: bold;")
+        y_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        control_layout.addWidget(y_label)
+
+        self._y_slider = QLabeledRangeSlider()
+        self._y_slider.setOrientation(Qt.Orientation.Vertical)
+        control_layout.addWidget(self._y_slider, stretch=1)
+        main_layout.addLayout(control_layout)
+        
+        # connect slider signals after initializaton
+        self._time_slider.valueChanged.connect(self._on_slider_changed)
+        self._y_slider.valueChanged.connect(self._on_slider_changed)
+
         # Create tooltip
-        self._tooltip = QLabel(self._scatter_plot)
+        self._tooltip = QLabel(self._plot)
         self._tooltip.setStyleSheet("QLabel { padding: 5px; }")
         self._tooltip.hide()
     
@@ -128,7 +199,7 @@ class TimeSpeedDialog(QDialog):
         """
     
     def _load_and_plot_data(self):
-        """Load data from database and create scatter plots for all vehicles."""
+        """Load data from database and create plots for all vehicles."""
         try:
             cursor = self.db_connection.cursor()
             cursor.execute(self._get_data_query(), [self.event_id] + self.veh_ids)
@@ -165,22 +236,12 @@ class TimeSpeedDialog(QDialog):
                 line_item = pg.PlotDataItem(
                     x=times_array,
                     y=y_array,
-                    pen=pg.mkPen(color=color, width=2),
+                    pen=pg.mkPen(color=color, width=4),
                     symbol=None
                 )
                 line_item.veh_id = veh_id  # Store vehicle ID on plot item
-                self._scatter_plot.addItem(line_item)
+                self._plot.addItem(line_item)
 
-#                scatter_item = pg.ScatterPlotItem(
-#                    x=times_array,
-#                    y=y_array,
-#                    pen=pg.mkPen(color=color),
-#                    brush=pg.mkBrush(color=color),
-#                    size=4
-#                )
-#                scatter_item.veh_id = veh_id  # Store vehicle ID on plot item                
-#                self._scatter_plot.addItem(scatter_item)
-                
                 logger.debug(f"Plotted {len(times)} {self.Y_COLUMN} points for vehicle {veh_id}")
             
             # Stream through database results
@@ -207,12 +268,39 @@ class TimeSpeedDialog(QDialog):
                 plot_vehicle_data(current_veh_id, current_times, current_y_values)
             
             # Auto-range to fit all data
-            self._scatter_plot.autoRange()
+            self._plot.autoRange()
+            
+            # Initialize y-axis slider range based on loaded data
+            if self._vehicle_data:
+                all_y_values = []
+                for data in self._vehicle_data.values():
+                    all_y_values.extend(data['y_values'])
+                
+                if all_y_values:
+                    y_min = float(np.min(all_y_values))
+                    y_max = float(np.max(all_y_values))
+                    self._y_slider.setRange(y_min, y_max)
+                    self._y_slider.setValue((y_min, y_max))
             
             logger.debug(f"Loaded {self.Y_COLUMN} data for {len(self._vehicle_data)} vehicles")
             
         except sqlite3.Error as e:
             logger.error(f"Error loading {self.Y_COLUMN} data: {e}")
+            
+    def _on_slider_changed(self):
+        """Handle changes to sliders by updating the plot view range."""
+        # Get current slider ranges
+        time_min, time_max = self._time_slider.value()
+        y_min, y_max = self._y_slider.value()
+        
+        # Update plot view to match slider ranges
+        self._plot.getViewBox().setRange(
+            xRange=[time_min, time_max],
+            yRange=[y_min, y_max],
+            padding=0
+        )
+        
+        logger.debug(f"Applied slider filters: time=[{time_min}, {time_max}], y=[{y_min}, {y_max}]")
     
     def _handle_mouse_moved(self, pos):
         """Handle mouse movement for showing tooltips with hysteresis.
@@ -226,7 +314,7 @@ class TimeSpeedDialog(QDialog):
             return
         self._last_mouse_move_time = current_time
         
-        view_box = self._scatter_plot.getViewBox()
+        view_box = self._plot.getViewBox()
         mouse_point = view_box.mapSceneToView(pos)
         mx, my = mouse_point.x(), mouse_point.y()
         

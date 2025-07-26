@@ -9,6 +9,6 @@ class TimeAccelDialog(TimeSpeedDialog):
     
     # Override class attributes for acceleration plotting
     Y_COLUMN = "veh_accel"
-    Y_LABEL = "Acceleration (m/s²)"
+    Y_LABEL = "Accel (m/s²)"
     PLOT_TITLE_SUFFIX = "Acceleration vs Time"
     TOLERANCE = 1.0  # Acceleration tolerance in m/s²

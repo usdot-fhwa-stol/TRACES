@@ -135,6 +135,11 @@ class TimeSpacePlotWidget(QWidget):
         self._event_button.clicked.connect(self._open_settings_dialog)
         control_layout.addWidget(self._event_button)
         
+        # Lane combobox next
+        self._lane_combobox = QComboBox()
+        self._lane_combobox.currentIndexChanged.connect(self._on_lane_changed)
+        control_layout.addWidget(self._lane_combobox)        
+
         # Distance slider section
         dist_label = QLabel("Dist (m)")
         dist_label.setStyleSheet("font-weight: bold;")
@@ -145,11 +150,6 @@ class TimeSpacePlotWidget(QWidget):
         self._dist_slider.setOrientation(Qt.Orientation.Vertical)
         self._dist_slider.valueChanged.connect(self._on_slider_changed)
         control_layout.addWidget(self._dist_slider, stretch=1)
-        
-        # Lane combobox at the bottom
-        self._lane_combobox = QComboBox()
-        self._lane_combobox.currentIndexChanged.connect(self._on_lane_changed)
-        control_layout.addWidget(self._lane_combobox)
         
         main_layout.addLayout(control_layout)
         
