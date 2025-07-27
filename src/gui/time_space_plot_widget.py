@@ -34,10 +34,10 @@ class TimeSpacePlotWidget(QWidget):
         _series (dict): Dictionary of vehicle series data by veh_id.
         _tooltip (QLabel): Tooltip for displaying point information.
         _last_queried_point (tuple): Tracks tooltip point to reduce queries.
-        _selected_series (set): Set of selected vehicle IDs.
+        _selected_series (set): Set of selected vehicle IDs on current lane.
         _last_mouse_move_time (float): Timestamp of last mouse move for debouncing.
         _lane_ids (list): List of available lane IDs for current event.
-        _veh_ids (list): List of available vehicle IDs for current event.
+        _veh_ids (list): List of available vehicle IDs for entire event.
         series_color (list): Static list of HTML hex colors for series.
         text_color (list): Static list of text colors for tooltip content.
     """
@@ -75,7 +75,7 @@ class TimeSpacePlotWidget(QWidget):
         self._series = None
         self._tooltip = None
         self._last_queried_point = None
-        self._selected_series = set()
+        self._selected_series = None
         self._last_mouse_move_time = 0.0
         self._lane_ids = []
         self._veh_ids = []
@@ -205,7 +205,6 @@ class TimeSpacePlotWidget(QWidget):
         self._time_range = (time_min, time_max)
         self._lane_ids = event_summary.get('lane_id', [])
         self._veh_ids = event_summary.get('veh_id', [])
-        self._selected_series.clear()
         self._clear_selection_box()
     
         # Update plot title
@@ -260,7 +259,7 @@ class TimeSpacePlotWidget(QWidget):
         
         # Populate combobox with provided lane_ids
         for lane_id in self._lane_ids:
-            self._lane_combobox.addItem(f"Lane {lane_id:2d}", lane_id)
+            self._lane_combobox.addItem(f"Lane {lane_id:2d}", {'lane_id': lane_id, 'lane_series': set()})
             
         # Default to first item and update plot
         if self._lane_ids:
@@ -305,23 +304,23 @@ class TimeSpacePlotWidget(QWidget):
         series['veh_dist_trav'] = distances
         
         # Apply current slider filters
-        time_filter = (times >= time_min) & (times <= time_max)
-        dist_filter = (distances >= dist_min) & (distances <= dist_max)
-        combined_filter = time_filter & dist_filter
+#        time_filter = (times >= time_min) & (times <= time_max)
+#        dist_filter = (distances >= dist_min) & (distances <= dist_max)
+#        combined_filter = time_filter & dist_filter
         
         # Apply filter to get filtered arrays for display
-        filtered_times = times[combined_filter]
-        filtered_distances = distances[combined_filter]
+#        filtered_times = times[combined_filter]
+#        filtered_distances = distances[combined_filter]
         
         # Only create plot item if there are points to display
-        if len(filtered_times) > 0:
+        if len(times) > 0:
             # Set color based on _selected_series
             color = series['color'] if veh_id in self._selected_series or not self._selected_series else '#a9a9a9'
             
             # Create scatter plot item with filtered data
             scatter_item = pg.ScatterPlotItem(
-                x=filtered_times, 
-                y=filtered_distances, 
+                x=times, 
+                y=distances, 
                 pen=pg.mkPen(color=color), 
                 brush=pg.mkBrush(color=color), 
                 size=4
@@ -341,7 +340,8 @@ class TimeSpacePlotWidget(QWidget):
             # Clear existing plot items and selection box
             self._scatter_plot.clear()
             self._clear_selection_box()
-            
+            self._selected_series = self._lane_combobox.currentData()['lane_series']
+
             # Reset arrays for each series but keep the series structure
             for series in self._series.values():
                 series['plot_item'] = None
@@ -358,7 +358,7 @@ class TimeSpacePlotWidget(QWidget):
                 FROM events 
                 WHERE event_id = ? AND lane_id = ? 
                 ORDER BY veh_id, veh_time
-            """, (self._current_event_id, self._lane_combobox.currentData()))
+            """, (self._current_event_id, self._lane_combobox.currentData()['lane_id']))
             
             # Process records one by one using streaming approach
             prev_veh_id = -1
@@ -390,7 +390,7 @@ class TimeSpacePlotWidget(QWidget):
                 self._create_scatter_plot_for_vehicle(prev_veh_id, current_times, current_distances,
                                                     time_min, time_max, dist_min, dist_max)
 
-            logger.debug(f"Updated plot data for event {self._current_event_id}, lane {self._lane_combobox.currentData()}")
+            logger.debug(f"Updated plot data for event {self._current_event_id}, lane {self._lane_combobox.currentData()['lane_id']}")
 
         except sqlite3.Error as e:
             logger.error(f"Error updating plot data: {e}")
@@ -415,19 +415,19 @@ class TimeSpacePlotWidget(QWidget):
         )
         
         # Update each series with filtered data
-        for series in self._series.values():
-            if series['plot_item'] is not None and len(series['veh_time']) > 0 and len(series['veh_dist_trav']) > 0:
+#        for series in self._series.values():
+#            if series['plot_item'] is not None and len(series['veh_time']) > 0 and len(series['veh_dist_trav']) > 0:
                 # Create numpy filter for time and distance ranges
-                time_filter = (series['veh_time'] >= time_min) & (series['veh_time'] <= time_max)
-                dist_filter = (series['veh_dist_trav'] >= dist_min) & (series['veh_dist_trav'] <= dist_max)
-                combined_filter = time_filter & dist_filter
+#                time_filter = (series['veh_time'] >= time_min) & (series['veh_time'] <= time_max)
+#                dist_filter = (series['veh_dist_trav'] >= dist_min) & (series['veh_dist_trav'] <= dist_max)
+#                combined_filter = time_filter & dist_filter
                 
                 # Apply filter to get filtered arrays
-                filtered_times = series['veh_time'][combined_filter]
-                filtered_distances = series['veh_dist_trav'][combined_filter]
+#                filtered_times = series['veh_time'][combined_filter]
+#                filtered_distances = series['veh_dist_trav'][combined_filter]
                 
                 # Update the scatter plot item with filtered data
-                series['plot_item'].setData(x=filtered_times, y=filtered_distances)
+#                series['plot_item'].setData(x=filtered_times, y=filtered_distances)
                 
         logger.debug(f"Applied slider filters: time=[{time_min}, {time_max}], dist=[{dist_min}, {dist_max}]")
 
@@ -533,7 +533,9 @@ class TimeSpacePlotWidget(QWidget):
     def keyPressEvent(self, event: QKeyEvent):
         """Handle key press events, clearing selection on Escape key."""
         if event.key() == Qt.Key.Key_Escape:
-            self._selected_series.clear()
+            for i in range(self._lane_combobox.count()): # clear all selected series
+                self._lane_combobox.itemData(i)['lane_series'].clear()
+
             self._update_plot_colors()
             self._clear_selection_box()
             logger.debug("Cleared selected series on Escape key")
