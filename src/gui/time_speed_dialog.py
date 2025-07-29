@@ -6,13 +6,14 @@ for displaying time-speed and time-acceleration plots with interactive tooltips.
 """
 
 import logging
+import math
 import time
 import numpy as np
 import sqlite3
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QDialog, QHBoxLayout, QVBoxLayout, QLabel
 import pyqtgraph as pg
-from superqt import QLabeledRangeSlider
+from superqt import QLabeledRangeSlider, QLabeledDoubleRangeSlider
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -154,8 +155,9 @@ class TimeSpeedDialog(QDialog):
         y_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         control_layout.addWidget(y_label)
 
-        self._y_slider = QLabeledRangeSlider()
+        self._y_slider = QLabeledDoubleRangeSlider()
         self._y_slider.setOrientation(Qt.Orientation.Vertical)
+        self._y_slider.setDecimals(1)
         control_layout.addWidget(self._y_slider, stretch=1)
         main_layout.addLayout(control_layout)
         
@@ -277,8 +279,8 @@ class TimeSpeedDialog(QDialog):
                     all_y_values.extend(data['y_values'])
                 
                 if all_y_values:
-                    y_min = float(np.min(all_y_values))
-                    y_max = float(np.max(all_y_values))
+                    y_min = math.floor(float(np.min(all_y_values)))
+                    y_max = math.ceil(float(np.max(all_y_values)))
                     self._y_slider.setRange(y_min, y_max)
                     self._y_slider.setValue((y_min, y_max))
             

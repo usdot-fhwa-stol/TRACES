@@ -4,7 +4,7 @@
   "col_defs": 
   {
     "event_id": {"func": "group", "parms": [49, 50, 53]},
-    "veh_id": {"type": "int", "parms": ["1"]},
+    "veh_id": {"src_col": 0, "type": "int"},
     "veh_time": {"src_col": 1, "units": "s"},
     "lane_id": {"src_col": 43, "type": "int"},
     "x_map_loc": {"src_col": 5, "units": "m"},

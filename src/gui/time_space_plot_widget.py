@@ -14,7 +14,6 @@ from .custom_view_box import CustomViewBox
 # Set up logger
 logger = logging.getLogger(__name__)
 
-
 class TimeSpacePlotWidget(QWidget):
     """Widget for displaying time-space trajectory plots with interactive controls.
     
@@ -42,18 +41,30 @@ class TimeSpacePlotWidget(QWidget):
         text_color (list): Static list of text colors for tooltip content.
     """
     
+#    series_color = [
+#        '#e6194B', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', 
+#        '#42d4f4', '#f032e6', '#bfef45', '#fabed4', '#469990', '#dcbeff', 
+#        '#9A6324', '#fffac8', '#800000', '#aaffc3', '#808000', '#ffd8b1', 
+#        '#000075', '#000000'
+#    ]
+    
+#    text_color = [
+#        '#ffffff', '#ffffff', '#000000', '#ffffff', '#ffffff', '#ffffff', 
+#        '#000000', '#ffffff', '#000000', '#000000', '#ffffff', '#000000', 
+#        '#ffffff', '#000000', '#ffffff', '#000000', '#ffffff', '#000000', 
+#        '#ffffff', '#ffffff'
+#    ]
+
     series_color = [
         '#e6194B', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', 
-        '#42d4f4', '#f032e6', '#bfef45', '#fabed4', '#469990', '#dcbeff', 
-        '#9A6324', '#fffac8', '#800000', '#aaffc3', '#808000', '#ffd8b1', 
-        '#000075', '#000000'
+        '#42d4f4', '#f032e6', '#bfef45', '#469990', '#9A6324', '#800000', 
+        '#808000', '#000075', '#000000'
     ]
     
     text_color = [
-        "#ffffff", "#ffffff", "#000000", "#ffffff", "#ffffff", "#ffffff", 
-        "#000000", "#ffffff", "#000000", "#000000", "#ffffff", "#000000", 
-        "#ffffff", "#000000", "#ffffff", "#000000", "#ffffff", "#000000", 
-        "#ffffff", "#ffffff"
+        '#ffffff', '#ffffff', '#000000', '#ffffff', '#ffffff', '#ffffff', 
+        '#000000', '#ffffff', '#000000', '#ffffff', '#ffffff', '#ffffff', 
+        '#ffffff', '#ffffff', '#ffffff'
     ]
 
     def __init__(self, parent=None):
