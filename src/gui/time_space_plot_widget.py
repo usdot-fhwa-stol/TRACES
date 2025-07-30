@@ -41,20 +41,6 @@ class TimeSpacePlotWidget(QWidget):
         text_color (list): Static list of text colors for tooltip content.
     """
     
-#    series_color = [
-#        '#e6194B', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', 
-#        '#42d4f4', '#f032e6', '#bfef45', '#fabed4', '#469990', '#dcbeff', 
-#        '#9A6324', '#fffac8', '#800000', '#aaffc3', '#808000', '#ffd8b1', 
-#        '#000075', '#000000'
-#    ]
-    
-#    text_color = [
-#        '#ffffff', '#ffffff', '#000000', '#ffffff', '#ffffff', '#ffffff', 
-#        '#000000', '#ffffff', '#000000', '#000000', '#ffffff', '#000000', 
-#        '#ffffff', '#000000', '#ffffff', '#000000', '#ffffff', '#000000', 
-#        '#ffffff', '#ffffff'
-#    ]
-
     series_color = [
         '#e6194B', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', 
         '#42d4f4', '#f032e6', '#bfef45', '#469990', '#9A6324', '#800000', 
@@ -86,7 +72,7 @@ class TimeSpacePlotWidget(QWidget):
         self._series = None
         self._tooltip = None
         self._last_queried_point = None
-        self._selected_series = None
+        self._selected_series = set()
         self._last_mouse_move_time = 0.0
         self._lane_ids = []
         self._veh_ids = []
@@ -113,6 +99,7 @@ class TimeSpacePlotWidget(QWidget):
         self._scatter_plot.scene().sigMouseMoved.connect(self._handle_mouse_moved)
         
         # Disable auto-range button
+        self._scatter_plot.getPlotItem().hideButtons()
         self._scatter_plot.getViewBox().setMenuEnabled(False)
         
         # Disable default mouse interactions
@@ -145,11 +132,6 @@ class TimeSpacePlotWidget(QWidget):
         self._event_button = QPushButton(" ")
         self._event_button.clicked.connect(self._open_settings_dialog)
         control_layout.addWidget(self._event_button)
-        
-        # Lane combobox next
-        self._lane_combobox = QComboBox()
-        self._lane_combobox.currentIndexChanged.connect(self._on_lane_changed)
-        control_layout.addWidget(self._lane_combobox)        
 
         # Distance slider section
         dist_label = QLabel("Dist (m)")
@@ -161,6 +143,11 @@ class TimeSpacePlotWidget(QWidget):
         self._dist_slider.setOrientation(Qt.Orientation.Vertical)
         self._dist_slider.valueChanged.connect(self._on_slider_changed)
         control_layout.addWidget(self._dist_slider, stretch=1)
+        
+        # Lane combobox next
+        self._lane_combobox = QComboBox()
+        self._lane_combobox.currentIndexChanged.connect(self._on_lane_changed)
+        control_layout.addWidget(self._lane_combobox)
         
         main_layout.addLayout(control_layout)
         
@@ -217,7 +204,8 @@ class TimeSpacePlotWidget(QWidget):
         self._lane_ids = event_summary.get('lane_id', [])
         self._veh_ids = event_summary.get('veh_id', [])
         self._clear_selection_box()
-    
+        self._selected_series.clear()
+
         # Update plot title
         self._scatter_plot.setTitle(event_summary.get('event_name', f"Event {event_id}"))
     
@@ -314,15 +302,6 @@ class TimeSpacePlotWidget(QWidget):
         series['veh_time'] = times
         series['veh_dist_trav'] = distances
         
-        # Apply current slider filters
-#        time_filter = (times >= time_min) & (times <= time_max)
-#        dist_filter = (distances >= dist_min) & (distances <= dist_max)
-#        combined_filter = time_filter & dist_filter
-        
-        # Apply filter to get filtered arrays for display
-#        filtered_times = times[combined_filter]
-#        filtered_distances = distances[combined_filter]
-        
         # Only create plot item if there are points to display
         if len(times) > 0:
             # Set color based on _selected_series
@@ -351,7 +330,6 @@ class TimeSpacePlotWidget(QWidget):
             # Clear existing plot items and selection box
             self._scatter_plot.clear()
             self._clear_selection_box()
-            self._selected_series = self._lane_combobox.currentData()['lane_series']
 
             # Reset arrays for each series but keep the series structure
             for series in self._series.values():
@@ -424,22 +402,7 @@ class TimeSpacePlotWidget(QWidget):
             yRange=[dist_min, dist_max],
             padding=0
         )
-        
-        # Update each series with filtered data
-#        for series in self._series.values():
-#            if series['plot_item'] is not None and len(series['veh_time']) > 0 and len(series['veh_dist_trav']) > 0:
-                # Create numpy filter for time and distance ranges
-#                time_filter = (series['veh_time'] >= time_min) & (series['veh_time'] <= time_max)
-#                dist_filter = (series['veh_dist_trav'] >= dist_min) & (series['veh_dist_trav'] <= dist_max)
-#                combined_filter = time_filter & dist_filter
-                
-                # Apply filter to get filtered arrays
-#                filtered_times = series['veh_time'][combined_filter]
-#                filtered_distances = series['veh_dist_trav'][combined_filter]
-                
-                # Update the scatter plot item with filtered data
-#                series['plot_item'].setData(x=filtered_times, y=filtered_distances)
-                
+
         logger.debug(f"Applied slider filters: time=[{time_min}, {time_max}], dist=[{dist_min}, {dist_max}]")
 
     def _handle_mouse_moved(self, pos):
@@ -493,21 +456,23 @@ class TimeSpacePlotWidget(QWidget):
                 # Query database for new point
                 cursor = self._db_connection.cursor()
                 cursor.execute("""
-                    SELECT veh_speed, veh_accel, veh_automation, veh_length
+                    SELECT lane_id, veh_speed, veh_accel, veh_automation, veh_length
                     FROM events
                     WHERE event_id = ? AND veh_id = ? AND veh_time = ?
                 """, (self._current_event_id, veh_id, veh_time))
                 row = cursor.fetchone()
                 
                 if row:
-                    veh_speed = f"{row[0]:.2f}" if row[0] is not None else " "
-                    veh_accel = f"{row[1]:.2f}" if row[1] is not None else " "
-                    veh_auto = f"{row[2]:d}" if row[2] is not None else " "
-                    veh_length = f"{row[3]:.2f}" if row[3] is not None else " "
+                    lane_id = f"{row[0]:d}" if row[0] is not None else " "
+                    veh_speed = f"{row[1]:.2f}" if row[1] is not None else " "
+                    veh_accel = f"{row[2]:.2f}" if row[2] is not None else " "
+                    veh_auto = f"{row[3]:d}" if row[3] is not None else " "
+                    veh_length = f"{row[4]:.2f}" if row[4] is not None else " "
     
                     tooltip_text = (
                         f"Vehicle ID: {veh_id}\n"
                         f"Time: {veh_time:.2f} s\n"
+                        f"Lane ID: {lane_id}\n"
                         f"Distance: {veh_dist_trav:.2f} m\n"
                         f"Speed: {veh_speed} m/s\n"
                         f"Acceleration: {veh_accel} m/s²\n"
@@ -544,9 +509,7 @@ class TimeSpacePlotWidget(QWidget):
     def keyPressEvent(self, event: QKeyEvent):
         """Handle key press events, clearing selection on Escape key."""
         if event.key() == Qt.Key.Key_Escape:
-            for i in range(self._lane_combobox.count()): # clear all selected series
-                self._lane_combobox.itemData(i)['lane_series'].clear()
-
+            self._selected_series.clear()
             self._update_plot_colors()
             self._clear_selection_box()
             logger.debug("Cleared selected series on Escape key")

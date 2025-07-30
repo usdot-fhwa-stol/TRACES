@@ -367,17 +367,6 @@ class CustomViewBox(pg.ViewBox):
         self.parent_widget._update_plot_colors()
         logger.debug("Inverted vehicle selection")
     
-    def _export_data(self):
-        """Export data for vehicles."""
-        if not self.parent_widget._selected_series:
-            logger.warning("No vehicles selected for export")
-            return
-        
-        # Placeholder for export functionality
-        selected_count = len(self.parent_widget._selected_series)
-        logger.info(f"Export requested for {selected_count} selected vehicles")
-        # TODO: Implement actual export functionality
-    
     def _select_vehicle_only(self):
         """Select only the clicked vehicle."""
         if self._current_context_vehicle is not None:
@@ -399,13 +388,6 @@ class CustomViewBox(pg.ViewBox):
             self.parent_widget._update_plot_colors()
             logger.debug(f"Toggled selection for vehicle {veh_id}")
     
-    def _hide_vehicle(self):
-        """Hide the clicked vehicle (placeholder functionality)."""
-        if self._current_context_vehicle is not None:
-            veh_id = self._current_context_vehicle
-            logger.info(f"Hide vehicle {veh_id} requested")
-            # TODO: Implement vehicle hiding functionality
-    
     def _reset_view(self):
         """Reset the plot view to show all data."""
         self.autoRange()
@@ -423,7 +405,12 @@ class CustomViewBox(pg.ViewBox):
         if not veh_ids:
             logger.warning("No vehicles available for time-speed dialog")
             return
-        
+
+        # Collect lane ids
+        lane_ids = []
+        for i in range(self.parent_widget._lane_combobox.count()):
+            lane_ids.append(self.parent_widget._lane_combobox.itemData(i)['lane_id'])
+
         # Create and show time-speed dialog
         time_min, time_max = self.parent_widget._time_slider.value()
         dialog = TimeSpeedDialog(
@@ -431,6 +418,7 @@ class CustomViewBox(pg.ViewBox):
             self.parent_widget._db_connection,
             self.parent_widget._current_event_id,
             veh_ids,
+            lane_ids,
             time_min,
             time_max,
             series_colors,
@@ -451,7 +439,12 @@ class CustomViewBox(pg.ViewBox):
         if not veh_ids:
             logger.warning("No vehicles available for time-acceleration dialog")
             return
-        
+
+        # Collect lane ids
+        lane_ids = []
+        for i in range(self.parent_widget._lane_combobox.count()):
+            lane_ids.append(self.parent_widget._lane_combobox.itemData(i)['lane_id'])
+
         # Create and show time-acceleration dialog
         time_min, time_max = self.parent_widget._time_slider.value()
         dialog = TimeAccelDialog(
@@ -459,6 +452,7 @@ class CustomViewBox(pg.ViewBox):
             self.parent_widget._db_connection,
             self.parent_widget._current_event_id,
             veh_ids,
+            lane_ids,
             time_min,
             time_max,
             series_colors,

@@ -11,7 +11,7 @@ import time
 import numpy as np
 import sqlite3
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QDialog, QHBoxLayout, QVBoxLayout, QLabel
+from PyQt6.QtWidgets import QComboBox, QDialog, QHBoxLayout, QVBoxLayout, QLabel
 import pyqtgraph as pg
 from superqt import QLabeledRangeSlider, QLabeledDoubleRangeSlider
 
@@ -44,7 +44,7 @@ class TimeSpeedDialog(QDialog):
     PLOT_TITLE_SUFFIX = "Speed vs Time"
     TOLERANCE = 2.0  # Tolerance for point detection
     
-    def __init__(self, parent, db_connection, event_id, veh_ids, time_min, time_max, series_colors, text_colors):
+    def __init__(self, parent, db_connection, event_id, veh_ids, lane_ids, time_min, time_max, series_colors, text_colors):
         """Initialize the TimeSpeedDialog.
         
         Args:
@@ -69,39 +69,39 @@ class TimeSpeedDialog(QDialog):
         if len(veh_ids) == 1:
             title = f"{self.PLOT_TITLE_SUFFIX} - Vehicle {veh_ids[0]}"
         else:
-            title = f"{self.PLOT_TITLE_SUFFIX} - {len(veh_ids)} Vehicles"
+            veh_list = ', '.join(str(v) for v in veh_ids)
+            title = f"{self.PLOT_TITLE_SUFFIX} - Vehicles {veh_list}"
         self.setWindowTitle(title)
         self.setModal(True)  # Do not allow interaction with parent window
         
         # Size dialog to 80% of parent size and center it
         self._size_and_center_dialog()
         
-        self._setup_ui(time_min, time_max)
+        self._setup_ui(lane_ids, time_min, time_max)
         self._load_and_plot_data()
     
     def _size_and_center_dialog(self):
         """Size the dialog to 80% of parent size and center it within the parent."""
-        if self.parent():
-            # Get parent geometry
-            parent_geometry = self.parent().geometry()
-            parent_width = parent_geometry.width()
-            parent_height = parent_geometry.height()
-            
-            # Calculate 80% of parent size
-            dialog_width = int(parent_width * 0.8)
-            dialog_height = int(parent_height * 0.8)
-            
-            # Calculate position to center the dialog
-            x = parent_geometry.x() + (parent_width - dialog_width) // 2
-            y = parent_geometry.y() + (parent_height - dialog_height) // 2
-            
-            # Set dialog geometry (position and size)
-            self.setGeometry(x, y, dialog_width, dialog_height)
-        else:
-            # Fallback to original fixed size if no parent
-            self.resize(900, 600)
+        parent = self.parent().parent()
+        if parent:
+            parent_geom = parent.frameGeometry()
+            dialog_width = int(parent_geom.width() * 0.8)
+            dialog_height = int(parent_geom.height() * 0.8)
     
-    def _setup_ui(self, time_min, time_max):
+            # Resize dialog
+            self.resize(dialog_width, dialog_height)
+    
+            # Center the dialog over the parent
+            parent_center = parent_geom.center()
+            self_geom = self.frameGeometry()
+            self_geom.moveCenter(parent_center)
+            self.move(self_geom.topLeft())
+        else:
+            # Fallback
+            self.resize(900, 600)
+
+    
+    def _setup_ui(self, lane_ids, time_min, time_max):
         """Set up the dialog UI components."""
         # Create main horizontal layout
         main_layout = QHBoxLayout(self)
@@ -120,6 +120,7 @@ class TimeSpeedDialog(QDialog):
         self._plot.scene().sigMouseMoved.connect(self._handle_mouse_moved)
                 
         # Disable auto-range button
+        self._plot.getPlotItem().hideButtons()
         self._plot.getViewBox().setMenuEnabled(False)
         
         # Disable default mouse interactions
@@ -159,6 +160,11 @@ class TimeSpeedDialog(QDialog):
         self._y_slider.setOrientation(Qt.Orientation.Vertical)
         self._y_slider.setDecimals(1)
         control_layout.addWidget(self._y_slider, stretch=1)
+        
+        # Lane combobox next
+        self._lane_combobox = QComboBox()
+        control_layout.addWidget(self._lane_combobox)
+
         main_layout.addLayout(control_layout)
         
         # connect slider signals after initializaton
@@ -169,6 +175,13 @@ class TimeSpeedDialog(QDialog):
         self._tooltip = QLabel(self._plot)
         self._tooltip.setStyleSheet("QLabel { padding: 5px; }")
         self._tooltip.hide()
+
+        # Populate combobox with lane_ids
+        self._lane_combobox.addItem("All Lanes", -1)
+        for lane_id in lane_ids:
+            self._lane_combobox.addItem(f"Lane {lane_id:2d}", lane_id)
+
+        self._lane_combobox.currentIndexChanged.connect(self._on_lane_changed)
     
     def _get_data_query(self):
         """Get the SQL query for loading plot data.
@@ -176,11 +189,23 @@ class TimeSpeedDialog(QDialog):
         Returns:
             str: SQL query string
         """
-        placeholders = ','.join('?' for _ in self.veh_ids)
+        all_lane_ids = []
+        selected_lane = self._lane_combobox.currentData()
+        if selected_lane < 0: # gather all lane ids from the combo box
+            for i in range(1, self._lane_combobox.count()): # skip All lanes value
+                all_lane_ids.append(self._lane_combobox.itemData(i))
+        else:
+            all_lane_ids.append(selected_lane)
+
+        veh_ids = ','.join(str(x) for x in self.veh_ids)
+        lane_ids = ','.join(str(x) for x in all_lane_ids)
         return f"""
             SELECT veh_id, veh_time, {self.Y_COLUMN}
             FROM events
-            WHERE event_id = ? AND veh_id IN ({placeholders}) AND {self.Y_COLUMN} IS NOT NULL
+            WHERE event_id = ? 
+            AND veh_id IN ({veh_ids}) 
+            AND lane_id IN ({lane_ids}) 
+            AND {self.Y_COLUMN} IS NOT NULL
             ORDER BY veh_id, veh_time
         """
     
@@ -191,7 +216,7 @@ class TimeSpeedDialog(QDialog):
             str: SQL query string
         """
         return f"""
-            SELECT veh_id, veh_time, {self.Y_COLUMN}, veh_dist_trav, veh_speed, veh_accel, veh_automation, veh_length
+            SELECT veh_id, veh_time, lane_id, {self.Y_COLUMN}, veh_dist_trav, veh_speed, veh_accel, veh_automation, veh_length
             FROM events
             WHERE event_id = ? AND veh_id = ? 
             AND veh_time BETWEEN ? AND ?
@@ -200,11 +225,15 @@ class TimeSpeedDialog(QDialog):
             LIMIT 1
         """
     
-    def _load_and_plot_data(self):
-        """Load data from database and create plots for all vehicles."""
+    def _load_and_plot_data(self, reset_view=True):
+        """Load data from database and create plots for vehicles."""
         try:
+            # Clear previous plots and state
+            self._plot.clear()
+            self._vehicle_data.clear()
+
             cursor = self.db_connection.cursor()
-            cursor.execute(self._get_data_query(), [self.event_id] + self.veh_ids)
+            cursor.execute(self._get_data_query(), [self.event_id])
             
             # Process data by vehicle using streaming approach
             current_veh_id = None
@@ -269,11 +298,8 @@ class TimeSpeedDialog(QDialog):
             if current_veh_id is not None and current_times:
                 plot_vehicle_data(current_veh_id, current_times, current_y_values)
             
-            # Auto-range to fit all data
-            self._plot.autoRange()
-            
             # Initialize y-axis slider range based on loaded data
-            if self._vehicle_data:
+            if reset_view and self._vehicle_data:
                 all_y_values = []
                 for data in self._vehicle_data.values():
                     all_y_values.extend(data['y_values'])
@@ -365,16 +391,17 @@ class TimeSpeedDialog(QDialog):
                         # Extract data
                         veh_id = row[0]
                         veh_time = row[1]
-                        y_value = row[2]
-                        veh_dist_trav = row[3] if len(row) > 3 else None
-                        veh_speed = row[4] if len(row) > 4 else None
-                        veh_accel = row[5] if len(row) > 5 else None
-                        veh_automation = row[6] if len(row) > 6 else None
-                        veh_length = row[7] if len(row) > 7 else None
+                        lane_id = row[2]
+                        y_value = row[3]
+                        veh_dist_trav = row[4] if len(row) > 4 else None
+                        veh_speed = row[5] if len(row) > 5 else None
+                        veh_accel = row[6] if len(row) > 6 else None
+                        veh_automation = row[7] if len(row) > 7 else None
+                        veh_length = row[8] if len(row) > 8 else None
                         
                         # Generate tooltip content
                         tooltip_text = self._generate_tooltip_content(
-                            veh_id, veh_time, veh_dist_trav, veh_speed, 
+                            veh_id, veh_time, lane_id, veh_dist_trav, veh_speed, 
                             veh_accel, veh_automation, veh_length
                         )
                         self._tooltip.setText(tooltip_text)
@@ -412,13 +439,14 @@ class TimeSpeedDialog(QDialog):
             self._last_queried_point = None
     
     @staticmethod
-    def _generate_tooltip_content(veh_id, veh_time, veh_dist_trav, veh_speed, 
+    def _generate_tooltip_content(veh_id, veh_time, lane_id, veh_dist_trav, veh_speed, 
                                  veh_accel, veh_automation, veh_length):
         """Generate tooltip content for vehicle data point.
         
         Args:
             veh_id (int): Vehicle ID
             veh_time (float): Vehicle time
+            lane_id (int): Lane ID
             veh_dist_trav (float or None): Distance traveled
             veh_speed (float or None): Vehicle speed
             veh_accel (float or None): Vehicle acceleration
@@ -437,9 +465,14 @@ class TimeSpeedDialog(QDialog):
         return (
             f"Vehicle ID: {veh_id}\n"
             f"Time: {veh_time:.2f} s\n"
+            f"Lane ID: {lane_id}\n"
             f"Distance: {veh_dist_str} m\n"
             f"Speed: {veh_speed_str} m/s\n"
             f"Acceleration: {veh_accel_str} m/s²\n"
             f"Automation: {veh_auto_str}\n"
             f"Length: {veh_length_str} m"
         )
+
+    def _on_lane_changed(self):
+        """Handle change in selected lane."""
+        self._load_and_plot_data(reset_view=False)
