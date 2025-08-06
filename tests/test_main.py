@@ -78,15 +78,26 @@ class TestUtils(unittest.TestCase):
         self.assertTrue(os.path.isabs(result))
         self.assertTrue(result.endswith(test_file))
 
-    @patch('sys._MEIPASS', '/frozen/app/path')
     def test_get_resource_path_frozen(self):
         """Test get_resource_path when running as frozen PyInstaller app."""
         test_path = "about.html"
-        result = utils.get_resource_path(test_path)
         
-        # Should use _MEIPASS when available
-        expected = os.path.join('/frozen/app/path', test_path)
-        self.assertEqual(result, expected)
+        # Temporarily add _MEIPASS to sys to simulate frozen environment
+        original_meipass = getattr(sys, '_MEIPASS', None)
+        try:
+            sys._MEIPASS = '/frozen/app/path'
+            result = utils.get_resource_path(test_path)
+            
+            # Should use _MEIPASS when available
+            expected = os.path.join('/frozen/app/path', test_path)
+            self.assertEqual(result, expected)
+        finally:
+            # Clean up - remove _MEIPASS or restore original value
+            if original_meipass is None:
+                if hasattr(sys, '_MEIPASS'):
+                    delattr(sys, '_MEIPASS')
+            else:
+                sys._MEIPASS = original_meipass
 
     def test_get_resource_path_with_subdirs(self):
         """Test get_resource_path with nested subdirectories."""
