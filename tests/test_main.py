@@ -9,6 +9,12 @@ import sys
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
+# Mock PyQt6 modules before any imports that might use them
+sys.modules['PyQt6'] = MagicMock()
+sys.modules['PyQt6.QtCore'] = MagicMock()
+sys.modules['PyQt6.QtWidgets'] = MagicMock()
+sys.modules['PyQt6.QtGui'] = MagicMock()
+
 # Add src to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 

@@ -12,6 +12,13 @@ import io
 from unittest.mock import Mock, MagicMock, patch, call
 from pathlib import Path
 
+# Mock PyQt6 modules before any imports that might use them
+sys.modules['PyQt6'] = MagicMock()
+sys.modules['PyQt6.QtCore'] = MagicMock()
+sys.modules['PyQt6.QtWidgets'] = MagicMock()
+sys.modules['PyQt6.QtGui'] = MagicMock()
+sys.modules['utm'] = MagicMock()  # Mock utm library as well
+
 # Add src to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
