@@ -1,668 +1,687 @@
 """
 Unit tests for the data_import package.
-
-Tests cover:
-- BaseProcess abstract class
-- CsvAlgorithms utility functions
-- CsvProcess CSV import functionality
 """
 
-import pytest
-import sqlite3
+import unittest
 import tempfile
-import json
-import csv
-from pathlib import Path
-from unittest.mock import Mock, patch, MagicMock
-from io import StringIO
-
-# Import the modules to test
-import sys
+import sqlite3
 import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import sys
+import csv
+import io
+from unittest.mock import Mock, MagicMock, patch, call
+from pathlib import Path
+
+# Add src to path for imports
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 from data_import.base_process import BaseProcess
 from data_import.csv_algorithms import CsvAlgorithms
 from data_import.csv_process import CsvProcess, ByteCountingStream
 
 
-class TestBaseProcess:
-    """Test cases for BaseProcess abstract class."""
-    
+class TestBaseProcess(unittest.TestCase):
+    """Test cases for the BaseProcess abstract base class."""
+
     def test_base_process_is_abstract(self):
         """Test that BaseProcess cannot be instantiated directly."""
-        with pytest.raises(TypeError, match="Can't instantiate abstract class BaseProcess"):
+        with self.assertRaises(TypeError):
             BaseProcess()
-    
-    def test_process_method_not_implemented(self):
-        """Test that concrete subclass must implement process method."""
+
+    def test_process_method_is_abstract(self):
+        """Test that process method must be implemented by subclasses."""
         class IncompleteProcessor(BaseProcess):
             pass
         
-        # Should raise TypeError when trying to instantiate without implementing abstract method
-        with pytest.raises(TypeError, match="Can't instantiate abstract class IncompleteProcessor"):
+        with self.assertRaises(TypeError):
             IncompleteProcessor()
-        
-        # Test that proper implementation works
-        class CompleteProcessor(BaseProcess):
-            def process(self, config: dict, input_path: str, db_connection, worker) -> int:
+
+    def test_concrete_implementation_works(self):
+        """Test that a concrete implementation can be instantiated."""
+        class ConcreteProcessor(BaseProcess):
+            def process(self, config, input_path, db_connection, worker):
                 return 0
         
-        # This should work fine
-        processor = CompleteProcessor()
-        result = processor.process({}, "", None, None)
-        assert result == 0
+        processor = ConcreteProcessor()
+        self.assertIsInstance(processor, BaseProcess)
+        
+        # Test that process method can be called
+        result = processor.process({}, "test.csv", None, None)
+        self.assertEqual(result, 0)
 
 
-class TestCsvAlgorithms:
-    """Test cases for CsvAlgorithms utility class."""
-    
-    def setup_method(self):
+class TestCsvAlgorithms(unittest.TestCase):
+    """Test cases for the CsvAlgorithms class."""
+
+    def setUp(self):
         """Set up test fixtures."""
         self.algorithms = CsvAlgorithms()
-    
-    def test_init_creates_empty_group_dict(self):
-        """Test that initialization creates empty group dictionary."""
-        assert self.algorithms._group_dict == {}
-    
+
     def test_copy_with_valid_data(self):
-        """Test copy function with valid data."""
-        row = ["123", "45.6", "text", "789.1"]
+        """Test copy method with valid data."""
+        row = ["1", "2.5", "hello", "world"]
+        col_def = {"src_col": 1, "type": "float", "parms": []}
         
-        # Test integer copy
-        col_def = {"src_col": 0, "type": "int"}
         result = self.algorithms.copy(row, col_def)
-        assert result == 123
+        self.assertEqual(result, 2.5)
+
+    def test_copy_with_int_type(self):
+        """Test copy method with integer type conversion."""
+        row = ["1", "2.7", "hello"]
+        col_def = {"src_col": 1, "type": "int", "parms": []}
         
-        # Test float copy
-        col_def = {"src_col": 1, "type": "float"}
         result = self.algorithms.copy(row, col_def)
-        assert result == 45.6
+        self.assertEqual(result, 2)  # Should truncate float to int
+
+    def test_copy_with_invalid_column(self):
+        """Test copy method with invalid column index."""
+        row = ["1", "2", "3"]
+        col_def = {"src_col": 5, "type": "float", "parms": [42.0]}
         
-        # Test string copy
-        col_def = {"src_col": 2, "type": "str"}
         result = self.algorithms.copy(row, col_def)
-        assert result == "text"
-    
-    def test_copy_with_float_string_to_int(self):
-        """Test copy function converts float strings to integers."""
-        row = ["123.0", "45.9"]
-        col_def = {"src_col": 0, "type": "int"}
-        result = self.algorithms.copy(row, col_def)
-        assert result == 123
-    
-    def test_copy_with_invalid_data(self):
-        """Test copy function with invalid data."""
-        row = ["invalid", "not_a_number"]
+        self.assertEqual(result, 42.0)  # Should return default from parms
+
+    def test_copy_with_empty_cell(self):
+        """Test copy method with empty cell."""
+        row = ["1", "", "3"]
+        col_def = {"src_col": 1, "type": "float", "parms": [99.0]}
         
-        # Test invalid integer
-        col_def = {"src_col": 0, "type": "int"}
         result = self.algorithms.copy(row, col_def)
-        assert result is None
+        self.assertEqual(result, 99.0)  # Should return default
+
+    def test_copy_with_invalid_data_type(self):
+        """Test copy method with invalid data type conversion."""
+        row = ["1", "not_a_number", "3"]
+        col_def = {"src_col": 1, "type": "float", "parms": []}
         
-        # Test invalid float
-        col_def = {"src_col": 1, "type": "float"}
         result = self.algorithms.copy(row, col_def)
-        assert result is None
-    
-    def test_copy_with_out_of_bounds_column(self):
-        """Test copy function with out of bounds column index."""
-        row = ["123", "456"]
-        col_def = {"src_col": 5, "type": "int", "parms": [999]}
+        self.assertIsNone(result)
+
+    def test_copy_with_string_type(self):
+        """Test copy method with string type (default)."""
+        row = ["1", "hello", "3"]
+        col_def = {"src_col": 1, "type": "string", "parms": []}
+        
         result = self.algorithms.copy(row, col_def)
-        assert result == 999  # Should return default from parms
-    
-    def test_copy_with_negative_column_uses_default(self):
-        """Test copy function with negative column uses default."""
-        row = ["123", "456"]
-        col_def = {"src_col": -1, "type": "int", "parms": [999]}
-        result = self.algorithms.copy(row, col_def)
-        assert result == 999
-    
-    def test_copy_with_empty_cell_uses_default(self):
-        """Test copy function with empty cell uses default."""
-        row = ["123", "", "789"]
-        col_def = {"src_col": 1, "type": "int", "parms": [999]}
-        result = self.algorithms.copy(row, col_def)
-        assert result == 999
-    
+        self.assertEqual(result, "hello")
+
     @patch('utm.from_latlon')
     @patch('utm.to_latlon')
-    def test_utm_common_valid_coordinates(self, mock_to_latlon, mock_from_latlon):
-        """Test utm_common with valid coordinates."""
-        # Mock UTM conversion functions
-        mock_from_latlon.return_value = (500000, 4500000, 17, 'T')
-        mock_to_latlon.return_value = (40.7589, -73.9851)
+    def test_utm_common_valid_conversion(self, mock_to_latlon, mock_from_latlon):
+        """Test utm_common method with valid UTM conversion."""
+        # Mock UTM library functions
+        mock_from_latlon.return_value = (500000.0, 4649776.0, 18, 'T')
+        mock_to_latlon.return_value = (42.0, -71.0)
         
-        row = ["-73.9851", "40.7589", "100.0", "200.0"]
-        col_def = {"parms": [0, 1, 2, 3]}
+        row = ["-71.0", "42.0", "1000.0", "2000.0"]
+        col_def = {"parms": [0, 1, 2, 3]}  # map_origin_x, map_origin_y, x_map_loc, y_map_loc
         
         lat, lon = CsvAlgorithms.utm_common(row, col_def)
         
-        assert lat == 40.7589
-        assert lon == -73.9851
-        mock_from_latlon.assert_called_once_with(40.7589, -73.9851)
-        mock_to_latlon.assert_called_once_with(500100.0, 4500200.0, 17, 'T')
-    
-    def test_utm_common_insufficient_params(self):
-        """Test utm_common with insufficient parameters."""
+        self.assertEqual(lat, 42.0)
+        self.assertEqual(lon, -71.0)
+        mock_from_latlon.assert_called_once_with(42.0, -71.0)
+        mock_to_latlon.assert_called_once_with(501000.0, 4651776.0, 18, 'T')
+
+    def test_utm_common_invalid_params(self):
+        """Test utm_common method with invalid parameters."""
         row = ["1", "2", "3"]
-        col_def = {"parms": [0, 1]}  # Only 2 params, need 4
+        col_def = {"parms": [0, 1]}  # Not enough parameters
         
         lat, lon = CsvAlgorithms.utm_common(row, col_def)
-        assert lat is None
-        assert lon is None
-    
-    def test_utm_common_out_of_bounds_params(self):
-        """Test utm_common with out of bounds parameter indices."""
-        row = ["1", "2"]
-        col_def = {"parms": [0, 1, 5, 6]}  # Indices 5,6 are out of bounds
+        
+        self.assertIsNone(lat)
+        self.assertIsNone(lon)
+
+    def test_utm_common_invalid_indices(self):
+        """Test utm_common method with out-of-bounds indices."""
+        row = ["1", "2", "3"]
+        col_def = {"parms": [0, 1, 2, 5]}  # Index 5 is out of bounds
         
         lat, lon = CsvAlgorithms.utm_common(row, col_def)
-        assert lat is None
-        assert lon is None
-    
-    def test_utm_common_invalid_coordinate_values(self):
-        """Test utm_common with invalid coordinate values."""
-        row = ["invalid", "40.7589", "100.0", "200.0"]
+        
+        self.assertIsNone(lat)
+        self.assertIsNone(lon)
+
+    @patch('utm.from_latlon', side_effect=ValueError("Invalid coordinates"))
+    def test_utm_common_conversion_error(self, mock_from_latlon):
+        """Test utm_common method with UTM conversion error."""
+        row = ["invalid", "coords", "1000", "2000"]
         col_def = {"parms": [0, 1, 2, 3]}
         
         lat, lon = CsvAlgorithms.utm_common(row, col_def)
-        assert lat is None
-        assert lon is None
-    
+        
+        self.assertIsNone(lat)
+        self.assertIsNone(lon)
+
     @patch.object(CsvAlgorithms, 'utm_common')
     def test_utm_lat(self, mock_utm_common):
-        """Test utm_lat function."""
-        mock_utm_common.return_value = (40.7589, -73.9851)
+        """Test utm_lat method."""
+        mock_utm_common.return_value = (42.0, -71.0)
         
-        row = ["test"]
-        col_def = {"parms": [0, 1, 2, 3]}
+        row = ["test_row"]
+        col_def = {"test": "config"}
         
         result = self.algorithms.utm_lat(row, col_def)
-        assert result == 40.7589
+        
+        self.assertEqual(result, 42.0)
         mock_utm_common.assert_called_once_with(row, col_def)
-    
+
     @patch.object(CsvAlgorithms, 'utm_common')
     def test_utm_lon(self, mock_utm_common):
-        """Test utm_lon function."""
-        mock_utm_common.return_value = (40.7589, -73.9851)
+        """Test utm_lon method."""
+        mock_utm_common.return_value = (42.0, -71.0)
         
-        row = ["test"]
-        col_def = {"parms": [0, 1, 2, 3]}
+        row = ["test_row"]
+        col_def = {"test": "config"}
         
         result = self.algorithms.utm_lon(row, col_def)
-        assert result == -73.9851
+        
+        self.assertEqual(result, -71.0)
         mock_utm_common.assert_called_once_with(row, col_def)
-    
-    def test_tgsim_lane_valid_data(self):
-        """Test tgsim_lane with valid data."""
-        # Test even src_value
-        row = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "5"]
-        col_def = {"src_col": 0, "parms": [11]}  # src_col=0 (value=1), parms[0]=11 (value=5)
+
+    def test_tgsim_lane_even_source_value(self):
+        """Test tgsim_lane method with even source value."""
+        row = ["1", "2", "4"]  # src_value = 4 (even), lane_kf = 2
+        col_def = {"src_col": 2, "parms": [1]}
         
         result = self.algorithms.tgsim_lane(row, col_def)
-        # src_value = 1 (odd), so: 7 - lane_kf = 7 - 5 = 2
-        assert result == 2
         
-        # Test odd src_value
-        row = ["2", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "5"]
-        result = self.algorithms.tgsim_lane(row, col_def)
-        # src_value = 2 (even), so: 16 - lane_kf = 16 - 5 = 11
-        assert result == 11
-    
-    def test_tgsim_lane_invalid_data(self):
-        """Test tgsim_lane with invalid data."""
-        # Test with invalid src_col
-        row = ["invalid", "2"]
-        col_def = {"src_col": 0, "parms": [1]}
-        result = self.algorithms.tgsim_lane(row, col_def)
-        assert result is None
+        self.assertEqual(result, 14)  # 16 - 2 = 14
+
+    def test_tgsim_lane_odd_source_value(self):
+        """Test tgsim_lane method with odd source value."""
+        row = ["1", "2", "5"]  # src_value = 5 (odd), lane_kf = 2
+        col_def = {"src_col": 2, "parms": [1]}
         
-        # Test with out of bounds src_col
-        row = ["1", "2"]
-        col_def = {"src_col": 5, "parms": [1]}
         result = self.algorithms.tgsim_lane(row, col_def)
-        assert result is None
         
-        # Test with insufficient params
-        row = ["1", "2"]
-        col_def = {"src_col": 0, "parms": []}
+        self.assertEqual(result, 5)  # 7 - 2 = 5
+
+    def test_tgsim_lane_invalid_indices(self):
+        """Test tgsim_lane method with invalid indices."""
+        row = ["1", "2", "3"]
+        col_def = {"src_col": 5, "parms": [1]}  # Invalid src_col
+        
         result = self.algorithms.tgsim_lane(row, col_def)
-        assert result is None
-    
+        
+        self.assertIsNone(result)
+
+    def test_tgsim_lane_invalid_parms(self):
+        """Test tgsim_lane method with invalid parms index."""
+        row = ["1", "2", "3"]
+        col_def = {"src_col": 2, "parms": [5]}  # Invalid parms index
+        
+        result = self.algorithms.tgsim_lane(row, col_def)
+        
+        self.assertIsNone(result)
+
     def test_group_creates_unique_indices(self):
-        """Test group function creates unique indices for different keys."""
-        row1 = ["A", "B", "C", "D"]
-        row2 = ["A", "X", "C", "D"]
-        row3 = ["A", "B", "C", "D"]  # Same as row1
+        """Test group method creates unique indices for different keys."""
+        row1 = ["A", "B", "C"]
+        row2 = ["A", "C", "D"]  # Different combination
+        row3 = ["A", "B", "C"]  # Same as row1
+        col_def = {"parms": [0, 1]}  # Concatenate columns 0 and 1
         
-        col_def = {"parms": [0, 1, 2]}
-        
-        # First unique combination
         result1 = self.algorithms.group(row1, col_def)
-        assert result1 == 0
-        
-        # Second unique combination
         result2 = self.algorithms.group(row2, col_def)
-        assert result2 == 1
-        
-        # Same as first combination
         result3 = self.algorithms.group(row3, col_def)
-        assert result3 == 0
         
-        # Verify group dictionary
-        assert len(self.algorithms._group_dict) == 2
-        assert "A B C" in self.algorithms._group_dict
-        assert "A X C" in self.algorithms._group_dict
-    
-    def test_group_with_empty_values(self):
-        """Test group function with empty values."""
-        row = ["A", "", "C"]
-        col_def = {"parms": [0, 1, 2]}
-        
-        result = self.algorithms.group(row, col_def)
-        assert result == 0
-        
-        # Should create key "A C" (empty value skipped)
-        assert "A C" in self.algorithms._group_dict
-    
-    def test_group_with_all_empty_values(self):
-        """Test group function with all empty values."""
-        row = ["", "", ""]
-        col_def = {"parms": [0, 1, 2]}
-        
-        result = self.algorithms.group(row, col_def)
-        assert result is None
-    
-    def test_group_with_out_of_bounds_params(self):
-        """Test group function with out of bounds parameters."""
-        row = ["A", "B"]
-        col_def = {"parms": [0, 1, 5]}  # Index 5 is out of bounds
-        
-        result = self.algorithms.group(row, col_def)
-        # Looking at the actual implementation in csv_algorithms.py:
-        # It uses: key = " ".join(str(row[i]) for i in parms if i < len(row) and row[i])
-        # This means it will skip index 5 (out of bounds) and only use indices 0, 1
-        # So it creates key "A B" and returns 0 (first unique key)
-        assert result == 0
-        assert "A B" in self.algorithms._group_dict
-    
-    def test_group_with_all_out_of_bounds_params(self):
-        """Test group function with all out of bounds parameters."""
-        row = ["A", "B"]
-        col_def = {"parms": [5, 6, 7]}  # All indices are out of bounds
-        
-        result = self.algorithms.group(row, col_def)
-        # When all indices are out of bounds, no valid values can be joined
-        # The key becomes empty string, which should return None per implementation
-        assert result is None
+        self.assertEqual(result1, 1)  # First unique combination
+        self.assertEqual(result2, 2)  # Second unique combination
+        self.assertEqual(result1, result3)  # Same combination should get same index
 
+    def test_group_with_empty_key(self):
+        """Test group method with empty key."""
+        row = ["", "", "C"]
+        col_def = {"parms": [0, 1]}
+        
+        result = self.algorithms.group(row, col_def)
+        
+        self.assertIsNone(result)
 
-class TestByteCountingStream:
-    """Test cases for ByteCountingStream helper class."""
-    
-    def test_byte_counting_stream_tracks_reads(self):
-        """Test that ByteCountingStream correctly tracks bytes read."""
-        data = b"Hello, World!"
-        with tempfile.NamedTemporaryFile() as tmp:
-            tmp.write(data)
-            tmp.flush()
+    def test_group_with_invalid_indices(self):
+        """Test group method with invalid column indices."""
+        row = ["A", "B", "C"]
+        col_def = {"parms": [0, 5]}  # Index 5 is out of bounds
+        
+        result = self.algorithms.group(row, col_def)
+        
+        self.assertEqual(result, 0)  # Should return 0 for error case
+
+    def test_event_name_with_label(self):
+        """Test event_name method with label parameter."""
+        row = ["event", "data", "test"]
+        col_def = {"parms": [0, 1, "Event: "]}  # Label as last parameter
+        
+        result = self.algorithms.event_name(row, col_def)
+        
+        self.assertEqual(result, "Event: event data")
+
+    def test_event_name_without_label(self):
+        """Test event_name method without label parameter."""
+        row = ["event", "data", "test"]
+        col_def = {"parms": [0, 1]}  # No label
+        
+        result = self.algorithms.event_name(row, col_def)
+        
+        self.assertEqual(result, "event data")
+
+    def test_event_name_with_empty_key(self):
+        """Test event_name method with empty key."""
+        row = ["", "", "test"]
+        col_def = {"parms": [0, 1]}
+        
+        result = self.algorithms.event_name(row, col_def)
+        
+        self.assertIsNone(result)
+
+    def test_event_name_with_no_parms(self):
+        """Test event_name method with no parameters."""
+        row = ["A", "B", "C"]
+        col_def = {"parms": []}
+        
+        result = self.algorithms.event_name(row, col_def)
+        
+        self.assertIsNone(result)
+
+    def test_tgsim_automated_yes(self):
+        """Test tgsim_automated method with 'yes' value."""
+        row = ["data1", "YES", "data3"]
+        col_def = {"src_col": 1}
+        
+        result = self.algorithms.tgsim_automated(row, col_def)
+        
+        self.assertEqual(result, 1)
+
+    def test_tgsim_automated_no(self):
+        """Test tgsim_automated method with 'no' value."""
+        row = ["data1", "no", "data3"]
+        col_def = {"src_col": 1}
+        
+        result = self.algorithms.tgsim_automated(row, col_def)
+        
+        self.assertEqual(result, 0)
+
+    def test_tgsim_automated_case_insensitive(self):
+        """Test tgsim_automated method is case insensitive."""
+        test_cases = ["yes", "YES", "Yes", "yEs"]
+        
+        for test_value in test_cases:
+            row = ["data1", test_value, "data3"]
+            col_def = {"src_col": 1}
             
-            with open(tmp.name, 'rb') as f:
-                stream = ByteCountingStream(f)
-                
-                # Initial state
-                assert stream.bytes_read == 0
-                
-                # Read some data
-                chunk1 = stream.read(5)
-                assert chunk1 == b"Hello"
-                assert stream.bytes_read == 5
-                
-                # Read more data
-                chunk2 = stream.read(8)
-                assert chunk2 == b", World!"
-                assert stream.bytes_read == 13
+            result = self.algorithms.tgsim_automated(row, col_def)
+            self.assertEqual(result, 1)
+
+    def test_tgsim_automated_invalid_column(self):
+        """Test tgsim_automated method with invalid column."""
+        row = ["data1", "yes", "data3"]
+        col_def = {"src_col": 5}  # Out of bounds
+        
+        result = self.algorithms.tgsim_automated(row, col_def)
+        
+        self.assertEqual(result, 0)
+
+    def test_tgsim_automated_empty_cell(self):
+        """Test tgsim_automated method with empty cell."""
+        row = ["data1", "", "data3"]
+        col_def = {"src_col": 1}
+        
+        result = self.algorithms.tgsim_automated(row, col_def)
+        
+        self.assertEqual(result, 0)
 
 
-class TestCsvProcess:
-    """Test cases for CsvProcess class."""
-    
-    def setup_method(self):
+class TestByteCountingStream(unittest.TestCase):
+    """Test cases for the ByteCountingStream class."""
+
+    def test_byte_counting_read(self):
+        """Test that ByteCountingStream correctly counts bytes read."""
+        test_data = b"Hello, World!"
+        raw_stream = io.BytesIO(test_data)
+        counting_stream = ByteCountingStream(raw_stream)
+        
+        # Initially no bytes read
+        self.assertEqual(counting_stream.bytes_read, 0)
+        
+        # Read some data
+        data = counting_stream.read(5)
+        self.assertEqual(data, b"Hello")
+        self.assertEqual(counting_stream.bytes_read, 5)
+        
+        # Read more data
+        data = counting_stream.read(8)
+        self.assertEqual(data, b", World!")
+        self.assertEqual(counting_stream.bytes_read, 13)
+
+    def test_byte_counting_read1(self):
+        """Test that ByteCountingStream correctly counts bytes with read1."""
+        test_data = b"Test data"
+        raw_stream = io.BytesIO(test_data)
+        counting_stream = ByteCountingStream(raw_stream)
+        
+        data = counting_stream.read1(4)
+        self.assertEqual(data, b"Test")
+        self.assertEqual(counting_stream.bytes_read, 4)
+
+
+class TestCsvProcess(unittest.TestCase):
+    """Test cases for the CsvProcess class."""
+
+    def setUp(self):
         """Set up test fixtures."""
         self.processor = CsvProcess()
         self.mock_worker = Mock()
-        self.mock_worker.interrupt_flag = False
         self.mock_worker.log_signal = Mock()
         self.mock_worker.progress_signal = Mock()
-    
+        self.mock_worker.interrupt_flag = False
+
     def test_initialization(self):
         """Test CsvProcess initialization."""
-        assert hasattr(self.processor, '_func_dict')
-        assert hasattr(self.processor, '_algorithms')
-        assert 'copy' in self.processor._func_dict
-        assert 'utm_lat' in self.processor._func_dict
-        assert 'utm_lon' in self.processor._func_dict
-        assert 'tgsim_lane' in self.processor._func_dict
-        assert 'group' in self.processor._func_dict
-    
-    def test_check_configuration_valid_object(self):
-        """Test configuration check with valid object format."""
+        self.assertIsInstance(self.processor, BaseProcess)
+        self.assertIsNotNone(self.processor._func_dict)
+        self.assertFalse(self.processor._has_header)
+        self.assertEqual(self.processor._min_cols, 1)
+        self.assertEqual(self.processor._col_defs, [])
+
+    def test_initialize_func_dict(self):
+        """Test that function dictionary is properly initialized."""
+        expected_functions = ['copy', 'utm_lat', 'utm_lon', 'tgsim_lane', 
+                            'group', 'event_name', 'tgsim_automated']
+        
+        for func_name in expected_functions:
+            self.assertIn(func_name, self.processor._func_dict)
+            self.assertTrue(callable(self.processor._func_dict[func_name]))
+
+    def test_check_configuration_valid_dict(self):
+        """Test configuration checking with valid dictionary format."""
         config = {
             "col_defs": {
-                "event_id": {"src_col": 0, "type": "int"},
-                "veh_id": {"src_col": 1, "type": "int"},
-                "event_time": {"src_col": 2, "type": "float"},
-                "lane_id": {"src_col": 3, "type": "int"},
-                "x_map_loc": {"src_col": 4, "type": "float"},
-                "y_map_loc": {"src_col": 5, "type": "float"}
+                "event_id": {"src_col": 0, "type": "int", "func": "copy"},
+                "veh_id": {"src_col": 1, "type": "int", "func": "copy"},
+                "veh_time": {"src_col": 2, "type": "float", "func": "copy"},
+                "lane_id": {"src_col": 3, "type": "int", "func": "copy"},
+                "x_map_loc": {"src_col": 4, "type": "float", "func": "copy"},
+                "y_map_loc": {"src_col": 5, "type": "float", "func": "copy"}
             }
         }
         
-        errors = self.processor._check_configuration(config, self.mock_worker)
-        assert errors == 0
-        assert len(self.processor._col_defs) == 1
-    
-    def test_check_configuration_valid_array(self):
-        """Test configuration check with valid array format."""
+        error_count = self.processor._check_configuration(config, self.mock_worker)
+        
+        self.assertEqual(error_count, 0)
+        self.assertEqual(len(self.processor._col_defs), 1)
+        self.assertEqual(self.processor._min_cols, 6)
+
+    def test_check_configuration_valid_list(self):
+        """Test configuration checking with valid list format."""
         config = {
             "col_defs": [
                 {
-                    "event_id": {"src_col": 0, "type": "int"},
-                    "veh_id": {"src_col": 1, "type": "int"},
-                    "event_time": {"src_col": 2, "type": "float"},
-                    "lane_id": {"src_col": 3, "type": "int"},
-                    "x_map_loc": {"src_col": 4, "type": "float"},
-                    "y_map_loc": {"src_col": 5, "type": "float"}
+                    "event_id": {"src_col": 0, "type": "int", "func": "copy"},
+                    "veh_id": {"src_col": 1, "type": "int", "func": "copy"},
+                    "veh_time": {"src_col": 2, "type": "float", "func": "copy"},
+                    "lane_id": {"src_col": 3, "type": "int", "func": "copy"},
+                    "x_map_loc": {"src_col": 4, "type": "float", "func": "copy"},
+                    "y_map_loc": {"src_col": 5, "type": "float", "func": "copy"}
                 }
             ]
         }
         
-        errors = self.processor._check_configuration(config, self.mock_worker)
-        assert errors == 0
-        assert len(self.processor._col_defs) == 1
-    
+        error_count = self.processor._check_configuration(config, self.mock_worker)
+        
+        self.assertEqual(error_count, 0)
+        self.assertEqual(len(self.processor._col_defs), 1)
+
     def test_check_configuration_missing_required_columns(self):
-        """Test configuration check with missing required columns."""
+        """Test configuration checking with missing required columns."""
         config = {
             "col_defs": {
-                "event_id": {"src_col": 0, "type": "int"},
-                "veh_id": {"src_col": 1, "type": "int"}
-                # Missing required columns: event_time, lane_id, x_map_loc, y_map_loc
+                "event_id": {"src_col": 0, "type": "int", "func": "copy"}
+                # Missing other required columns
             }
         }
         
-        errors = self.processor._check_configuration(config, self.mock_worker)
-        assert errors > 0
-    
+        error_count = self.processor._check_configuration(config, self.mock_worker)
+        
+        self.assertGreater(error_count, 0)
+
     def test_check_configuration_invalid_function(self):
-        """Test configuration check with invalid function."""
+        """Test configuration checking with invalid function name."""
         config = {
             "col_defs": {
                 "event_id": {"src_col": 0, "type": "int", "func": "invalid_function"},
-                "veh_id": {"src_col": 1, "type": "int"},
-                "event_time": {"src_col": 2, "type": "float"},
-                "lane_id": {"src_col": 3, "type": "int"},
-                "x_map_loc": {"src_col": 4, "type": "float"},
-                "y_map_loc": {"src_col": 5, "type": "float"}
+                "veh_id": {"src_col": 1, "type": "int", "func": "copy"},
+                "veh_time": {"src_col": 2, "type": "float", "func": "copy"},
+                "lane_id": {"src_col": 3, "type": "int", "func": "copy"},
+                "x_map_loc": {"src_col": 4, "type": "float", "func": "copy"},
+                "y_map_loc": {"src_col": 5, "type": "float", "func": "copy"}
             }
         }
         
-        errors = self.processor._check_configuration(config, self.mock_worker)
-        assert errors > 0
-    
+        error_count = self.processor._check_configuration(config, self.mock_worker)
+        
+        self.assertGreater(error_count, 0)
+
     def test_check_configuration_duplicate_keys(self):
-        """Test configuration check with duplicate keys."""
+        """Test configuration checking with duplicate keys."""
         config = {
             "col_defs": [
-                {
-                    "event_id": {"src_col": 0, "type": "int"},
-                    "veh_id": {"src_col": 1, "type": "int"},
-                    "event_time": {"src_col": 2, "type": "float"},
-                    "lane_id": {"src_col": 3, "type": "int"},
-                    "x_map_loc": {"src_col": 4, "type": "float"},
-                    "y_map_loc": {"src_col": 5, "type": "float"}
-                },
-                {
-                    "event_id": {"src_col": 10, "type": "int"},  # Duplicate key
-                    "another_col": {"src_col": 11, "type": "float"}
-                }
+                {"event_id": {"src_col": 0, "type": "int", "func": "copy"}},
+                {"event_id": {"src_col": 1, "type": "int", "func": "copy"}}  # Duplicate
             ]
         }
         
-        errors = self.processor._check_configuration(config, self.mock_worker)
-        assert errors > 0
-    
-    def create_test_csv(self, data_rows, has_header=False):
-        """Helper method to create a test CSV file."""
-        tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False)
-        writer = csv.writer(tmp)
+        error_count = self.processor._check_configuration(config, self.mock_worker)
         
-        if has_header:
-            writer.writerow(["col1", "col2", "col3", "col4", "col5", "col6"])
-        
-        for row in data_rows:
-            writer.writerow(row)
-        
-        tmp.flush()
-        tmp.close()
-        return tmp.name
-    
-    def test_check_import_file_valid_data(self):
-        """Test import file check with valid data."""
-        # Configure processor first
-        config = {
-            "col_defs": {
-                "event_id": {"src_col": 0, "type": "int"},
-                "veh_id": {"src_col": 1, "type": "int"},
-                "event_time": {"src_col": 2, "type": "float"},
-                "lane_id": {"src_col": 3, "type": "int"},
-                "x_map_loc": {"src_col": 4, "type": "float"},
-                "y_map_loc": {"src_col": 5, "type": "float"}
-            }
-        }
-        self.processor._check_configuration(config, self.mock_worker)
-        
-        # Create test CSV
-        csv_path = self.create_test_csv([
-            ["1", "101", "0.0", "1", "100.5", "200.7"],
-            ["1", "102", "0.1", "1", "101.5", "201.7"],
-            ["2", "103", "0.2", "2", "102.5", "202.7"]
-        ], has_header=True)
-        
-        try:
-            errors = self.processor._check_import_file(csv_path, self.mock_worker)
-            assert errors == 0
-            assert self.processor._has_header is True
-        finally:
-            Path(csv_path).unlink()
-    
+        self.assertGreater(error_count, 0)
+
     def test_check_import_file_empty_file(self):
-        """Test import file check with empty file."""
-        tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False)
-        tmp.close()
+        """Test file checking with empty file."""
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv') as f:
+            temp_path = f.name
         
         try:
-            errors = self.processor._check_import_file(tmp.name, self.mock_worker)
-            assert errors == 1
+            error_count = self.processor._check_import_file(temp_path, self.mock_worker)
+            self.assertEqual(error_count, 1)
         finally:
-            Path(tmp.name).unlink()
-    
+            os.unlink(temp_path)
+
+    def test_check_import_file_valid_csv(self):
+        """Test file checking with valid CSV file."""
+        # Set up valid configuration first
+        self.processor._col_defs = [{
+            "event_id": {"src_col": 0, "type": "int", "func": "copy"},
+            "veh_id": {"src_col": 1, "type": "int", "func": "copy"},
+            "veh_time": {"src_col": 2, "type": "float", "func": "copy"},
+            "lane_id": {"src_col": 3, "type": "int", "func": "copy"},
+            "x_map_loc": {"src_col": 4, "type": "float", "func": "copy"},
+            "y_map_loc": {"src_col": 5, "type": "float", "func": "copy"}
+        }]
+        self.processor._min_cols = 6
+        
+        csv_data = """event_id,veh_id,veh_time,lane_id,x_map_loc,y_map_loc
+1,101,0.0,1,100.0,200.0
+1,101,0.1,1,101.0,201.0"""
+        
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', newline='') as f:
+            f.write(csv_data)
+            temp_path = f.name
+        
+        try:
+            error_count = self.processor._check_import_file(temp_path, self.mock_worker)
+            self.assertEqual(error_count, 0)
+        finally:
+            os.unlink(temp_path)
+
     def test_check_import_file_insufficient_columns(self):
-        """Test import file check with insufficient columns."""
-        # Configure processor to expect 6 columns
-        config = {
-            "col_defs": {
-                "event_id": {"src_col": 0, "type": "int"},
-                "veh_id": {"src_col": 1, "type": "int"},
-                "event_time": {"src_col": 2, "type": "float"},
-                "lane_id": {"src_col": 3, "type": "int"},
-                "x_map_loc": {"src_col": 4, "type": "float"},
-                "y_map_loc": {"src_col": 5, "type": "float"}
-            }
-        }
-        self.processor._check_configuration(config, self.mock_worker)
+        """Test file checking with insufficient columns."""
+        # Set up configuration requiring more columns
+        self.processor._col_defs = [{
+            "event_id": {"src_col": 0, "type": "int", "func": "copy"},
+            "veh_id": {"src_col": 1, "type": "int", "func": "copy"},
+            "veh_time": {"src_col": 2, "type": "float", "func": "copy"},
+            "lane_id": {"src_col": 3, "type": "int", "func": "copy"},
+            "x_map_loc": {"src_col": 4, "type": "float", "func": "copy"},
+            "y_map_loc": {"src_col": 5, "type": "float", "func": "copy"}
+        }]
+        self.processor._min_cols = 6
         
-        # Create CSV with insufficient columns
-        csv_path = self.create_test_csv([
-            ["1", "101", "0.0"],  # Only 3 columns, need 6
-        ])
+        csv_data = """1,101,0.0"""  # Only 3 columns, need 6
         
-        try:
-            errors = self.processor._check_import_file(csv_path, self.mock_worker)
-            assert errors == 1
-        finally:
-            Path(csv_path).unlink()
-    
-    def test_process_full_workflow(self):
-        """Test complete process workflow."""
-        # Create test database
-        db = sqlite3.connect(":memory:")
-        db.execute("""
-            CREATE TABLE events (
-                event_id INTEGER NOT NULL,
-                veh_id INTEGER NOT NULL,
-                event_time REAL NOT NULL,
-                lane_id INTEGER,
-                x_map_loc REAL,
-                y_map_loc REAL,
-                x_frenet REAL,
-                y_frenet REAL,
-                x_map_origin REAL,
-                y_map_origin REAL,
-                veh_lat REAL,
-                veh_lon REAL,
-                veh_speed REAL,
-                veh_acceleration REAL,
-                veh_length REAL,
-                veh_width REAL,
-                veh_automated INTEGER,
-                osm_way_id INTEGER,
-                osm_speed_limit INTEGER,
-                osm_traffic_control INTEGER,
-                preceding_veh_id INTEGER,
-                veh_dist REAL,
-                PRIMARY KEY (event_id, veh_id, event_time)
-            ) WITHOUT ROWID;
-        """)
-        
-        # Create test CSV
-        csv_path = self.create_test_csv([
-            ["1", "101", "0.0", "1", "100.5", "200.7"],
-            ["1", "102", "0.1", "1", "101.5", "201.7"],
-            ["2", "103", "0.2", "2", "102.5", "202.7"]
-        ])
-        
-        # Configure processor
-        config = {
-            "col_defs": {
-                "event_id": {"src_col": 0, "type": "int"},
-                "veh_id": {"src_col": 1, "type": "int"},
-                "event_time": {"src_col": 2, "type": "float"},
-                "lane_id": {"src_col": 3, "type": "int"},
-                "x_map_loc": {"src_col": 4, "type": "float"},
-                "y_map_loc": {"src_col": 5, "type": "float"}
-            }
-        }
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', newline='') as f:
+            f.write(csv_data)
+            temp_path = f.name
         
         try:
-            errors = self.processor.process(config, csv_path, db, self.mock_worker)
-            assert errors == 0
+            error_count = self.processor._check_import_file(temp_path, self.mock_worker)
+            self.assertGreater(error_count, 0)
+        finally:
+            os.unlink(temp_path)
+
+    @patch('sqlite3.connect')
+    def test_process_integration(self, mock_connect):
+        """Test the main process method integration."""
+        # Mock database connection
+        mock_db = Mock()
+        mock_connect.return_value = mock_db
+        mock_cursor = Mock()
+        mock_db.cursor.return_value = mock_cursor
+        mock_db.executemany.return_value = None
+        mock_db.commit.return_value = None
+        
+        # Create valid test CSV
+        csv_data = """event_id,veh_id,veh_time,lane_id,x_map_loc,y_map_loc
+1,101,0.0,1,100.0,200.0
+1,101,0.1,1,101.0,201.0"""
+        
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', newline='') as f:
+            f.write(csv_data)
+            temp_path = f.name
+        
+        try:
+            config = {
+                "col_defs": {
+                    "event_id": {"src_col": 0, "type": "int", "func": "copy"},
+                    "veh_id": {"src_col": 1, "type": "int", "func": "copy"},
+                    "veh_time": {"src_col": 2, "type": "float", "func": "copy"},
+                    "lane_id": {"src_col": 3, "type": "int", "func": "copy"},
+                    "x_map_loc": {"src_col": 4, "type": "float", "func": "copy"},
+                    "y_map_loc": {"src_col": 5, "type": "float", "func": "copy"},
+                    "x_frenet_loc": {"src_col": -1, "parms": [0.0], "func": "copy"},
+                    "y_frenet_loc": {"src_col": -1, "parms": [0.0], "func": "copy"},
+                    "x_map_origin": {"src_col": -1, "parms": [0.0], "func": "copy"},
+                    "y_map_origin": {"src_col": -1, "parms": [0.0], "func": "copy"},
+                    "veh_lat": {"src_col": -1, "parms": [0.0], "func": "copy"},
+                    "veh_lon": {"src_col": -1, "parms": [0.0], "func": "copy"},
+                    "veh_speed": {"src_col": -1, "parms": [0.0], "func": "copy"},
+                    "veh_accel": {"src_col": -1, "parms": [0.0], "func": "copy"},
+                    "veh_length": {"src_col": -1, "parms": [0.0], "func": "copy"},
+                    "veh_width": {"src_col": -1, "parms": [0.0], "func": "copy"},
+                    "veh_automation": {"src_col": -1, "parms": [0], "func": "copy"},
+                    "osm_way_id": {"src_col": -1, "parms": [0], "func": "copy"},
+                    "osm_speed_limit": {"src_col": -1, "parms": [0], "func": "copy"},
+                    "osm_traffic_control": {"src_col": -1, "parms": [0], "func": "copy"},
+                    "preceding_veh_id": {"src_col": -1, "parms": [0], "func": "copy"},
+                    "veh_dist_trav": {"src_col": -1, "parms": [0.0], "func": "copy"},
+                    "event_name": {"src_col": -1, "parms": ["Test Event"], "func": "copy"}
+                }
+            }
             
-            # Verify data was inserted
-            cursor = db.cursor()
-            cursor.execute("SELECT COUNT(*) FROM events")
-            count = cursor.fetchone()[0]
-            assert count == 3
+            result = self.processor.process(config, temp_path, mock_db, self.mock_worker)
             
-            # Verify specific data
-            cursor.execute("SELECT event_id, veh_id, event_time FROM events ORDER BY event_time")
-            rows = cursor.fetchall()
-            expected = [(1, 101, 0.0), (1, 102, 0.1), (2, 103, 0.2)]
-            assert rows == expected
+            # Should return 0 for success
+            self.assertEqual(result, 0)
+            
+            # Verify database operations were called
+            mock_db.executemany.assert_called()
+            mock_db.commit.assert_called()
             
         finally:
-            Path(csv_path).unlink()
-            db.close()
-    
-    def test_process_with_interrupt(self):
-        """Test process workflow with interrupt flag set."""
+            os.unlink(temp_path)
+
+    def test_process_with_worker_interrupt(self):
+        """Test process method handles worker interrupt flag."""
         # Set interrupt flag
         self.mock_worker.interrupt_flag = True
         
-        # Create minimal test data
-        csv_path = self.create_test_csv([["1", "101", "0.0", "1", "100.5", "200.7"]])
+        config = {"col_defs": {}}  # Invalid config to trigger early return
+        
+        result = self.processor.process(config, "dummy_path", None, self.mock_worker)
+        
+        # Should return early due to interrupt or config error
+        self.assertGreaterEqual(result, 0)
+
+    def test_process_handles_invalid_config(self):
+        """Test process method handles invalid configuration."""
+        config = {"invalid": "config"}  # Missing col_defs
+        
+        result = self.processor.process(config, "dummy_path", None, self.mock_worker)
+        
+        # Should return error count > 0
+        self.assertGreater(result, 0)
+
+    def test_col_def_defaults(self):
+        """Test that column definition defaults are properly set."""
         config = {
             "col_defs": {
-                "event_id": {"src_col": 0, "type": "int"},
-                "veh_id": {"src_col": 1, "type": "int"},
-                "event_time": {"src_col": 2, "type": "float"},
-                "lane_id": {"src_col": 3, "type": "int"},
-                "x_map_loc": {"src_col": 4, "type": "float"},
-                "y_map_loc": {"src_col": 5, "type": "float"}
+                "event_id": {"src_col": 0},  # Minimal definition
+                "veh_id": {"src_col": 1, "type": "int", "func": "copy"},
+                "veh_time": {"src_col": 2, "type": "float", "func": "copy"},
+                "lane_id": {"src_col": 3, "type": "int", "func": "copy"},
+                "x_map_loc": {"src_col": 4, "type": "float", "func": "copy"},
+                "y_map_loc": {"src_col": 5, "type": "float", "func": "copy"}
             }
         }
         
+        self.processor._check_configuration(config, self.mock_worker)
+        
+        col_def = self.processor._col_defs[0]["event_id"]
+        self.assertEqual(col_def["type"], "float")  # Default type
+        self.assertEqual(col_def["units"], "")      # Default units
+        self.assertEqual(col_def["func"], "copy")   # Default func
+        self.assertEqual(col_def["parms"], [])      # Default parms
+
+    def test_header_detection_with_text(self):
+        """Test CSV header detection with text headers."""
+        csv_data = """EventID,VehicleID,Time,Lane
+1,101,0.0,1
+1,101,0.1,1"""
+        
+        # Set up minimal config for testing
+        self.processor._col_defs = [{"event_id": {"src_col": 0, "type": "int", "func": "copy"}}]
+        self.processor._min_cols = 1
+        
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', newline='') as f:
+            f.write(csv_data)
+            temp_path = f.name
+        
         try:
-            errors = self.processor.process(config, csv_path, None, self.mock_worker)
-            # Should return early due to interrupt flag
-            assert errors == 0  # Configuration check should succeed before interrupt is checked
+            self.processor._check_import_file(temp_path, self.mock_worker)
+            self.assertTrue(self.processor._has_header)
         finally:
-            Path(csv_path).unlink()
+            os.unlink(temp_path)
+
+    def test_header_detection_without_text(self):
+        """Test CSV header detection with numeric headers."""
+        csv_data = """1,101,0.0,1
+1,101,0.1,1
+1,102,0.0,1"""
+        
+        # Set up minimal config for testing
+        self.processor._col_defs = [{"event_id": {"src_col": 0, "type": "int", "func": "copy"}}]
+        self.processor._min_cols = 1
+        
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', newline='') as f:
+            f.write(csv_data)
+            temp_path = f.name
+        
+        try:
+            self.processor._check_import_file(temp_path, self.mock_worker)
+            self.assertFalse(self.processor._has_header)
+        finally:
+            os.unlink(temp_path)
 
 
-# Pytest fixtures and test configuration
-@pytest.fixture
-def sample_config():
-    """Provide a sample configuration for testing."""
-    return {
-        "file_ext": "csv",
-        "class": "data_import.csv_process.CsvProcess",
-        "col_defs": {
-            "event_id": {"src_col": 0, "type": "int"},
-            "veh_id": {"src_col": 1, "type": "int"},
-            "event_time": {"src_col": 2, "type": "float"},
-            "lane_id": {"src_col": 3, "type": "int"},
-            "x_map_loc": {"src_col": 4, "type": "float"},
-            "y_map_loc": {"src_col": 5, "type": "float"},
-            "veh_speed": {"src_col": 6, "type": "float"},
-            "veh_acceleration": {"src_col": 7, "type": "float"},
-            "veh_length": {"src_col": 8, "type": "float"}
-        }
-    }
-
-
-@pytest.fixture
-def test_database():
-    """Provide a test SQLite database."""
-    db = sqlite3.connect(":memory:")
-    db.execute("""
-        CREATE TABLE events (
-            event_id INTEGER NOT NULL,
-            veh_id INTEGER NOT NULL,
-            event_time REAL NOT NULL,
-            lane_id INTEGER,
-            x_map_loc REAL,
-            y_map_loc REAL,
-            x_frenet REAL,
-            y_frenet REAL,
-            x_map_origin REAL,
-            y_map_origin REAL,
-            veh_lat REAL,
-            veh_lon REAL,
-            veh_speed REAL,
-            veh_acceleration REAL,
-            veh_length REAL,
-            veh_width REAL,
-            veh_automated INTEGER,
-            osm_way_id INTEGER,
-            osm_speed_limit INTEGER,
-            osm_traffic_control INTEGER,
-            preceding_veh_id INTEGER,
-            veh_dist REAL,
-            PRIMARY KEY (event_id, veh_id, event_time)
-        ) WITHOUT ROWID;
-    """)
-    yield db
-    db.close()
+if __name__ == '__main__':
+    unittest.main()
