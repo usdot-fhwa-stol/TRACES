@@ -23,15 +23,44 @@ sys.modules['pyqtgraph'] = MagicMock()
 sys.modules['superqt'] = MagicMock()
 
 # Mock all PyQt6 and related GUI modules before any imports
-sys.modules['PyQt6'] = MagicMock()
-sys.modules['PyQt6.QtCore'] = MagicMock()
-sys.modules['PyQt6.QtWidgets'] = MagicMock() 
-sys.modules['PyQt6.QtGui'] = MagicMock()
-sys.modules['PyQt6.QtWebEngineWidgets'] = MagicMock()
-sys.modules['PyQt6.QtWebChannel'] = MagicMock()
-sys.modules['pyqtgraph'] = MagicMock()
-sys.modules['superqt'] = MagicMock()
-sys.modules['utm'] = MagicMock()  # Also mock utm which is used by data_import
+def setup_qt_mocks():
+    """Set up comprehensive PyQt6 and GUI library mocking."""
+    # Create the main PyQt6 mock
+    pyqt6_mock = MagicMock()
+    
+    # Create submodule mocks
+    qtcore_mock = MagicMock()
+    qtwidgets_mock = MagicMock()
+    qtgui_mock = MagicMock()
+    qtwebengine_mock = MagicMock()
+    qtwebchannel_mock = MagicMock()
+    
+    # Set up the package structure
+    pyqt6_mock.QtCore = qtcore_mock
+    pyqt6_mock.QtWidgets = qtwidgets_mock
+    pyqt6_mock.QtGui = qtgui_mock
+    pyqt6_mock.QtWebEngineWidgets = qtwebengine_mock
+    pyqt6_mock.QtWebChannel = qtwebchannel_mock
+    
+    # Install all the mocks
+    sys.modules['PyQt6'] = pyqt6_mock
+    sys.modules['PyQt6.QtCore'] = qtcore_mock
+    sys.modules['PyQt6.QtWidgets'] = qtwidgets_mock
+    sys.modules['PyQt6.QtGui'] = qtgui_mock
+    sys.modules['PyQt6.QtWebEngineWidgets'] = qtwebengine_mock
+    sys.modules['PyQt6.QtWebChannel'] = qtwebchannel_mock
+    
+    # Mock other GUI libraries
+    sys.modules['pyqtgraph'] = MagicMock()
+    sys.modules['superqt'] = MagicMock()
+    
+    # Mock UTM library
+    utm_mock = MagicMock()
+    utm_mock.from_latlon = MagicMock()
+    utm_mock.to_latlon = MagicMock()
+    sys.modules['utm'] = utm_mock
+
+setup_qt_mocks()
 
 # Add src to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
@@ -849,7 +878,7 @@ class TestTimeSpeedDialog(unittest.TestCase):
         self.assertIn("Lane ID: 1", content)
         self.assertIn("Distance: 250.50 m", content)
         self.assertIn("Speed: 12.50 m/s", content)
-        self.assertIn("Acceleration: 1.50 m/s²", content)
+        self.assertIn("Acceleration: 1.50 m/s^2", content)
         self.assertIn("Automation: 0", content)
         self.assertIn("Length: 4.50 m", content)
 
@@ -868,7 +897,7 @@ class TestTimeSpeedDialog(unittest.TestCase):
         
         self.assertIn("Distance:   m", content)
         self.assertIn("Speed:   m/s", content)
-        self.assertIn("Acceleration:   m/s²", content)
+        self.assertIn("Acceleration:   m/s^2", content)
         self.assertIn("Automation:  ", content)
         self.assertIn("Length:   m", content)
 
@@ -891,7 +920,7 @@ class TestTimeAccelDialog(unittest.TestCase):
     def test_class_attributes(self):
         """Test that TimeAccelDialog properly overrides parent class attributes."""
         self.assertEqual(TimeAccelDialog.Y_COLUMN, "veh_accel")
-        self.assertEqual(TimeAccelDialog.Y_LABEL, "Accel (m/s²)")
+        self.assertEqual(TimeAccelDialog.Y_LABEL, "Accel (m/s^2)")
         self.assertEqual(TimeAccelDialog.PLOT_TITLE_SUFFIX, "Acceleration vs Time")
         self.assertEqual(TimeAccelDialog.TOLERANCE, 1.0)
 
