@@ -3,11 +3,9 @@ Unit tests for the main trajectory_tools module and utils.
 """
 
 import unittest
-import tempfile
 import os
 import sys
 import logging
-from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 # Mock PyQt6 modules before any imports that might use them
@@ -69,7 +67,10 @@ class TestUtils(unittest.TestCase):
         
         # Should return base path when given empty string
         expected = getattr(sys, '_MEIPASS', os.path.abspath("."))
-        self.assertEqual(result, expected)
+        # Normalize paths to handle trailing slashes consistently
+        result_normalized = os.path.normpath(result)
+        expected_normalized = os.path.normpath(expected)
+        self.assertEqual(result_normalized, expected_normalized)
 
     def test_get_resource_path_single_file(self):
         """Test get_resource_path with single filename."""
