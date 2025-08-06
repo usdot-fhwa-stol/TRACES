@@ -18,7 +18,8 @@ jobs:
       run: |
         pyinstaller --name "trajectory_tools" --onedir --windowed `
           --add-data "src/config;config" `
-          --add-data "src/trajectory_tools.html;." `
+          --add-data "src/home.html;." `
+          --add-data "src/about.html;." `
           --add-data "src/data_import;data_import" `
           --add-data "src/gui;gui" `
           --hidden-import PyQt6 `
