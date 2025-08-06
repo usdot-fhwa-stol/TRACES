@@ -838,7 +838,7 @@ class TestTimeSpeedDialog(unittest.TestCase):
         self.assertIn("Lane ID: 1", content)
         self.assertIn("Distance: 250.50 m", content)
         self.assertIn("Speed: 12.50 m/s", content)
-        self.assertIn("Acceleration: 1.50 m/s²", content)
+        self.assertIn("Acceleration: 1.50 m/s^2", content)
         self.assertIn("Automation: 0", content)
         self.assertIn("Length: 4.50 m", content)
 
@@ -857,7 +857,7 @@ class TestTimeSpeedDialog(unittest.TestCase):
         
         self.assertIn("Distance:   m", content)
         self.assertIn("Speed:   m/s", content)
-        self.assertIn("Acceleration:   m/s²", content)
+        self.assertIn("Acceleration:   m/sÂ²", content)
         self.assertIn("Automation:  ", content)
         self.assertIn("Length:   m", content)
 
@@ -880,7 +880,7 @@ class TestTimeAccelDialog(unittest.TestCase):
     def test_class_attributes(self):
         """Test that TimeAccelDialog properly overrides parent class attributes."""
         self.assertEqual(TimeAccelDialog.Y_COLUMN, "veh_accel")
-        self.assertEqual(TimeAccelDialog.Y_LABEL, "Accel (m/s²)")
+        self.assertEqual(TimeAccelDialog.Y_LABEL, "Accel (m/sÂ²)")
         self.assertEqual(TimeAccelDialog.PLOT_TITLE_SUFFIX, "Acceleration vs Time")
         self.assertEqual(TimeAccelDialog.TOLERANCE, 1.0)
 
