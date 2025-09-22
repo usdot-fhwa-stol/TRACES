@@ -713,7 +713,7 @@ class TestCsvProcessIntegration(unittest.TestCase):
 
 
 if __name__ == '__main__':
-    unittest.main()_worker)
+    unittest.main()
         self.assertEqual(error_count, 0)
         self.assertEqual(len(self.csv_process._col_defs), 1)
         self.assertEqual(self.csv_process._min_cols, 6)
@@ -779,4 +779,5 @@ if __name__ == '__main__':
             }
         }
         
-        error_count = self.csv_process._check_configuration(config, self.mock
+        error_count = self.csv_process._check_configuration(config, self.mock_worker)
+        self.assertGreater(error_count, 0)
