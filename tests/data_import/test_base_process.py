@@ -1,7 +1,7 @@
 import pytest
 import sqlite3
 from abc import ABC
-from base_process import BaseProcess
+from data_import.base_process import BaseProcess
 
 
 class ConcreteProcess(BaseProcess):

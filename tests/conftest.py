@@ -2,9 +2,11 @@ import pytest
 import sys
 import os
 
-# Add the source directory to the Python path
-# This assumes the test files are in a 'tests' directory and the source files are in the parent directory
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+# Add the src directory to the Python path for imports
+# This assumes conftest.py is in the test/ directory
+test_dir = os.path.dirname(__file__)
+src_dir = os.path.join(os.path.dirname(test_dir), 'src')
+sys.path.insert(0, src_dir)
 
 @pytest.fixture
 def mock_utm():

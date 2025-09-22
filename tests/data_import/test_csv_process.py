@@ -4,7 +4,7 @@ import tempfile
 import os
 import csv
 from unittest.mock import Mock, patch, MagicMock
-from csv_process import CsvProcess, ByteCountingStream
+from data_import.csv_process import CsvProcess, ByteCountingStream
 
 
 class TestByteCountingStream:
@@ -431,10 +431,10 @@ class TestCsvProcess:
             temp_file.close()
             return temp_file.name
     
-    def test_inheritance(self):
-        """Test that CsvProcess inherits from BaseProcess."""
-        from base_process import BaseProcess
-        assert isinstance(self.processor, BaseProcess)
+        def test_inheritance(self):
+            """Test that CsvProcess inherits from BaseProcess."""
+            from data_import.base_process import BaseProcess
+            assert isinstance(self.processor, BaseProcess)
     
     def test_process_large_file_batching(self):
         """Test process method with large file to verify batching."""
@@ -552,4 +552,5 @@ class TestCsvProcess:
                 }
             }
             
-            result = self.processor._check_configuration(config, self.worker
+            result = self.processor._check_configuration(config, self.worker)
+            assert result > 0

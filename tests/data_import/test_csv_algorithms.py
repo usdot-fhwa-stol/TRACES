@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import patch
-from csv_algorithms import CsvAlgorithms
+from data_import.csv_algorithms import CsvAlgorithms
 
 
 class TestCsvAlgorithms:
