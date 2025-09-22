@@ -468,7 +468,7 @@ class TestCsvProcess:
             # Verify progress signals were emitted
             assert self.worker.progress_signal.emit.called
         finally:
-            os.unlink(temp_file))
+            os.unlink(temp_file)
             assert result == 0
             assert len(self.processor._col_defs) == 1
         
