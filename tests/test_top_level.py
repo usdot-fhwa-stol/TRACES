@@ -38,7 +38,7 @@ class TestUtils(unittest.TestCase):
     def test_get_resource_path_pyinstaller(self):
         """Test get_resource_path in PyInstaller frozen environment."""
         # Mock sys._MEIPASS to exist (PyInstaller mode)
-        with patch.object(sys, '_MEIPASS', '/mock/pyinstaller/path'):
+        with patch('sys._MEIPASS', '/mock/pyinstaller/path', create=True):
             result = utils.get_resource_path('config/test.json')
             
             expected = os.path.join('/mock/pyinstaller/path', 'config/test.json')
