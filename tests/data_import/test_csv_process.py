@@ -118,6 +118,10 @@ class TestCsvProcess:
             self.worker = Mock()
             self.worker.log_signal = Mock()
         
+        def teardown_method(self):
+            """Clean up after each test method."""
+            pass
+        
         def test_valid_configuration_dict(self):
             """Test valid configuration with dict col_defs."""
             config = {
@@ -152,6 +156,10 @@ class TestCsvProcess:
             self.worker.log_signal = Mock()
             self.worker.progress_signal = Mock()
             self.worker.interrupt_flag = False
+        
+        def teardown_method(self):
+            """Clean up after each test method."""
+            pass
         
         def test_empty_file(self):
             """Test check_import_file with empty file."""
@@ -249,6 +257,7 @@ class TestCsvProcess:
             self.worker.progress_signal = Mock()
         
         def teardown_method(self):
+            """Clean up after each test method."""
             self.db_conn.close()
         
         def create_test_table(self):
@@ -468,7 +477,7 @@ class TestCsvProcess:
             # Verify progress signals were emitted
             assert self.worker.progress_signal.emit.called
         finally:
-            os.unlink(temp_file)
+            os.unlink(temp_file))
             assert result == 0
             assert len(self.processor._col_defs) == 1
         
