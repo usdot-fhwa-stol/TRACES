@@ -1320,7 +1320,7 @@ class TestPerformance:
 
 # Error condition tests
 class TestErrorConditions:
-    """Test various error conditions and edge cases.""" Create a larger CSV file for performance testing
+    """Test various error conditions and edge cases.""" # Create a larger CSV file for performance testing
         with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
             writer = csv.writer(f)
             writer.writerow(['event_id', 'veh_id', 'veh_time', 'lane_id', 'x_map_loc', 'y_map_loc'])
