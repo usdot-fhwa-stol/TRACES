@@ -12,6 +12,7 @@ from pathlib import Path
 # Add src to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
+# Import modules - PyQt6 is mocked globally by conftest.py
 import utils
 import trajectory_tools
 
