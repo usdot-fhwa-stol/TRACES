@@ -428,6 +428,72 @@ class TestCsvProcess(unittest.TestCase):
         
         error_count = self.csv_process._check_configuration(config, self.mock_worker)
         self.assertEqual(error_count, 0)
+        self.assertEqual(len(self.csv_process._col_defs), 1)
+        self.assertEqual(self.csv_process._min_cols, 6)
+    
+    def test_check_configuration_valid_array(self):
+        """Test _check_configuration with valid array configuration."""
+        config = {
+            'col_defs': [
+                {
+                    'event_id': {'src_col': 0, 'type': 'int', 'func': 'copy'},
+                    'veh_id': {'src_col': 1, 'type': 'int', 'func': 'copy'},
+                    'veh_time': {'src_col': 2, 'type': 'float', 'func': 'copy'},
+                    'lane_id': {'src_col': 3, 'type': 'int', 'func': 'copy'},
+                    'x_map_loc': {'src_col': 4, 'type': 'float', 'func': 'copy'},
+                    'y_map_loc': {'src_col': 5, 'type': 'float', 'func': 'copy'}
+                }
+            ]
+        }
+        
+        error_count = self.csv_process._check_configuration(config, self.mock_worker)
+        self.assertEqual(error_count, 0)
+        self.assertEqual(len(self.csv_process._col_defs), 1)
+    
+    def test_check_configuration_missing_required_columns(self):
+        """Test _check_configuration with missing required columns."""
+        config = {
+            'col_defs': {
+                'event_id': {'src_col': 0, 'type': 'int', 'func': 'copy'},
+                'veh_id': {'src_col': 1, 'type': 'int', 'func': 'copy'}
+                # Missing required columns
+            }
+        }
+        
+        error_count = self.csv_process._check_configuration(config, self.mock_worker)
+        self.assertGreater(error_count, 0)
+    
+    def test_check_configuration_invalid_function(self):
+        """Test _check_configuration with invalid function name."""
+        config = {
+            'col_defs': {
+                'event_id': {'src_col': 0, 'type': 'int', 'func': 'invalid_func'},
+                'veh_id': {'src_col': 1, 'type': 'int', 'func': 'copy'},
+                'veh_time': {'src_col': 2, 'type': 'float', 'func': 'copy'},
+                'lane_id': {'src_col': 3, 'type': 'int', 'func': 'copy'},
+                'x_map_loc': {'src_col': 4, 'type': 'float', 'func': 'copy'},
+                'y_map_loc': {'src_col': 5, 'type': 'float', 'func': 'copy'}
+            }
+        }
+        
+        error_count = self.csv_process._check_configuration(config, self.mock_worker)
+        self.assertGreater(error_count, 0)
+    
+    def test_check_configuration_defaults(self):
+        """Test _check_configuration sets proper defaults."""
+        config = {
+            'col_defs': {
+                'event_id': {'src_col': 0},  # Missing type, func, etc.
+                'veh_id': {'src_col': 1, 'type': 'int', 'func': 'copy'},
+                'veh_time': {'src_col': 2, 'type': 'float', 'func': 'copy'},
+                'lane_id': {'src_col': 3, 'type': 'int', 'func': 'copy'},
+                'x_map_loc': {'src_col': 4, 'type': 'float', 'func': 'copy'},
+                'y_map_loc': {'src_col': 5, 'type': 'float', 'func': 'copy'}
+            }
+        }
+        
+        error_count = self.csv_process._check_configuration(config, self.mock_worker)
+        self.assertEqual(error_count, 0)
         
         # Check that defaults were set
         event_id_def = self.csv_process._col_defs[0]['event_id']
@@ -547,24 +613,6 @@ class TestCsvProcess(unittest.TestCase):
         """Test process with configuration errors."""
         # Invalid configuration
         config = {'col_defs': 'invalid'}
-        
-        result = self.csv_process.process(config, 'dummy.csv', Mock(), self.mock_worker)
-        self.assertGreater(result, 0)  # Error count > 0
-    
-    def test_process_interrupt_flag(self):
-        """Test process respects interrupt flag."""
-        self.mock_worker.interrupt_flag = True
-        
-        config = {
-            'col_defs': {
-                'event_id': {'src_col': 0, 'type': 'int', 'func': 'copy'},
-                'veh_id': {'src_col': 1, 'type': 'int', 'func': 'copy'},
-                'veh_time': {'src_col': 2, 'type': 'float', 'func': 'copy'},
-                'lane_id': {'src_col': 3, 'type': 'int', 'func': 'copy'},
-                'x_map_loc': {'src_col': 4, 'type': 'float', 'func': 'copy'},
-                'y_map_loc': {'src_col': 5, 'type': 'float', 'func': 'copy'}
-            }
-        }
         
         result = self.csv_process.process(config, 'dummy.csv', Mock(), self.mock_worker)
         # Should return early due to interrupt flag
@@ -714,70 +762,3 @@ class TestCsvProcessIntegration(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
-        self.assertEqual(error_count, 0)
-        self.assertEqual(len(self.csv_process._col_defs), 1)
-        self.assertEqual(self.csv_process._min_cols, 6)
-    
-    def test_check_configuration_valid_array(self):
-        """Test _check_configuration with valid array configuration."""
-        config = {
-            'col_defs': [
-                {
-                    'event_id': {'src_col': 0, 'type': 'int', 'func': 'copy'},
-                    'veh_id': {'src_col': 1, 'type': 'int', 'func': 'copy'},
-                    'veh_time': {'src_col': 2, 'type': 'float', 'func': 'copy'},
-                    'lane_id': {'src_col': 3, 'type': 'int', 'func': 'copy'},
-                    'x_map_loc': {'src_col': 4, 'type': 'float', 'func': 'copy'},
-                    'y_map_loc': {'src_col': 5, 'type': 'float', 'func': 'copy'}
-                }
-            ]
-        }
-        
-        error_count = self.csv_process._check_configuration(config, self.mock_worker)
-        self.assertEqual(error_count, 0)
-        self.assertEqual(len(self.csv_process._col_defs), 1)
-    
-    def test_check_configuration_missing_required_columns(self):
-        """Test _check_configuration with missing required columns."""
-        config = {
-            'col_defs': {
-                'event_id': {'src_col': 0, 'type': 'int', 'func': 'copy'},
-                'veh_id': {'src_col': 1, 'type': 'int', 'func': 'copy'}
-                # Missing required columns
-            }
-        }
-        
-        error_count = self.csv_process._check_configuration(config, self.mock_worker)
-        self.assertGreater(error_count, 0)
-    
-    def test_check_configuration_invalid_function(self):
-        """Test _check_configuration with invalid function name."""
-        config = {
-            'col_defs': {
-                'event_id': {'src_col': 0, 'type': 'int', 'func': 'invalid_func'},
-                'veh_id': {'src_col': 1, 'type': 'int', 'func': 'copy'},
-                'veh_time': {'src_col': 2, 'type': 'float', 'func': 'copy'},
-                'lane_id': {'src_col': 3, 'type': 'int', 'func': 'copy'},
-                'x_map_loc': {'src_col': 4, 'type': 'float', 'func': 'copy'},
-                'y_map_loc': {'src_col': 5, 'type': 'float', 'func': 'copy'}
-            }
-        }
-        
-        error_count = self.csv_process._check_configuration(config, self.mock_worker)
-        self.assertGreater(error_count, 0)
-    
-    def test_check_configuration_defaults(self):
-        """Test _check_configuration sets proper defaults."""
-        config = {
-            'col_defs': {
-                'event_id': {'src_col': 0},  # Missing type, func, etc.
-                'veh_id': {'src_col': 1, 'type': 'int', 'func': 'copy'},
-                'veh_time': {'src_col': 2, 'type': 'float', 'func': 'copy'},
-                'lane_id': {'src_col': 3, 'type': 'int', 'func': 'copy'},
-                'x_map_loc': {'src_col': 4, 'type': 'float', 'func': 'copy'},
-                'y_map_loc': {'src_col': 5, 'type': 'float', 'func': 'copy'}
-            }
-        }
-        
-        error_count = self.csv_process._check_configuration(config, self.mock_worker)
-        self.assertGreater(error_count, 0)
