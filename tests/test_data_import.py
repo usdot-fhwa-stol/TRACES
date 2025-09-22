@@ -1320,87 +1320,89 @@ class TestPerformance:
 
 # Error condition tests
 class TestErrorConditions:
-    """Test various error conditions and edge cases.""" # Create a larger CSV file for performance testing
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
-            writer = csv.writer(f)
-            writer.writerow(['event_id', 'veh_id', 'veh_time', 'lane_id', 'x_map_loc', 'y_map_loc'])
-            
-            # Write 1000 rows
-            for i in range(1000):
-                writer.writerow([str(i), str(100 + i), str(i * 0.1), str(i % 3 + 1), 
-                               str(10.0 + i * 0.1), str(20.0 + i * 0.05)])
-            f.flush()
-            
-        try:
-            config = {
-                "col_defs": {
-                    "event_id": {"src_col": 0, "type": "int", "func": "copy"},
-                    "veh_id": {"src_col": 1, "type": "int", "func": "copy"},
-                    "veh_time": {"src_col": 2, "type": "float", "func": "copy"},
-                    "lane_id": {"src_col": 3, "type": "int", "func": "copy"},
-                    "x_map_loc": {"src_col": 4, "type": "float", "func": "copy"},
-                    "y_map_loc": {"src_col": 5, "type": "float", "func": "copy"}
-                }
+    """Test various error conditions and edge cases."""
+    
+    # Create a larger CSV file for performance testing
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+        writer = csv.writer(f)
+        writer.writerow(['event_id', 'veh_id', 'veh_time', 'lane_id', 'x_map_loc', 'y_map_loc'])
+        
+        # Write 1000 rows
+        for i in range(1000):
+            writer.writerow([str(i), str(100 + i), str(i * 0.1), str(i % 3 + 1), 
+                           str(10.0 + i * 0.1), str(20.0 + i * 0.05)])
+        f.flush()
+        
+    try:
+        config = {
+            "col_defs": {
+                "event_id": {"src_col": 0, "type": "int", "func": "copy"},
+                "veh_id": {"src_col": 1, "type": "int", "func": "copy"},
+                "veh_time": {"src_col": 2, "type": "float", "func": "copy"},
+                "lane_id": {"src_col": 3, "type": "int", "func": "copy"},
+                "x_map_loc": {"src_col": 4, "type": "float", "func": "copy"},
+                "y_map_loc": {"src_col": 5, "type": "float", "func": "copy"}
             }
-            
-            processor = CsvProcess()
-            mock_worker = Mock()
-            mock_worker.log_signal = Mock()
-            mock_worker.log_signal.emit = Mock()
-            mock_worker.progress_signal = Mock()
-            mock_worker.progress_signal.emit = Mock()
-            mock_worker.interrupt_flag = False
-            
-            db = sqlite3.connect(':memory:')
-            db.execute('''
-                CREATE TABLE events (
-                    event_id INTEGER,
-                    veh_id INTEGER,
-                    veh_time REAL,
-                    lane_id INTEGER,
-                    x_map_loc REAL,
-                    y_map_loc REAL,
-                    x_frenet_loc REAL,
-                    y_frenet_loc REAL,
-                    x_map_origin REAL,
-                    y_map_origin REAL,
-                    veh_lat REAL,
-                    veh_lon REAL,
-                    veh_speed REAL,
-                    veh_accel REAL,
-                    veh_length REAL,
-                    veh_width REAL,
-                    veh_automation INTEGER,
-                    osm_way_id INTEGER,
-                    osm_speed_limit REAL,
-                    osm_traffic_control TEXT,
-                    preceding_veh_id INTEGER,
-                    veh_dist_trav REAL,
-                    event_name TEXT,
-                    PRIMARY KEY (event_id, veh_id, veh_time)
-                )
-            ''')
-            
-            # Process the large file
-            import time
-            start_time = time.time()
-            error_count = processor.process(config, f.name, db, mock_worker)
-            end_time = time.time()
-            
-            assert error_count == 0
-            
-            # Verify all data was inserted
-            cursor = db.execute("SELECT COUNT(*) FROM events")
-            count = cursor.fetchone()[0]
-            assert count == 1000
-            
-            # Check that progress was updated multiple times
-            assert mock_worker.progress_signal.emit.call_count > 0
-            
-            db.close()
-            
-        finally:
-            os.unlink(f.name)
+        }
+        
+        processor = CsvProcess()
+        mock_worker = Mock()
+        mock_worker.log_signal = Mock()
+        mock_worker.log_signal.emit = Mock()
+        mock_worker.progress_signal = Mock()
+        mock_worker.progress_signal.emit = Mock()
+        mock_worker.interrupt_flag = False
+        
+        db = sqlite3.connect(':memory:')
+        db.execute('''
+            CREATE TABLE events (
+                event_id INTEGER,
+                veh_id INTEGER,
+                veh_time REAL,
+                lane_id INTEGER,
+                x_map_loc REAL,
+                y_map_loc REAL,
+                x_frenet_loc REAL,
+                y_frenet_loc REAL,
+                x_map_origin REAL,
+                y_map_origin REAL,
+                veh_lat REAL,
+                veh_lon REAL,
+                veh_speed REAL,
+                veh_accel REAL,
+                veh_length REAL,
+                veh_width REAL,
+                veh_automation INTEGER,
+                osm_way_id INTEGER,
+                osm_speed_limit REAL,
+                osm_traffic_control TEXT,
+                preceding_veh_id INTEGER,
+                veh_dist_trav REAL,
+                event_name TEXT,
+                PRIMARY KEY (event_id, veh_id, veh_time)
+            )
+        ''')
+        
+        # Process the large file
+        import time
+        start_time = time.time()
+        error_count = processor.process(config, f.name, db, mock_worker)
+        end_time = time.time()
+        
+        assert error_count == 0
+        
+        # Verify all data was inserted
+        cursor = db.execute("SELECT COUNT(*) FROM events")
+        count = cursor.fetchone()[0]
+        assert count == 1000
+        
+        # Check that progress was updated multiple times
+        assert mock_worker.progress_signal.emit.call_count > 0
+        
+        db.close()
+        
+    finally:
+        os.unlink(f.name)
 
 
 # Additional test fixtures and utilities
