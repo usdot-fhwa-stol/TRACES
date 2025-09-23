@@ -514,11 +514,8 @@ class TestCsvProcessProcess:
         finally:
             os.unlink(temp_file)
     
-    @patch('sqlite3.Connection.executemany')
-    def test_process_database_error(self, mock_executemany):
+    def test_process_database_error(self):
         """Test process method with database error."""
-        mock_executemany.side_effect = sqlite3.Error("Database error")
-        
         config = {
             "col_defs": {
                 "event_id": {"src_col": 0, "type": "int"},
@@ -533,8 +530,13 @@ class TestCsvProcessProcess:
         data = [["1", "100", "1.5", "2", "123.45", "678.90"]]
         temp_file = self.create_test_csv_file(data)
         
+        # Create a mock connection that raises an error on executemany
+        mock_conn = Mock()
+        mock_conn.executemany.side_effect = sqlite3.Error("Database error")
+        mock_conn.commit.return_value = None
+        
         try:
-            result = self.processor.process(config, temp_file, self.db_conn, self.worker)
+            result = self.processor.process(config, temp_file, mock_conn, self.worker)
             assert result == 0  # Should continue processing despite database errors
         finally:
             os.unlink(temp_file)
