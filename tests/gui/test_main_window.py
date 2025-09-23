@@ -4,10 +4,6 @@ import tempfile
 import os
 from pathlib import Path
 from unittest.mock import Mock, patch, MagicMock, mock_open
-from PyQt6.QtWidgets import QApplication, QDialog
-from PyQt6.QtCore import QRect
-from PyQt6.QtTest import QTest
-from PyQt6.QtCore import Qt
 
 # Import the classes to test
 from src.gui.main_window import MainWindow, WebBridge
