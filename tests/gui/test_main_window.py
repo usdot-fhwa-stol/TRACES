@@ -13,16 +13,6 @@ from PyQt6.QtCore import Qt
 from src.gui.main_window import MainWindow, WebBridge
 
 
-@pytest.fixture
-def qapp():
-    """Create QApplication instance for testing."""
-    if not QApplication.instance():
-        app = QApplication([])
-    else:
-        app = QApplication.instance()
-    yield app
-
-
 class TestWebBridge:
     """Test suite for WebBridge class."""
     

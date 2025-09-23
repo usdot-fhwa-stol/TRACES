@@ -1,12 +1,22 @@
 import pytest
 import sys
 import os
+from PyQt6.QtWidgets import QApplication
 
 # Add the src directory to the Python path for imports
 # This assumes conftest.py is in the test/ directory
 test_dir = os.path.dirname(__file__)
 src_dir = os.path.join(os.path.dirname(test_dir), 'src')
 sys.path.insert(0, src_dir)
+
+@pytest.fixture(scope="session")
+def qapp():
+    """Create a single QApplication instance for all tests."""
+    app = QApplication.instance()
+    if app is None:
+        app = QApplication([])
+    yield app
+    # Let pytest-qt handle cleanup
 
 @pytest.fixture
 def mock_utm():
