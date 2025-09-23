@@ -29,7 +29,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pytest pytest-mock pytest-qt utm PyQt6 PyQt6-WebEngine numpy
+          pip install pytest pytest-mock pytest-qt utm PyQt6 PyQt6-WebEngine pyqtgraph qtrangeslider numpy
 
       - name: Run tests with Xvfb
         run: |
