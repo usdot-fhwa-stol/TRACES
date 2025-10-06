@@ -142,12 +142,18 @@ def mock_utils():
 @pytest.fixture
 def mock_sqlite():
     """Mock sqlite3 database operations."""
+    import sqlite3 as real_sqlite3
+    
     with patch('gui.main_window.sqlite3') as mock_db:
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
         
         mock_conn.cursor.return_value = mock_cursor
         mock_db.connect.return_value = mock_conn
+        
+        # CRITICAL: Make sqlite3.Error point to the real exception class
+        # so it can be used in except clauses
+        mock_db.Error = real_sqlite3.Error
         
         # Default successful database checks
         mock_cursor.fetchone.return_value = ('events',)
