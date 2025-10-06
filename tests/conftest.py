@@ -135,9 +135,14 @@ def mock_custom_widgets():
 @pytest.fixture
 def mock_utils():
     """Mock utility functions."""
-    with patch('gui.main_window.get_resource_path') as mock_resource:
-        mock_resource.return_value = 'home.html'
-        yield mock_resource
+    with patch('gui.main_window.get_resource_path') as mock_main_resource, \
+         patch('gui.about_dialog.get_resource_path') as mock_about_resource:
+        mock_main_resource.return_value = 'home.html'
+        mock_about_resource.return_value = 'about.html'
+        yield {
+            'main_window': mock_main_resource,
+            'about_dialog': mock_about_resource
+        }
 
 @pytest.fixture
 def mock_sqlite():
