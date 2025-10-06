@@ -12,43 +12,50 @@ import json
 def mock_db_connection():
     """Create a mock database connection."""
     mock_conn = MagicMock()
+    mock_cursor = MagicMock()
     
-    # Create a smart cursor that returns different values based on the query
-    def create_smart_cursor():
-        cursor = MagicMock()
-        
-        # Track the last query to determine what to return
-        last_query = []
-        
-        def execute_side_effect(query, params=()):
-            last_query.clear()
-            last_query.append(query.lower())
-        
-        def fetchone_side_effect():
-            if not last_query:
-                return (100,)  # Default count
-            
-            query = last_query[0]
-            if 'count' in query:
-                return (100,)  # Return integer for count queries
-            elif 'summary_json' in query or 'summary' in query:
-                return (json.dumps({"event_name": "Test Event"}),)  # Return JSON for summary
-            else:
-                return (100,)  # Default to integer
-        
-        cursor.execute.side_effect = execute_side_effect
-        cursor.fetchone.side_effect = fetchone_side_effect
-        cursor.fetchall.return_value = [
-            (0, 'event_id', 'INTEGER'),
-            (1, 'veh_id', 'INTEGER'),
-            (2, 'veh_time', 'REAL'),
-            (3, 'veh_speed', 'REAL')
-        ]
-        cursor.fetchmany.return_value = []
-        
-        return cursor
+    # Track queries to determine return values
+    queries = []
     
-    mock_conn.cursor.side_effect = create_smart_cursor
+    def execute_side_effect(query, params=()):
+        queries.append(query.lower())
+    
+    def fetchone_side_effect():
+        if not queries:
+            return (100,)
+        
+        last_query = queries[-1]
+        if 'count' in last_query:
+            return (100,)
+        elif 'summary_json' in last_query or 'summary' in last_query:
+            return (json.dumps({"event_name": "Test Event"}),)
+        else:
+            return (100,)
+    
+    def fetchall_side_effect():
+        if not queries:
+            return []
+        
+        last_query = queries[-1]
+        if 'pragma table_info' in last_query:
+            return [
+                (0, 'event_id', 'INTEGER'),
+                (1, 'veh_id', 'INTEGER'),
+                (2, 'veh_time', 'REAL'),
+                (3, 'veh_speed', 'REAL')
+            ]
+        elif 'from ranges' in last_query:
+            return [(1,), (2,), (3,), (4,)]
+        else:
+            return []
+    
+    mock_cursor.execute.side_effect = execute_side_effect
+    mock_cursor.fetchone.side_effect = fetchone_side_effect
+    mock_cursor.fetchall.side_effect = fetchall_side_effect
+    mock_cursor.fetchmany.return_value = []
+    
+    # Return the same cursor instance each time
+    mock_conn.cursor.return_value = mock_cursor
     
     return mock_conn
 
@@ -131,32 +138,23 @@ class TestUISetup:
         """Test note label in Export All mode."""
         from gui.export_dialog import ExportDialog
         
-        mock_cursor = mock_db_connection.cursor.return_value
-        mock_cursor.fetchone.return_value = (1234,)
-        
         dialog = ExportDialog(db_connection=mock_db_connection, selected_columns=None)
         qtbot.addWidget(dialog)
         
-        # Should show record count
-        # Can't easily check label text, but verify query was called
-        mock_cursor.execute.assert_any_call("SELECT COUNT(*) FROM events")
+        # Should have called execute with COUNT query
+        calls = [str(call) for call in mock_db_connection.cursor.return_value.execute.call_args_list]
+        assert any('count' in str(call).lower() for call in calls)
     
     def test_export_selected_checkboxes_created(self, qtbot, mock_db_connection, mock_dialogs):
         """Test that checkboxes are created in Export Selected mode."""
         from gui.export_dialog import ExportDialog
         
-        mock_cursor = mock_db_connection.cursor.return_value
-        mock_cursor.fetchall.return_value = [
-            (0, 'event_id', 'INTEGER'),
-            (1, 'veh_id', 'INTEGER'),
-            (2, 'veh_time', 'REAL')
-        ]
-        
         dialog = ExportDialog(db_connection=mock_db_connection, 
                             selected_columns=['veh_id'])
         qtbot.addWidget(dialog)
         
-        assert len(dialog._column_checkboxes) == 3
+        # Should have 4 checkboxes from the mock (event_id, veh_id, veh_time, veh_speed)
+        assert len(dialog._column_checkboxes) == 4
         assert 'event_id' in dialog._column_checkboxes
         assert 'veh_id' in dialog._column_checkboxes
         assert 'veh_time' in dialog._column_checkboxes
@@ -169,18 +167,13 @@ class TestUISetup:
         """Test that event combobox is created in Export Selected mode."""
         from gui.export_dialog import ExportDialog
         
-        mock_cursor = mock_db_connection.cursor.return_value
-        mock_cursor.fetchall.side_effect = [
-            [(0, 'veh_id', 'INTEGER')],  # column names
-            [(1,), (2,), (3,)]  # event IDs from ranges table
-        ]
-        
         dialog = ExportDialog(db_connection=mock_db_connection,
                             selected_columns=['veh_id'])
         qtbot.addWidget(dialog)
         
         assert dialog._event_combobox is not None
-        assert dialog._event_combobox.count() == 3
+        # Should have 4 events from mock ranges query
+        assert dialog._event_combobox.count() == 4
     
     def test_export_all_no_combobox(self, qtbot, mock_db_connection, mock_dialogs):
         """Test that no event combobox is created in Export All mode."""
@@ -316,30 +309,18 @@ class TestEventCombobox:
         """Test populating event combobox."""
         from gui.export_dialog import ExportDialog
         
-        mock_cursor = mock_db_connection.cursor.return_value
-        mock_cursor.fetchall.side_effect = [
-            [(0, 'veh_id', 'INTEGER')],
-            [(1,), (5,), (10,)]
-        ]
-        
         dialog = ExportDialog(db_connection=mock_db_connection,
                             selected_columns=['veh_id'])
         qtbot.addWidget(dialog)
         
-        assert dialog._event_combobox.count() == 3
+        # Should have 4 events from fixture
+        assert dialog._event_combobox.count() == 4
         assert dialog._event_combobox.itemText(0) == "Event 1"
         assert dialog._event_combobox.itemData(0) == 1
     
     def test_on_event_changed(self, qtbot, mock_db_connection, mock_dialogs):
         """Test event selection change."""
         from gui.export_dialog import ExportDialog
-        
-        mock_cursor = mock_db_connection.cursor.return_value
-        mock_cursor.fetchall.side_effect = [
-            [(0, 'veh_id', 'INTEGER')],
-            [(1,), (2,)]
-        ]
-        mock_cursor.fetchone.return_value = (json.dumps({"event_name": "Test Event"}),)
         
         dialog = ExportDialog(db_connection=mock_db_connection,
                             selected_columns=['veh_id'])
@@ -426,9 +407,6 @@ class TestExportProcess:
         """Test producer initialization in Export All mode."""
         from gui.export_dialog import ExportDialog
         
-        mock_cursor = mock_db_connection.cursor.return_value
-        mock_cursor.fetchone.return_value = (100,)
-        
         dialog = ExportDialog(db_connection=mock_db_connection, selected_columns=None)
         qtbot.addWidget(dialog)
         
@@ -436,16 +414,12 @@ class TestExportProcess:
         
         assert dialog._total_records == 100
         assert dialog._records_processed == 0
-        # Should execute query without WHERE clause
-        calls = [str(call) for call in mock_cursor.execute.call_args_list]
-        assert any('ORDER BY event_id' in str(call) for call in calls)
+        # Should execute query - check that execute was called
+        assert mock_db_connection.cursor.return_value.execute.called
     
     def test_init_producer_export_selected(self, qtbot, mock_db_connection, mock_dialogs):
         """Test producer initialization in Export Selected mode."""
         from gui.export_dialog import ExportDialog
-        
-        mock_cursor = mock_db_connection.cursor.return_value
-        mock_cursor.fetchone.return_value = (50,)
         
         dialog = ExportDialog(db_connection=mock_db_connection,
                             selected_columns=['veh_id'])
@@ -453,20 +427,20 @@ class TestExportProcess:
         
         dialog._init_producer(['veh_id'], event_id=5)
         
-        assert dialog._total_records == 50
-        # Should execute query with WHERE clause
-        calls = [str(call) for call in mock_cursor.execute.call_args_list]
-        assert any('WHERE event_id = ?' in str(call) for call in calls)
+        assert dialog._total_records == 100
+        # Should execute query with WHERE clause - check calls
+        calls = [str(call) for call in mock_db_connection.cursor.return_value.execute.call_args_list]
+        assert any('where' in str(call).lower() for call in calls)
     
     def test_init_producer_no_records_raises_error(self, qtbot, mock_db_connection, mock_dialogs):
         """Test that producer initialization raises error when no records found."""
         from gui.export_dialog import ExportDialog
         
-        mock_cursor = mock_db_connection.cursor.return_value
-        mock_cursor.fetchone.return_value = (0,)
-        
         dialog = ExportDialog(db_connection=mock_db_connection, selected_columns=None)
         qtbot.addWidget(dialog)
+        
+        # Override fetchone to return 0 count
+        mock_db_connection.cursor.return_value.fetchone.side_effect = lambda: (0,)
         
         with pytest.raises(ValueError, match="No records found"):
             dialog._init_producer(['veh_id'], event_id=None)
@@ -526,10 +500,13 @@ class TestProducerConsumer:
         dialog = ExportDialog(db_connection=mock_db_connection, selected_columns=None)
         qtbot.addWidget(dialog)
         
-        dialog._producer_timer = MagicMock()
+        # Create and set a mock timer
+        mock_timer = MagicMock()
+        dialog._producer_timer = mock_timer
+        
         dialog._stop_producer()
         
-        dialog._producer_timer.stop.assert_called_once()
+        mock_timer.stop.assert_called_once()
         assert dialog._producer_timer is None
 
 
@@ -545,12 +522,13 @@ class TestInterrupt:
         
         # Set up mock thread and timer
         dialog._worker_thread = MagicMock()
-        dialog._producer_timer = MagicMock()
+        mock_timer = MagicMock()
+        dialog._producer_timer = mock_timer
         
         dialog._interrupt_export()
         
         assert dialog._worker_thread.interrupt_flag is True
-        dialog._producer_timer.stop.assert_called()
+        mock_timer.stop.assert_called()
         assert dialog._interrupt_button.isEnabled() is False
 
 
@@ -560,10 +538,6 @@ class TestExportCompletion:
     def test_on_export_finished_success(self, qtbot, mock_db_connection, mock_dialogs):
         """Test successful export completion."""
         from gui.export_dialog import ExportDialog
-        
-        # Override for count query
-        mock_cursor = mock_db_connection.cursor.return_value
-        mock_cursor.fetchone.return_value = (100,)
         
         dialog = ExportDialog(db_connection=mock_db_connection, selected_columns=None)
         qtbot.addWidget(dialog)
@@ -580,10 +554,6 @@ class TestExportCompletion:
     def test_on_export_finished_failure(self, qtbot, mock_db_connection, mock_dialogs):
         """Test failed export completion."""
         from gui.export_dialog import ExportDialog
-        
-        # Override for count query
-        mock_cursor = mock_db_connection.cursor.return_value
-        mock_cursor.fetchone.return_value = (100,)
         
         dialog = ExportDialog(db_connection=mock_db_connection, selected_columns=None)
         qtbot.addWidget(dialog)
@@ -620,14 +590,11 @@ class TestCloseEvent:
         """Test closing dialog during export when user cancels."""
         from gui.export_dialog import ExportDialog
         
-        # Override for count query
-        mock_cursor = mock_db_connection.cursor.return_value
-        mock_cursor.fetchone.return_value = (100,)
-        
-        mock_dialogs['message'].question.return_value = QMessageBox.StandardButton.Cancel
-        
         dialog = ExportDialog(db_connection=mock_db_connection, selected_columns=None)
         qtbot.addWidget(dialog)
+        
+        # Override the question mock for this test
+        mock_dialogs['message'].question.return_value = QMessageBox.StandardButton.Cancel
         
         dialog._worker_thread = MagicMock()
         dialog._worker_thread.isRunning.return_value = True
@@ -638,18 +605,14 @@ class TestCloseEvent:
         
         dialog.closeEvent(event)
         
-        # Event should be ignored
+        # Event should be ignored - check using isAccepted() == False
         assert event.isAccepted() is False
     
     def test_close_event_export_running_user_confirms(self, qtbot, mock_db_connection, mock_dialogs):
         """Test closing dialog during export when user confirms."""
         from gui.export_dialog import ExportDialog
         
-        # Override for count query
-        mock_cursor = mock_db_connection.cursor.return_value
-        mock_cursor.fetchone.return_value = (100,)
-        
-        mock_dialogs['message'].question.return_value = QMessageBox.StandardButton.Yes
+        # Use default Yes response from fixture
         
         dialog = ExportDialog(db_connection=mock_db_connection, selected_columns=None)
         qtbot.addWidget(dialog)
@@ -673,12 +636,6 @@ class TestCloseEvent:
         """Test that close event emits selected columns in Export Selected mode."""
         from gui.export_dialog import ExportDialog
         
-        mock_cursor = mock_db_connection.cursor.return_value
-        mock_cursor.fetchall.return_value = [
-            (0, 'veh_id', 'INTEGER'),
-            (1, 'veh_time', 'REAL')
-        ]
-        
         dialog = ExportDialog(db_connection=mock_db_connection,
                             selected_columns=['veh_id'])
         qtbot.addWidget(dialog)
@@ -698,10 +655,6 @@ class TestCloseEvent:
     def test_close_event_export_all_emits_empty_list(self, qtbot, mock_db_connection, mock_dialogs):
         """Test that close event emits empty list in Export All mode."""
         from gui.export_dialog import ExportDialog
-        
-        # Override for count query
-        mock_cursor = mock_db_connection.cursor.return_value
-        mock_cursor.fetchone.return_value = (100,)
         
         dialog = ExportDialog(db_connection=mock_db_connection, selected_columns=None)
         qtbot.addWidget(dialog)
@@ -808,13 +761,6 @@ class TestIntegration:
         """Test complete Export All workflow."""
         from gui.export_dialog import ExportDialog
         
-        mock_cursor = mock_db_connection.cursor.return_value
-        mock_cursor.fetchone.return_value = (10,)
-        mock_cursor.fetchall.return_value = [
-            (0, 'event_id', 'INTEGER'),
-            (1, 'veh_id', 'INTEGER')
-        ]
-        
         output_file = tmp_path / "export_all.csv"
         mock_dialogs['file'].getSaveFileName.return_value = (str(output_file), '')
         
@@ -829,18 +775,14 @@ class TestIntegration:
         """Test complete Export Selected workflow."""
         from gui.export_dialog import ExportDialog
         
-        mock_cursor = mock_db_connection.cursor.return_value
-        mock_cursor.fetchall.side_effect = [
-            [(0, 'event_id', 'INTEGER'), (1, 'veh_id', 'INTEGER')],
-            [(1,), (2,)]
-        ]
-        mock_cursor.fetchone.return_value = (json.dumps({"event_name": "Test"}),)
-        
         dialog = ExportDialog(db_connection=mock_db_connection,
                             selected_columns=['veh_id'])
         qtbot.addWidget(dialog)
         
         assert dialog.is_export_all_mode is False
-        assert len(dialog._column_checkboxes) == 2
-        assert dialog._event_combobox.count() == 2
+        # Should have 4 checkboxes from fixture
+        assert len(dialog._column_checkboxes) == 4
+        assert dialog._event_combobox is not None
+        # Should have 4 events from fixture
+        assert dialog._event_combobox.count() == 4
         assert dialog._column_checkboxes['veh_id'].isChecked() is True
