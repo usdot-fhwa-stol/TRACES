@@ -2,7 +2,7 @@ import pytest
 from unittest.mock import Mock, MagicMock, patch, mock_open
 from pathlib import Path
 from PyQt6.QtWidgets import QMainWindow, QPushButton, QTextBrowser
-from PyQt6.QtCore import QTimer, QRect
+from PyQt6.QtCore import QTimer, QRect, Qt
 
 
 class TestAboutDialogInitialization:
@@ -123,10 +123,11 @@ class TestContentLoading:
             dialog = AboutDialog()
             qtbot.addWidget(dialog)
             
-            # Should show fallback content
+            # Should show fallback content - Qt adds its own formatting
             loaded_html = dialog._text_browser.toHtml()
-            # Should have empty body as fallback
-            assert "<body>" in loaded_html
+            # Check that it has HTML structure (fallback was set)
+            assert "html" in loaded_html.lower()
+            assert "body" in loaded_html.lower()
             
             # Should print error
             captured = capsys.readouterr()
@@ -146,9 +147,11 @@ class TestContentLoading:
             dialog = AboutDialog()
             qtbot.addWidget(dialog)
             
-            # Should show fallback content
+            # Should show fallback content - Qt adds its own formatting
             loaded_html = dialog._text_browser.toHtml()
-            assert "<body>" in loaded_html
+            # Check that it has HTML structure (fallback was set)
+            assert "html" in loaded_html.lower()
+            assert "body" in loaded_html.lower()
 
 
 class TestPositioning:
@@ -409,7 +412,7 @@ class TestDialogClosing:
             dialog.closed.connect(closed_signal)
             
             # Click the close button
-            qtbot.mouseClick(dialog._close_button, qtbot.MouseButton.LeftButton)
+            qtbot.mouseClick(dialog._close_button, Qt.MouseButton.LeftButton)
             
             closed_signal.assert_called_once()
 
@@ -531,7 +534,7 @@ class TestIntegration:
             closed_signal = Mock()
             dialog.closed.connect(closed_signal)
             
-            qtbot.mouseClick(dialog._close_button, qtbot.MouseButton.LeftButton)
+            qtbot.mouseClick(dialog._close_button, Qt.MouseButton.LeftButton)
             
             # Timer should be stopped
             assert not dialog._countdown_timer.isActive()
