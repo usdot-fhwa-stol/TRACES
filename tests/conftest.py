@@ -26,6 +26,36 @@ def mock_qapplication(qapp):
     return qapp
 
 @pytest.fixture
+def mock_qwebengine():
+    """Mock QWebEngineView and related components to avoid crashes."""
+    from PyQt6.QtWidgets import QWidget
+    
+    with patch('gui.main_window.QWebEngineView') as mock_view_class, \
+         patch('gui.main_window.QWebChannel') as mock_channel_class:
+        
+        # Create a real QWidget to use as the web view
+        mock_web_view_instance = QWidget()
+        
+        # Mock the QWebEngineView class to return our widget
+        mock_view_class.return_value = mock_web_view_instance
+        
+        # Add necessary methods that the code expects
+        mock_web_view_instance.page = MagicMock()
+        mock_web_view_instance.page.return_value.setWebChannel = MagicMock()
+        mock_web_view_instance.setHtml = MagicMock()
+        
+        # Mock QWebChannel
+        mock_channel_instance = MagicMock()
+        mock_channel_class.return_value = mock_channel_instance
+        
+        yield {
+            'view_class': mock_view_class,
+            'view_instance': mock_web_view_instance,
+            'channel_class': mock_channel_class,
+            'channel_instance': mock_channel_instance
+        }
+
+@pytest.fixture
 def mock_dialogs():
     """Mock various Qt dialogs."""
     with patch('gui.main_window.QFileDialog') as mock_file_dialog, \
@@ -48,27 +78,45 @@ def mock_dialogs():
 @pytest.fixture
 def mock_custom_widgets():
     """Mock custom widget imports."""
+    from PyQt6.QtWidgets import QWidget, QDialog
+    
     with patch('gui.main_window.TimeSpacePlotWidget') as mock_plot, \
          patch('gui.main_window.TimeSpacePlotSettingsDialog') as mock_settings, \
          patch('gui.main_window.ImportDialog') as mock_import, \
          patch('gui.main_window.AboutDialog') as mock_about, \
          patch('gui.main_window.ExportDialog') as mock_export:
         
-        # Configure mocks
-        mock_plot_instance = MagicMock()
+        # Create real QWidget instances where needed
+        mock_plot_instance = QWidget()
+        mock_plot_instance.set_database = MagicMock()
+        mock_plot_instance._apply_settings = MagicMock()
+        mock_plot_instance.setParent = MagicMock()
+        mock_plot_instance.deleteLater = MagicMock()
         mock_plot.return_value = mock_plot_instance
         
+        # Mock dialog instances
         mock_settings_instance = MagicMock()
-        mock_settings_instance.exec.return_value = 1  # QDialog.DialogCode.Accepted
+        mock_settings_instance.exec.return_value = QDialog.DialogCode.Accepted
+        mock_settings_instance.settings_applied = MagicMock()
+        mock_settings_instance.settings_applied.connect = MagicMock()
         mock_settings.return_value = mock_settings_instance
         
         mock_import_instance = MagicMock()
+        mock_import_instance.setModal = MagicMock()
+        mock_import_instance.show = MagicMock()
+        mock_import_instance.import_finished = MagicMock()
+        mock_import_instance.import_finished.connect = MagicMock()
         mock_import.return_value = mock_import_instance
         
         mock_about_instance = MagicMock()
+        mock_about_instance.exec = MagicMock()
         mock_about.return_value = mock_about_instance
         
         mock_export_instance = MagicMock()
+        mock_export_instance.setModal = MagicMock()
+        mock_export_instance.exec = MagicMock()
+        mock_export_instance.export_finished = MagicMock()
+        mock_export_instance.export_finished.connect = MagicMock()
         mock_export.return_value = mock_export_instance
         
         yield {
