@@ -15,8 +15,10 @@ def mock_db_connection():
     mock_cursor = MagicMock()
     mock_conn.cursor.return_value = mock_cursor
     
-    # Default return values
-    mock_cursor.fetchone.return_value = (100,)  # Default count
+    # Default return values - use JSON string to avoid parsing errors
+    # This works for most queries since count queries will just use the first element
+    mock_cursor.fetchone.return_value = (json.dumps({"event_name": "Test Event"}),)
+    
     mock_cursor.fetchall.return_value = [
         (0, 'event_id', 'INTEGER'),
         (1, 'veh_id', 'INTEGER'),
@@ -51,6 +53,10 @@ class TestExportDialogInitialization:
         """Test initialization in Export All mode."""
         from gui.export_dialog import ExportDialog
         
+        # Override for count query in Export All mode
+        mock_cursor = mock_db_connection.cursor.return_value
+        mock_cursor.fetchone.return_value = (100,)
+        
         dialog = ExportDialog(parent=None, db_connection=mock_db_connection, 
                             selected_columns=None)
         qtbot.addWidget(dialog)
@@ -75,6 +81,10 @@ class TestExportDialogInitialization:
     def test_init_components_created(self, qtbot, mock_db_connection, mock_dialogs):
         """Test that UI components are created."""
         from gui.export_dialog import ExportDialog
+        
+        # Override for count query
+        mock_cursor = mock_db_connection.cursor.return_value
+        mock_cursor.fetchone.return_value = (100,)
         
         dialog = ExportDialog(db_connection=mock_db_connection, selected_columns=None)
         qtbot.addWidget(dialog)
@@ -158,6 +168,10 @@ class TestUISetup:
     def test_export_all_no_combobox(self, qtbot, mock_db_connection, mock_dialogs):
         """Test that no event combobox is created in Export All mode."""
         from gui.export_dialog import ExportDialog
+        
+        # Override for count query
+        mock_cursor = mock_db_connection.cursor.return_value
+        mock_cursor.fetchone.return_value = (100,)
         
         dialog = ExportDialog(db_connection=mock_db_connection, selected_columns=None)
         qtbot.addWidget(dialog)
@@ -365,6 +379,10 @@ class TestExportProcess:
         """Test export when user cancels file dialog."""
         from gui.export_dialog import ExportDialog
         
+        # Override for count query
+        mock_cursor = mock_db_connection.cursor.return_value
+        mock_cursor.fetchone.return_value = (100,)
+        
         mock_dialogs['file'].getSaveFileName.return_value = ('', '')
         
         dialog = ExportDialog(db_connection=mock_db_connection, selected_columns=None)
@@ -378,6 +396,10 @@ class TestExportProcess:
     def test_on_export_file_exists_user_declines(self, qtbot, mock_db_connection, mock_dialogs, tmp_path):
         """Test export when file exists and user declines overwrite."""
         from gui.export_dialog import ExportDialog
+        
+        # Override for count query
+        mock_cursor = mock_db_connection.cursor.return_value
+        mock_cursor.fetchone.return_value = (100,)
         
         # Create existing file
         existing_file = tmp_path / "test.csv"
@@ -397,6 +419,10 @@ class TestExportProcess:
     def test_on_export_starts_export(self, qtbot, mock_db_connection, mock_dialogs, tmp_path):
         """Test that export process starts correctly."""
         from gui.export_dialog import ExportDialog
+        
+        # Override for count query
+        mock_cursor = mock_db_connection.cursor.return_value
+        mock_cursor.fetchone.return_value = (100,)
         
         output_file = tmp_path / "test.csv"
         mock_dialogs['file'].getSaveFileName.return_value = (str(output_file), '')
@@ -527,6 +553,10 @@ class TestInterrupt:
         """Test interrupting export."""
         from gui.export_dialog import ExportDialog
         
+        # Override for count query
+        mock_cursor = mock_db_connection.cursor.return_value
+        mock_cursor.fetchone.return_value = (100,)
+        
         dialog = ExportDialog(db_connection=mock_db_connection, selected_columns=None)
         qtbot.addWidget(dialog)
         
@@ -547,6 +577,10 @@ class TestExportCompletion:
         """Test successful export completion."""
         from gui.export_dialog import ExportDialog
         
+        # Override for count query
+        mock_cursor = mock_db_connection.cursor.return_value
+        mock_cursor.fetchone.return_value = (100,)
+        
         dialog = ExportDialog(db_connection=mock_db_connection, selected_columns=None)
         qtbot.addWidget(dialog)
         
@@ -562,6 +596,10 @@ class TestExportCompletion:
     def test_on_export_finished_failure(self, qtbot, mock_db_connection, mock_dialogs):
         """Test failed export completion."""
         from gui.export_dialog import ExportDialog
+        
+        # Override for count query
+        mock_cursor = mock_db_connection.cursor.return_value
+        mock_cursor.fetchone.return_value = (100,)
         
         dialog = ExportDialog(db_connection=mock_db_connection, selected_columns=None)
         qtbot.addWidget(dialog)
@@ -598,6 +636,10 @@ class TestCloseEvent:
         """Test closing dialog during export when user cancels."""
         from gui.export_dialog import ExportDialog
         
+        # Override for count query
+        mock_cursor = mock_db_connection.cursor.return_value
+        mock_cursor.fetchone.return_value = (100,)
+        
         mock_dialogs['message'].question.return_value = QMessageBox.StandardButton.Cancel
         
         dialog = ExportDialog(db_connection=mock_db_connection, selected_columns=None)
@@ -618,6 +660,10 @@ class TestCloseEvent:
     def test_close_event_export_running_user_confirms(self, qtbot, mock_db_connection, mock_dialogs):
         """Test closing dialog during export when user confirms."""
         from gui.export_dialog import ExportDialog
+        
+        # Override for count query
+        mock_cursor = mock_db_connection.cursor.return_value
+        mock_cursor.fetchone.return_value = (100,)
         
         mock_dialogs['message'].question.return_value = QMessageBox.StandardButton.Yes
         
@@ -668,6 +714,10 @@ class TestCloseEvent:
     def test_close_event_export_all_emits_empty_list(self, qtbot, mock_db_connection, mock_dialogs):
         """Test that close event emits empty list in Export All mode."""
         from gui.export_dialog import ExportDialog
+        
+        # Override for count query
+        mock_cursor = mock_db_connection.cursor.return_value
+        mock_cursor.fetchone.return_value = (100,)
         
         dialog = ExportDialog(db_connection=mock_db_connection, selected_columns=None)
         qtbot.addWidget(dialog)
