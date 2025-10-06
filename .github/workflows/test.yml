@@ -24,7 +24,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb libxkbcommon-x11-0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-xinerama0 libxcb-xfixes0 libegl1 x11-utils
+          sudo apt-get install -y xvfb libxkbcommon-x11-0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-xinerama0 libxcb-xfixes0 libegl1 x11-utils libxcb-cursor0
 
       - name: Install Python dependencies
         run: |
@@ -36,4 +36,6 @@ jobs:
           xvfb-run --auto-servernum --server-args='-screen 0 1280x720x24' pytest tests/ --verbose
         env:
           PYTHONPATH: src
-          QT_LOGGING_RULES: qt6.accessibility.warning=false  # Suppress accessibility warnings
+          QT_QPA_PLATFORM: offscreen
+          QT_LOGGING_RULES: qt6.accessibility.warning=false
+          QT_DEBUG_PLUGINS: 0
