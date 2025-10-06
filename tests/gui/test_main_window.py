@@ -2,7 +2,7 @@ import pytest
 from unittest.mock import Mock, MagicMock, patch, call
 from pathlib import Path
 from PyQt6.QtWidgets import QDialog
-import sqlite3
+import sqlite3 as real_sqlite3
 
 
 class TestMainWindowInitialization:
@@ -99,10 +99,21 @@ class TestSettingsManagement:
     
     def test_save_settings(self, qtbot, mock_qwebengine, mock_custom_widgets, mock_utils, mock_dialogs, tmp_path):
         """Test saving settings to config file."""
+        config_file = tmp_path / "trajectory_tools.conf"
+        
+        # Create a mock Path that returns our config file
         with patch('gui.main_window.Path') as mock_path:
-            config_file = tmp_path / "trajectory_tools.conf"
-            mock_path.return_value = config_file
-            mock_path.return_value.exists.return_value = False
+            # For initialization, return a path that doesn't exist
+            mock_init_path = MagicMock()
+            mock_init_path.exists.return_value = False
+            
+            # For saving, return our real temp config file
+            def path_constructor(arg):
+                if str(arg) == "trajectory_tools.conf":
+                    return config_file
+                return mock_init_path
+            
+            mock_path.side_effect = path_constructor
             
             from gui.main_window import MainWindow
             window = MainWindow()
@@ -242,8 +253,8 @@ class TestDatabaseValidation:
             window = MainWindow()
             qtbot.addWidget(window)
             
-            # Configure mock to raise error
-            mock_sqlite['module'].connect.side_effect = sqlite3.Error("Connection failed")
+            # Configure mock to raise error - use real sqlite3.Error
+            mock_sqlite['module'].connect.side_effect = real_sqlite3.Error("Connection failed")
             
             result = window._check_database("/test/error.db")
             assert result is False
@@ -587,10 +598,20 @@ class TestCloseEvent:
     
     def test_close_event_saves_settings(self, qtbot, mock_qwebengine, mock_custom_widgets, mock_utils, mock_dialogs, tmp_path):
         """Test that closing window saves settings."""
+        config_file = tmp_path / "trajectory_tools.conf"
+        
         with patch('gui.main_window.Path') as mock_path:
-            config_file = tmp_path / "trajectory_tools.conf"
-            mock_path.return_value = config_file
-            mock_path.return_value.exists.return_value = False
+            # For initialization, return a path that doesn't exist
+            mock_init_path = MagicMock()
+            mock_init_path.exists.return_value = False
+            
+            # For saving, return our real temp config file
+            def path_constructor(arg):
+                if str(arg) == "trajectory_tools.conf":
+                    return config_file
+                return mock_init_path
+            
+            mock_path.side_effect = path_constructor
             
             from gui.main_window import MainWindow
             window = MainWindow()
