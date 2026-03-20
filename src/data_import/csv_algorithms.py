@@ -95,8 +95,8 @@ class CsvAlgorithms:
         _, lon = self.utm_common(row, col_def)
         return lon
 
-    def tgsim_lane(self, row: List[str], col_def: Dict[str, Any]) -> int:
-        """Calculate lane ID based on tgsim rules.
+    def lane_tgsim_L1L2(self, row: List[str], col_def: Dict[str, Any]) -> int:
+        """Calculate lane ID based on tgsim L1 and L2 rules.
 
         Args:
             row (List[str]): CSV row data.
@@ -116,8 +116,63 @@ class CsvAlgorithms:
         
         try:
             lane_kf = int(float(row[parms[0]]))
-            src_value = int(float(row[src_col]))
-            return 7 - lane_kf if src_value % 2 else 16 - lane_kf
+            if lane_kf < 0:
+                return -lane_kf;
+            else:
+                return lane_kf
+        except (ValueError, TypeError):
+            return None
+
+    def lane_tgsim_sationary(self, row: List[str], col_def: Dict[str, Any]) -> int:
+        """Calculate lane ID based on tgsim stionary rules.
+
+        Args:
+            row (List[str]): CSV row data.
+            col_def (Dict[str, Any]): Column definition with src_col and parms.
+
+        Returns:
+            int: Calculated lane ID or None if invalid.
+        """
+        src_col = col_def.get("src_col", -1)
+        parms = col_def.get("parms", [])
+        
+        if src_col < 0 or src_col >= len(row) or not row[src_col] or len(parms) < 1:
+            return None
+        
+        if parms[0] < 0 or parms[0] >= len(row):
+            return None
+        
+        try:
+            lane_kf = int(float(row[parms[0]]))
+            if lane_kf > 9:
+                return lane_kf - 9;
+            else:
+                return lane_kf
+        except (ValueError, TypeError):
+            return None
+
+    def lane_ohio(self, row: List[str], col_def: Dict[str, Any]) -> int:
+        """Calculate lane ID based on ohio rules.
+
+        Args:
+            row (List[str]): CSV row data.
+            col_def (Dict[str, Any]): Column definition with src_col and parms.
+
+        Returns:
+            int: Calculated lane ID or None if invalid.
+        """
+        src_col = col_def.get("src_col", -1)
+        parms = col_def.get("parms", [])
+        
+        if src_col < 0 or src_col >= len(row) or not row[src_col] or len(parms) < 1:
+            return None
+        
+        if parms[0] < 0 or parms[0] >= len(row):
+            return None
+        
+        try:
+            lane_kf = int(float(row[parms[0]]))
+            return lane_kf + 1
         except (ValueError, TypeError):
             return None
 

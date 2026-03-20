@@ -29,7 +29,7 @@ class _ImportWorkerThread(QThread):
         logger.debug(f"ImportWorkerThread initialized with input: {input_path}, output: {output_path}")
 
     def run(self):
-        """Execute the import process and update vehicle distance traveled."""
+        """Execute the import process."""
         logger.debug("ImportWorkerThread.run() started")
         try:
             # CRITICAL FIX: Close any existing database connection first
@@ -82,6 +82,7 @@ class _ImportWorkerThread(QThread):
                     veh_id INTEGER NOT NULL,
                     veh_time REAL NOT NULL,
                     lane_id INTEGER,
+                    orig_lane_id INTEGER,
                     x_map_loc REAL,
                     y_map_loc REAL,
                     x_frenet_loc REAL,
@@ -132,68 +133,9 @@ class _ImportWorkerThread(QThread):
             error_count = processor.process(self.config, self.input_path, self.db_connection, self)
             logger.debug(f"Data processing completed with {error_count} errors")
 
-            if error_count == 0 and not self.interrupt_flag:
-                logger.debug("Starting vehicle distance calculation")
-                self.log_signal.emit("Updating vehicle distance traveled", True)
-                
-                # Calculate total records for progress
-                cursor = self.db_connection.cursor()
-                cursor.execute("SELECT COUNT(*) FROM events")
-                total_records = cursor.fetchone()[0]
-                logger.debug(f"Total records for distance calculation: {total_records}")
-                
-                # Calculate cumulative distances
-                cursor.execute("SELECT DISTINCT event_id, veh_id FROM events")
-                pairs = cursor.fetchall()
-                processed_records = 0
-                batch_size = 1000
-                
-                logger.debug(f"Processing {len(pairs)} vehicle pairs")
-                self.log_signal.emit(f"Processing {len(pairs)} vehicle pairs", True)
-                for i, (event_id, veh_id) in enumerate(pairs):
-                    if self.interrupt_flag:
-                        logger.debug("Interrupt flag set, breaking distance calculation loop")
-                        break
-                        
-                    cursor.execute("""
-                        SELECT veh_time, x_map_loc, y_map_loc
-                        FROM events
-                        WHERE event_id = ? AND veh_id = ?
-                        ORDER BY veh_time
-                    """, (event_id, veh_id))
-                    points = cursor.fetchall()
-                    
-                    total_dist = 0.0
-                    prev_x_loc = None
-                    prev_y_loc = None
-                    
-                    for j, (veh_time, x_map_loc, y_map_loc) in enumerate(points):
-                        if self.interrupt_flag:
-                            logger.debug("Interrupt flag set during point processing")
-                            break
-                            
-                        if prev_x_loc is not None and prev_y_loc is not None:
-                            dist = ((x_map_loc - prev_x_loc) ** 2 + (y_map_loc - prev_y_loc) ** 2) ** 0.5
-                            total_dist += dist
-                        cursor.execute("""
-                            UPDATE events
-                            SET veh_dist_trav = ?
-                            WHERE event_id = ? AND veh_id = ? AND veh_time = ?
-                        """, (total_dist, event_id, veh_id, veh_time))
-                        prev_x_loc = x_map_loc
-                        prev_y_loc = y_map_loc
-                        
-                        if (j + 1) % batch_size == 0 or j == len(points) - 1:
-                            self.db_connection.commit()
-                            processed_records += min(batch_size, len(points) - j)
-                    
-                    # Update progress after completing each vehicle pair
-                    if (i + 1) % 100 == 0 or i == len(pairs) - 1:
-                        progress = int(((i + 1) / len(pairs)) * 100)
-                        self.progress_signal.emit(progress)
-                        logger.debug(f"Processed {i + 1}/{len(pairs)} vehicle pairs")
-
+            if error_count == 0:
                 if not self.interrupt_flag:
+                    cursor = self.db_connection.cursor()
                     logger.debug("Creating event summaries")
                     self.log_signal.emit("Creating event summaries", True)
                     

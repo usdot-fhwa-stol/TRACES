@@ -296,6 +296,7 @@ class MainWindow(QMainWindow):
                 "veh_id": "INTEGER",
                 "veh_time": "REAL",
                 "lane_id": "INTEGER",
+                "orig_lane_id": "INTEGER",
                 "x_map_loc": "REAL",
                 "y_map_loc": "REAL",
                 "x_frenet_loc": "REAL",

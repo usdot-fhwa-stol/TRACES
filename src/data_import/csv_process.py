@@ -64,7 +64,7 @@ class CsvProcess(BaseProcess):
             worker.log_signal.emit("Error: 'col_defs' must be an object or array.", False)
             return 1
 
-        required_cols = {"event_id", "veh_id", "veh_time", "lane_id", "x_map_loc", "y_map_loc"}
+        required_cols = {"event_id", "veh_id", "veh_time", "lane_id", "orig_lane_id", "x_map_loc", "y_map_loc"}
         seen_keys = set()
 
         for i, col_def_set in enumerate(self._col_defs):
