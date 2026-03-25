@@ -1,40 +1,14 @@
 import sqlite3
 from pathlib import Path
 from PyQt6.QtWidgets import QMainWindow, QMenuBar, QMenu, QApplication, QFileDialog, QMessageBox, QDialog
-from PyQt6.QtWebEngineWidgets import QWebEngineView
-from PyQt6.QtWebChannel import QWebChannel
 from PyQt6.QtGui import QAction
-from PyQt6.QtCore import QTimer, QObject, pyqtSlot
+from PyQt6.QtCore import QTimer
 from .time_space_plot_widget import TimeSpacePlotWidget
 from .time_space_plot_settings_dialog import TimeSpacePlotSettingsDialog
+from .home_widget import HomeWidget
 from .import_dialog import ImportDialog
 from .about_dialog import AboutDialog
 from .export_dialog import ExportDialog
-from utils import get_resource_path
-
-class WebBridge(QObject):
-    """Bridge class to connect HTML page with MainWindow methods."""
-    
-    def __init__(self, main_window):
-        super().__init__()
-        self.main_window = main_window
-    
-    @pyqtSlot()
-    def openFile(self):
-        """Handle open file action from HTML page."""
-        self.main_window._open_file()
-    
-    @pyqtSlot()
-    def importFile(self):
-        """Handle import file action from HTML page."""
-        self.main_window._import_file()
-    
-    @pyqtSlot(str)
-    def openRecentFile(self, file_path):
-        """Handle recent file action from HTML page."""
-        # Convert forward slashes back to OS-specific separators
-        os_file_path = str(Path(file_path))
-        self.main_window._open_recent_file(os_file_path)
 
 class MainWindow(QMainWindow):
     """Main window for the Trajectory Tools application.
@@ -64,9 +38,7 @@ class MainWindow(QMainWindow):
         self._plot_widget = None
         self._import_dialog = None
         self._selected_export_columns = []  # Initially empty list of selected export columns
-        self._web_view = None
-        self._web_bridge = None
-        self._web_channel = None
+        self._home_widget = None
         
         self._setup_ui()
         self._load_settings()
@@ -128,41 +100,15 @@ class MainWindow(QMainWindow):
         file_menu.addAction(exit_action)
 
     def _setup_home_page(self):
-        """Set up the HTML home page view."""
-        self._web_view = QWebEngineView()
-        self.setCentralWidget(self._web_view)
-        
-        # Set up web channel for communication between HTML and Python
-        self._web_bridge = WebBridge(self)
-        self._web_channel = QWebChannel()
-        self._web_channel.registerObject("bridge", self._web_bridge)
-        self._web_view.page().setWebChannel(self._web_channel)
-        
-        # Load the home page
-        self._load_home_page()
-
+        self._home_widget = HomeWidget()
+        self._home_widget.open_file_requested.connect(self._open_file)
+        self._home_widget.import_file_requested.connect(self._import_file)
+        self._home_widget.recent_file_requested.connect(self._open_recent_file)
+        self.setCentralWidget(self._home_widget)
+    
     def _load_home_page(self):
-        """Load the HTML home page with dynamic content."""
-        html_path = Path(get_resource_path("home.html"))
-        
-        if html_path.exists():
-            try:
-                with html_path.open('r', encoding='utf-8') as f:
-                    template_content = f.read()
-                
-                # Generate recent files HTML
-                recent_files_html = self._generate_recent_files_html()
-                
-                # Replace placeholder with dynamic content
-                html_content = template_content.replace("{{RECENT_FILES}}", recent_files_html)
-                
-                # Load the HTML content
-                self._web_view.setHtml(html_content)
-                
-            except (IOError, UnicodeDecodeError) as e:
-                print(f"Error loading home.html: {e}")
-        else:
-            print("home.html file not found")
+        if self._home_widget:
+            self._home_widget.refresh(self._recent_files)
 
     def _generate_recent_files_html(self):
         """Generate HTML for recent files list."""
@@ -254,17 +200,17 @@ class MainWindow(QMainWindow):
             f.write('\n'.join(config_data))
 
     def _update_recent_menu(self):
-        """Update the recent files submenu with current file list."""
-        self._recent_menu.clear()
-        for file_path in self._recent_files:
-            action = QAction(file_path, self)
-            action.triggered.connect(lambda checked, path=file_path: self._open_recent_file(path))
-            self._recent_menu.addAction(action)
-        self._recent_menu.setEnabled(bool(self._recent_files))
-        
-        # Update home page to reflect changes in recent files
-        if self._web_view and self.centralWidget() == self._web_view:
-            self._load_home_page()
+            """Update the recent files submenu with current file list."""
+            self._recent_menu.clear()
+            for file_path in self._recent_files:
+                action = QAction(file_path, self)
+                action.triggered.connect(lambda checked, path=file_path: self._open_recent_file(path))
+                self._recent_menu.addAction(action)
+            self._recent_menu.setEnabled(bool(self._recent_files))
+    
+            # Update home widget if it is currently the central widget
+            if self._home_widget and self.centralWidget() == self._home_widget:
+                self._home_widget.refresh(self._recent_files)
 
     def _check_database(self, file_path: str) -> bool:
         """Check if the file is a valid SQLite database with correct events table.
@@ -315,6 +261,10 @@ class MainWindow(QMainWindow):
                 "osm_traffic_control": "INTEGER",
                 "preceding_veh_id": "INTEGER",
                 "veh_dist_trav": "REAL",
+                "gap_b": "REAL",
+                "gap_f": "REAL",
+                "hway_b": "REAL",
+                "hway_f": "REAL",
                 "event_name": "TEXT"
             }
 
@@ -454,7 +404,7 @@ class MainWindow(QMainWindow):
             self._plot_widget = None
         
         # Show home page again
-        self.setCentralWidget(self._web_view)
+        self.setCentralWidget(self._home_widget)
         self._load_home_page()
         
         # Disable export menu

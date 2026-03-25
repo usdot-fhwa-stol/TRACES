@@ -101,6 +101,10 @@ class _ImportWorkerThread(QThread):
                     osm_traffic_control INTEGER,
                     preceding_veh_id INTEGER,
                     veh_dist_trav REAL,
+                    gap_b REAL,
+                    gap_f REAL,
+                    hway_b REAL,
+                    hway_f REAL,
                     event_name TEXT,
                     PRIMARY KEY (event_id, veh_id, veh_time)
                 ) WITHOUT ROWID;

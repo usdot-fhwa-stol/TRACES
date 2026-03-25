@@ -1,7 +1,5 @@
-from pathlib import Path
-from PyQt6.QtWidgets import QDialog, QVBoxLayout, QTextBrowser, QPushButton, QHBoxLayout
-from PyQt6.QtCore import QTimer, pyqtSignal
-from utils import get_resource_path
+from PyQt6.QtWidgets import QDialog, QVBoxLayout, QLabel, QFrame, QPushButton, QHBoxLayout
+from PyQt6.QtCore import QTimer, pyqtSignal, Qt
 
 class AboutDialog(QDialog):
     """About dialog that displays HTML content and can function as a splash screen.
@@ -33,57 +31,73 @@ class AboutDialog(QDialog):
         self._close_button = None
         
         self._setup_ui()
-        self._load_content()
         self._setup_positioning()
         
         if self._is_splash:
             self._setup_splash_mode()
-    
+
     def _setup_ui(self):
-        """Set up the dialog UI components."""
         self.setWindowTitle("About Trajectory Tools")
         self.setFixedSize(400, 600)
-        
-        # Create main layout
         layout = QVBoxLayout()
         self.setLayout(layout)
-        
-        # Create text browser for HTML content
-        self._text_browser = QTextBrowser()
-        self._text_browser.setOpenExternalLinks(True)
-        layout.addWidget(self._text_browser)
-        
-        # Create button layout
+    
+        # Title
+        title = QLabel("Trajectory Tools")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet("font-size: 20px; font-weight: bold; color: #2c5aa0; margin-top: 10px;")
+        layout.addWidget(title)
+    
+        # Version
+        version = QLabel("<b>Version 0.1 (beta)</b>")
+        version.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(version)
+    
+        def add_section(heading, body):
+            rule = QFrame()
+            rule.setFrameShape(QFrame.Shape.HLine)
+            rule.setStyleSheet("color: #cccccc;")
+            layout.addWidget(rule)
+            h = QLabel(heading)
+            h.setStyleSheet("font-size: 13px; font-weight: bold; color: #4a4a4a; margin-top: 6px;")
+            layout.addWidget(h)
+            b = QLabel(body)
+            b.setWordWrap(True)
+            b.setStyleSheet("line-height: 1.6;")
+            layout.addWidget(b)
+    
+        add_section("About",
+            "Trajectory Tools is a PyQt6-based application for analyzing and visualizing "
+            "vehicle trajectory data stored in SQLite databases.")
+    
+        add_section("Features",
+            "• Import and analyze trajectory data\n"
+            "• Time-space plotting and visualization\n"
+            "• Export capabilities for data analysis\n"
+            "• SQLite database management")
+    
+        add_section("Requirements",
+            "• Python 3.9+\n"
+            "• PyQt6\n"
+            "• SQLite3")
+    
+        footer = QLabel("<i>For more information, please refer to the documentation.</i>")
+        footer.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        footer.setStyleSheet("margin-top: 20px; color: #555;")
+        layout.addWidget(footer)
+    
+        layout.addStretch()
+    
+        # Close button
         button_layout = QHBoxLayout()
         button_layout.addStretch()
-        
-        # Create close button
         self._close_button = QPushButton("Close")
         self._close_button.clicked.connect(self.accept)
         self._close_button.setMinimumWidth(80)
         button_layout.addWidget(self._close_button)
-        
         button_layout.addStretch()
-        layout.addLayout(button_layout)
-    
-    def _load_content(self):
-        """Load HTML content from about.html file."""
-        # Use get_resource_path to handle both development and PyInstaller environments
-        html_path = Path(get_resource_path("about.html"))
-        
-        if html_path.exists():
-            try:
-                with html_path.open('r', encoding='utf-8') as f:
-                    content = f.read()
-                self._text_browser.setHtml(content)
-            except (IOError, UnicodeDecodeError) as e:
-                # Fallback content if file can't be read
-                print(e)
-                self._text_browser.setHtml("<html><body></body></html>")
-        else:
-            # Fallback content if file doesn't exist
-            self._text_browser.setHtml("<html><body><h2>Trajectory Tools</h2><p>About information not available.</p></body></html>")
-    
+        layout.addLayout(button_layout)    
+
     def _setup_positioning(self):
         """Position the dialog centered within the parent window."""
         if self.parent():
