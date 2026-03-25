@@ -3,12 +3,12 @@ from pathlib import Path
 from PyQt6.QtWidgets import QMainWindow, QMenuBar, QMenu, QApplication, QFileDialog, QMessageBox, QDialog
 from PyQt6.QtGui import QAction
 from PyQt6.QtCore import QTimer
-from .time_space_plot_widget import TimeSpacePlotWidget
-from .time_space_plot_settings_dialog import TimeSpacePlotSettingsDialog
 from .home_widget import HomeWidget
 from .import_dialog import ImportDialog
 from .about_dialog import AboutDialog
 from .export_dialog import ExportDialog
+from plot.time_space_plot_settings_dialog import TimeSpacePlotSettingsDialog
+from plot.time_space_plot_widget import TimeSpacePlotWidget
 
 class MainWindow(QMainWindow):
     """Main window for the Trajectory Tools application.
