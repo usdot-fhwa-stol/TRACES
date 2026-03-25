@@ -123,7 +123,7 @@ class CsvAlgorithms:
         except (ValueError, TypeError):
             return None
 
-    def lane_tgsim_sationary(self, row: List[str], col_def: Dict[str, Any]) -> int:
+    def lane_tgsim_stationary(self, row: List[str], col_def: Dict[str, Any]) -> int:
         """Calculate lane ID based on tgsim stionary rules.
 
         Args:
@@ -148,31 +148,6 @@ class CsvAlgorithms:
                 return lane_kf - 9;
             else:
                 return lane_kf
-        except (ValueError, TypeError):
-            return None
-
-    def lane_ohio(self, row: List[str], col_def: Dict[str, Any]) -> int:
-        """Calculate lane ID based on ohio rules.
-
-        Args:
-            row (List[str]): CSV row data.
-            col_def (Dict[str, Any]): Column definition with src_col and parms.
-
-        Returns:
-            int: Calculated lane ID or None if invalid.
-        """
-        src_col = col_def.get("src_col", -1)
-        parms = col_def.get("parms", [])
-        
-        if src_col < 0 or src_col >= len(row) or not row[src_col] or len(parms) < 1:
-            return None
-        
-        if parms[0] < 0 or parms[0] >= len(row):
-            return None
-        
-        try:
-            lane_kf = int(float(row[parms[0]]))
-            return lane_kf + 1
         except (ValueError, TypeError):
             return None
 
