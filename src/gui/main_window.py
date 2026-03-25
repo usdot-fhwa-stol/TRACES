@@ -4,6 +4,7 @@ from PyQt6.QtWidgets import QMainWindow, QMenuBar, QMenu, QApplication, QFileDia
 from PyQt6.QtGui import QAction
 from PyQt6.QtCore import QTimer
 from .home_widget import HomeWidget
+from .log_viewer_dialog import LogViewerDialog
 from .import_dialog import ImportDialog
 from .about_dialog import AboutDialog
 from .export_dialog import ExportDialog
@@ -39,6 +40,7 @@ class MainWindow(QMainWindow):
         self._import_dialog = None
         self._selected_export_columns = []  # Initially empty list of selected export columns
         self._home_widget = None
+        self._log_viewer_dialog = None
         
         self._setup_ui()
         self._load_settings()
@@ -98,6 +100,14 @@ class MainWindow(QMainWindow):
         exit_action = QAction("E&xit", self)
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
+
+        # View menu
+        view_menu = QMenu("&View", self)
+        menu_bar.addMenu(view_menu)
+        
+        log_action = QAction("&Log", self)
+        log_action.triggered.connect(self._show_log_viewer)
+        view_menu.addAction(log_action)
 
     def _setup_home_page(self):
         self._home_widget = HomeWidget()
@@ -482,13 +492,34 @@ class MainWindow(QMainWindow):
         self._recent_files = self._recent_files[:7]  # Keep only 7 recent files
         self._update_recent_menu()
 
+    def _show_log_viewer(self) -> None:
+        """Show the modeless System Log Viewer dialog.
+    
+        If the dialog is already open and minimized, restore it.  If it is
+        visible and not minimized, bring it to the front.  If it does not exist
+        yet, create it.
+        """
+        if self._log_viewer_dialog is not None and self._log_viewer_dialog.isVisible():
+            if self._log_viewer_dialog.isMinimized():
+                self._log_viewer_dialog.showNormal()
+            self._log_viewer_dialog.raise_()
+            self._log_viewer_dialog.activateWindow()
+            return
+    
+        self._log_viewer_dialog = LogViewerDialog(parent=self)
+        self._log_viewer_dialog.show()
+
     def closeEvent(self, event):
         """Handle window close event and save settings.
 
         Args:
             event (QCloseEvent): The close event.
         """
+        if self._log_viewer_dialog is not None:
+            self._log_viewer_dialog.close()
+
         if self._db_connection:
             self._db_connection.close()
+
         self._save_settings()
         super().closeEvent(event)
