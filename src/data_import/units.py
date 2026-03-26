@@ -136,6 +136,9 @@ class Units:
             present in the conversion table.  The caller (``_check_configuration``
             in ``csv_process.py``) should catch this and emit an error message.
         """
+        if dst_units == src_units:
+            return value; # early out check avoids lookup and multiply
+
         return value * self._FACTORS[src_units][dst_units]
 
     def factor(self, src_units: str, dst_units: str) -> float:

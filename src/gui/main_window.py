@@ -39,6 +39,7 @@ class MainWindow(QMainWindow):
         self._setup_ui()
         self._load_settings()
         self._setup_home_page()
+        self._load_home_page()
 
     def _setup_ui(self):
         """Set up the main window UI including menu bar and initial settings."""

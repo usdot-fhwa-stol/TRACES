@@ -350,9 +350,10 @@ class CsvProcess(BaseProcess):
                     for key, col_def in col_def_set.items():
                         try:
                             value = self._func_dict[col_def["func"]](row, col_def)
-                            src_u = col_def["units"]
-                            if value is not None and src_u:
-                                value = _units.convert(src_u, _units.system_units(key), value)
+                            if value is not None:
+                                factor = col_def["_factor"]
+                                if factor != 1.0:
+                                    value *= factor
                             record[key] = value
                         except Exception as e:
                             worker.log_signal.emit(

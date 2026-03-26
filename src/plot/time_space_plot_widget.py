@@ -103,8 +103,17 @@ class TimeSpacePlotWidget(QWidget):
         # Toggle switches
         self._speed_toggle = ToggleSwitch()
         self._speed_toggle.toggled.connect(self._on_speed_gradient_toggled)
-        self._gap_headway_toggle = ToggleSwitch()
+        speed_toggle_label = QLabel("Show Speed") # speed toggle label
+        speed_toggle_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        speed_toggle_label.setStyleSheet("font-weight: bold;")
+        left_layout.addWidget(speed_toggle_label)
         left_layout.addWidget(self._speed_toggle)
+
+        self._gap_headway_toggle = ToggleSwitch()
+        gap_headway_toggle_label = QLabel("Show Gap\nHeadway") # gap/headway toggle label
+        gap_headway_toggle_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        gap_headway_toggle_label.setStyleSheet("font-weight: bold;")
+        left_layout.addWidget(gap_headway_toggle_label)
         left_layout.addWidget(self._gap_headway_toggle)
 
         main_layout.addLayout(left_layout)
@@ -224,7 +233,7 @@ class TimeSpacePlotWidget(QWidget):
         self._current_event_id = event_id
         self._dist_range = (dist_min, dist_max)
         self._time_range = (time_min, time_max)
-        self._lane_ids = [pair[0] for pair in event_summary.get('lane_id', [])]
+        self._lane_ids = event_summary.get('lane_id', [])
         self._veh_ids = event_summary.get('veh_id', [])
         self._clear_selection_box()
         self._selected_series.clear()
@@ -276,12 +285,11 @@ class TimeSpacePlotWidget(QWidget):
         logger.debug(f"Initialized {len(self._series)} vehicle series for event {self._current_event_id}")
 
     def _populate_lane_combobox_from_ids(self):
-        """Populate the lane combobox using the provided lane IDs."""
+        """Populate the lane combobox using the provided lane ID pairs."""
         self._lane_combobox.blockSignals(True)
         self._lane_combobox.clear()
     
-        lane_pairs = self._event_summary.get('lane_id', [])
-        for pair in lane_pairs:
+        for pair in self._lane_ids:
             lane_id = pair[0]
             orig_lane_id = pair[1] if len(pair) > 1 else None
             tooltip = f"Orig Lane ID: {orig_lane_id}" if orig_lane_id is not None else ""
@@ -296,14 +304,14 @@ class TimeSpacePlotWidget(QWidget):
             )
     
         self._lane_combobox.blockSignals(False)
-        if lane_pairs:
+        if self._lane_ids:
             self._lane_combobox.setCurrentIndex(0)
             first_tooltip = self._lane_combobox.itemData(0, Qt.ItemDataRole.ToolTipRole)
             self._lane_combobox.setToolTip(first_tooltip or "")
             QTimer.singleShot(0, self._update_plot_data)
     
-        logger.debug(f"Populated lane combobox with {len(lane_pairs)} lanes")
-        
+        logger.debug(f"Populated lane combobox with {len(self._lane_ids)} lanes")
+
     def _on_lane_changed(self, index: int):
         """Handle lane combobox selection change.
         
@@ -576,9 +584,9 @@ class TimeSpacePlotWidget(QWidget):
     def _on_speed_gradient_toggled(self, checked: bool):
         """Handle speed gradient toggle switch.
 
-        When on, each point of every active (non-dimmed) trajectory is coloured
+        When on, each point of every active (non-dimmed) trajectory is colored
         by its speed via the vertical gradient.  When off, trajectories return
-        to their flat per-vehicle series colour.  Either way only the brushes
+        to their flat per-vehicle series color.  Either way only the brushes
         are updated in-place; no database round-trip is needed.
 
         Args:
@@ -594,8 +602,8 @@ class TimeSpacePlotWidget(QWidget):
 
         Decision tree:
           1. Dimmed (unselected while a selection exists) → flat neutral grey.
-          2. Speed-gradient mode active → per-point colour from gradient lookup.
-          3. Default → flat per-vehicle series colour.
+          2. Speed-gradient mode active → per-point color from gradient lookup.
+          3. Default → flat per-vehicle series color.
 
         Args:
             veh_id (int): Vehicle ID.
@@ -616,7 +624,7 @@ class TimeSpacePlotWidget(QWidget):
             return [pen] * n, [brush] * n
 
         if self._speed_gradient_enabled:
-            # Per-point colour from the speed → gradient lookup
+            # Per-point color from the speed → gradient lookup
             speeds = series.get('veh_speed')
             pens = []
             brushes = []
@@ -630,7 +638,7 @@ class TimeSpacePlotWidget(QWidget):
                 brushes.append(pg.mkBrush(color=hex_color))
             return pens, brushes
 
-        # Default: flat per-vehicle series colour
+        # Default: flat per-vehicle series color
         color = series['color']
         pen = pg.mkPen(color=color)
         brush = pg.mkBrush(color=color)
