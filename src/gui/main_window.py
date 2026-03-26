@@ -1,15 +1,8 @@
-import sqlite3
 from pathlib import Path
 from PyQt6.QtWidgets import QMainWindow, QMenuBar, QMenu, QApplication, QFileDialog, QMessageBox, QDialog
 from PyQt6.QtGui import QAction
 from PyQt6.QtCore import QTimer
 from .home_widget import HomeWidget
-from .log_viewer_dialog import LogViewerDialog
-from .import_dialog import ImportDialog
-from .about_dialog import AboutDialog
-from .export_dialog import ExportDialog
-from plot.time_space_plot_settings_dialog import TimeSpacePlotSettingsDialog
-from plot.time_space_plot_widget import TimeSpacePlotWidget
 from utils import get_user_data_path
 
 class MainWindow(QMainWindow):
@@ -220,6 +213,7 @@ class MainWindow(QMainWindow):
         Raises:
             sqlite3.Error: If SQLite operations fail.
         """
+        import sqlite3
         try:
             # Check if file is a valid SQLite database
             conn = sqlite3.connect(file_path)
@@ -304,6 +298,7 @@ class MainWindow(QMainWindow):
             self.setWindowTitle(f"Trajectory Tools - {file_path}")
             
             # Show settings dialog before creating plot widget
+            from plot.time_space_plot_settings_dialog import TimeSpacePlotSettingsDialog
             settings_dialog = TimeSpacePlotSettingsDialog(parent=self, db_connection=self._db_connection)
             settings_dialog.settings_applied.connect(self._create_plot_widget)
             
@@ -332,6 +327,7 @@ class MainWindow(QMainWindow):
             self.setWindowTitle(f"Trajectory Tools - {file_path}")
             
             # Show settings dialog before creating plot widget
+            from plot.time_space_plot_settings_dialog import TimeSpacePlotSettingsDialog
             settings_dialog = TimeSpacePlotSettingsDialog(parent=self, db_connection=self._db_connection)
             settings_dialog.settings_applied.connect(self._create_plot_widget)
             
@@ -345,6 +341,7 @@ class MainWindow(QMainWindow):
 
     def _import_file(self):
         """Handle the Import menu action."""
+        from .import_dialog import ImportDialog
         dialog = ImportDialog(self)
         dialog.setModal(True)
         # Connect to the import_finished signal to receive the output path
@@ -372,6 +369,7 @@ class MainWindow(QMainWindow):
         """Show the settings dialog for the imported file after import dialog closes."""
         if self._db_connection:
             # Show settings dialog before creating plot widget
+            from plot.time_space_plot_settings_dialog import TimeSpacePlotSettingsDialog
             settings_dialog = TimeSpacePlotSettingsDialog(parent=self, db_connection=self._db_connection)
             settings_dialog.settings_applied.connect(self._create_plot_widget)
             
@@ -418,6 +416,7 @@ class MainWindow(QMainWindow):
             dist_max (float): Maximum distance value.
             event_summary (dict) dictionary object containing rollup for event
         """
+        from plot.time_space_plot_widget import TimeSpacePlotWidget
         if not self._plot_widget:
             self._plot_widget = TimeSpacePlotWidget()
             self.setCentralWidget(self._plot_widget)
@@ -431,7 +430,8 @@ class MainWindow(QMainWindow):
         if not self._db_connection:
             QMessageBox.warning(self, "Warning", "No database is currently open.")
             return
-            
+
+        from .export_dialog import ExportDialog
         dialog = ExportDialog(parent=self, db_connection=self._db_connection, selected_columns=None)
         dialog.setModal(True)
         dialog.export_finished.connect(self._handle_export_finished)
@@ -443,6 +443,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Warning", "No database is currently open.")
             return
             
+        from .export_dialog import ExportDialog
         dialog = ExportDialog(parent=self, db_connection=self._db_connection, 
                             selected_columns=self._selected_export_columns.copy())
         dialog.setModal(True)
@@ -462,6 +463,7 @@ class MainWindow(QMainWindow):
 
     def _show_about(self):
         """Handle the About menu action by showing the AboutDialog."""
+        from .about_dialog import AboutDialog
         about_dialog = AboutDialog(parent=self, is_splash=False)
         about_dialog.exec()
 
@@ -491,7 +493,8 @@ class MainWindow(QMainWindow):
             self._log_viewer_dialog.raise_()
             self._log_viewer_dialog.activateWindow()
             return
-    
+
+        from .log_viewer_dialog import LogViewerDialog    
         self._log_viewer_dialog = LogViewerDialog(parent=self)
         self._log_viewer_dialog.show()
 

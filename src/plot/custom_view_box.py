@@ -14,9 +14,6 @@ from PyQt6.QtWidgets import QMenu
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction
 import pyqtgraph as pg
-from .statistics_dialog import StatisticsDialog
-from .time_speed_dialog import TimeSpeedDialog
-from .time_accel_dialog import TimeAccelDialog
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -413,6 +410,7 @@ class CustomViewBox(pg.ViewBox):
 
         # Create and show time-speed dialog
         time_min, time_max = self.parent_widget._time_slider.value()
+        from .time_speed_dialog import TimeSpeedDialog
         dialog = TimeSpeedDialog(
             self.parent_widget,
             self.parent_widget._db_connection,
@@ -447,6 +445,7 @@ class CustomViewBox(pg.ViewBox):
 
         # Create and show time-acceleration dialog
         time_min, time_max = self.parent_widget._time_slider.value()
+        from .time_accel_dialog import TimeAccelDialog
         dialog = TimeAccelDialog(
             self.parent_widget,
             self.parent_widget._db_connection,
@@ -477,6 +476,7 @@ class CustomViewBox(pg.ViewBox):
         mode = self._get_statistics_mode()
         
         # Create and show statistics dialog
+        from .statistics_dialog import StatisticsDialog
         dialog = StatisticsDialog(self.parent_widget, target_veh_ids, 
                                 self.parent_widget._db_connection, 
                                 self.parent_widget._current_event_id,
