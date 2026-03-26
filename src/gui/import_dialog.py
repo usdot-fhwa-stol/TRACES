@@ -2,6 +2,7 @@ import json
 import sqlite3
 import logging
 import math
+import numpy as np
 from datetime import datetime
 from pathlib import Path
 from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QProgressBar, QTextEdit, QFileDialog, QMessageBox
@@ -15,6 +16,10 @@ logger = logging.getLogger(__name__)
 
 class _ImportWorkerThread(QThread):
     """Worker thread for handling import operations."""
+
+    _SEGMENT_GAP_FACTOR = 2.5   # multiple of median step that marks a break
+    _MIN_SEGMENT_PTS    = 2     # minimum points required per segment
+    _DB_BATCH           = 2000  # rows per executemany UPDATE call
 
     log_signal = pyqtSignal(str, bool)
     progress_signal = pyqtSignal(int)
@@ -137,92 +142,96 @@ class _ImportWorkerThread(QThread):
             error_count = processor.process(self.config, self.input_path, self.db_connection, self)
             logger.debug(f"Data processing completed with {error_count} errors")
 
-            if error_count == 0:
-                if not self.interrupt_flag:
-                    cursor = self.db_connection.cursor()
-                    logger.debug("Creating event summaries")
-                    self.log_signal.emit("Creating event summaries", True)
-                    
-                    # Get distinct event IDs
-                    cursor.execute("SELECT DISTINCT event_id FROM events ORDER BY event_id")
-                    event_ids = [row[0] for row in cursor.fetchall()]
-                    
-                    logger.debug(f"Creating summaries for {len(event_ids)} events")
-                    self.log_signal.emit(f"Creating summaries for {len(event_ids)} events", True)
-                    
-                    for i, event_id in enumerate(event_ids):
-                        if self.interrupt_flag:
-                            logger.debug("Interrupt flag set during event summary creation")
-                            break
-                        
-                        # Get event name
-                        cursor.execute("""
-                            SELECT DISTINCT event_name FROM events
-                            WHERE event_id = ?
-                        """, (event_id,))
-                        event_name, = cursor.fetchone()
-                        
-                        # Get time and distance ranges
-                        cursor.execute("""
-                            SELECT MIN(veh_time), MAX(veh_time), MIN(veh_dist_trav), MAX(veh_dist_trav)
-                            FROM events
-                            WHERE event_id = ?
-                        """, (event_id,))
-                        time_min, time_max, dist_min, dist_max = cursor.fetchone()
-                        
-                        # Get unique lane IDs
-                        cursor.execute("""
-                            SELECT DISTINCT lane_id FROM events
-                            WHERE event_id = ?
-                            ORDER BY lane_id
-                        """, (event_id,))
-                        lane_ids = [row[0] for row in cursor.fetchall() if row[0] is not None]
-                        
-                        # Get unique vehicle IDs
-                        cursor.execute("""
-                            SELECT DISTINCT veh_id FROM events
-                            WHERE event_id = ?
-                            ORDER BY veh_id
-                        """, (event_id,))
-                        veh_ids = [row[0] for row in cursor.fetchall()]
-                        
-                        # Create summary JSON
-                        summary = {
-                            "event_name": event_name,
-                            "veh_time": [math.floor(time_min) if time_min is not None else 0, 
-                                        math.ceil(time_max) if time_max is not None else 0],
-                            "veh_dist_trav": [math.floor(dist_min) if dist_min is not None else 0, 
-                                            math.ceil(dist_max) if dist_max is not None else 0],
-                            "lane_id": lane_ids,
-                            "veh_id": veh_ids
-                        }
-                        
-                        # Insert summary into ranges table
-                        cursor.execute("""
-                            INSERT INTO ranges (event_id, summary_json)
-                            VALUES (?, ?)
-                        """, (event_id, json.dumps(summary)))
-                        
-                        # Update progress bar based on event processing
-                        if len(event_ids) > 0:
-                            progress = int(((i + 1) / len(event_ids)) * 100)
-                            self.progress_signal.emit(progress)
-                            logger.debug(f"Processed event summary {i + 1}/{len(event_ids)}")
-                        
-                        # Check for interrupt after each event
-                        if self.interrupt_flag:
-                            logger.debug("Interrupt flag set after event summary processing")
-                            break
-                    
-                    logger.debug("Committing final database changes")
-                    self.db_connection.commit()
-                    self.log_signal.emit(f"{self.input_path} successfully imported", True)
-                    logger.info(f"Import completed successfully: {self.input_path}")
-                else:
-                    logger.debug("Import was interrupted, cleaning up")
+            if error_count == 0 and not self.interrupt_flag:
+                if not self._compute_gap_headway():
                     self.log_signal.emit("Import interrupted", False)
-                    if Path(self.output_path).exists():
-                        Path(self.output_path).unlink()
+                    error_count += 1
+                
+            if error_count == 0 and not self.interrupt_flag:
+                cursor = self.db_connection.cursor()
+                logger.debug("Creating event summaries")
+                self.log_signal.emit("Creating event summaries", True)
+                
+                # Get distinct event IDs
+                cursor.execute("SELECT DISTINCT event_id FROM events ORDER BY event_id")
+                event_ids = [row[0] for row in cursor.fetchall()]
+                
+                logger.debug(f"Creating summaries for {len(event_ids)} events")
+                self.log_signal.emit(f"Creating summaries for {len(event_ids)} events", True)
+                
+                for i, event_id in enumerate(event_ids):
+                    if self.interrupt_flag:
+                        logger.debug("Interrupt flag set during event summary creation")
+                        break
+                    
+                    # Get event name
+                    cursor.execute("""
+                        SELECT DISTINCT event_name FROM events
+                        WHERE event_id = ?
+                    """, (event_id,))
+                    event_name, = cursor.fetchone()
+                    
+                    # Get time and distance ranges
+                    cursor.execute("""
+                        SELECT MIN(veh_time), MAX(veh_time), MIN(veh_dist_trav), MAX(veh_dist_trav)
+                        FROM events
+                        WHERE event_id = ?
+                    """, (event_id,))
+                    time_min, time_max, dist_min, dist_max = cursor.fetchone()
+                    
+                    # Get unique lane IDs
+                    cursor.execute("""
+                        SELECT DISTINCT lane_id FROM events
+                        WHERE event_id = ?
+                        ORDER BY lane_id
+                    """, (event_id,))
+                    lane_ids = [row[0] for row in cursor.fetchall() if row[0] is not None]
+                    
+                    # Get unique vehicle IDs
+                    cursor.execute("""
+                        SELECT DISTINCT veh_id FROM events
+                        WHERE event_id = ?
+                        ORDER BY veh_id
+                    """, (event_id,))
+                    veh_ids = [row[0] for row in cursor.fetchall()]
+                    
+                    # Create summary JSON
+                    summary = {
+                        "event_name": event_name,
+                        "veh_time": [math.floor(time_min) if time_min is not None else 0, 
+                                    math.ceil(time_max) if time_max is not None else 0],
+                        "veh_dist_trav": [math.floor(dist_min) if dist_min is not None else 0, 
+                                        math.ceil(dist_max) if dist_max is not None else 0],
+                        "lane_id": lane_ids,
+                        "veh_id": veh_ids
+                    }
+                    
+                    # Insert summary into ranges table
+                    cursor.execute("""
+                        INSERT INTO ranges (event_id, summary_json)
+                        VALUES (?, ?)
+                    """, (event_id, json.dumps(summary)))
+                    
+                    # Update progress bar based on event processing
+                    if len(event_ids) > 0:
+                        progress = int(((i + 1) / len(event_ids)) * 100)
+                        self.progress_signal.emit(progress)
+                        logger.debug(f"Processed event summary {i + 1}/{len(event_ids)}")
+                    
+                    # Check for interrupt after each event
+                    if self.interrupt_flag:
+                        logger.debug("Interrupt flag set after event summary processing")
+                        break
+                
+                logger.debug("Committing final database changes")
+                self.db_connection.commit()
+                self.log_signal.emit(f"{self.input_path} successfully imported", True)
+                logger.info(f"Import completed successfully: {self.input_path}")
+            else:
+                logger.debug("Import was interrupted, cleaning up")
+                self.log_signal.emit("Import interrupted", False)
+                if Path(self.output_path).exists():
+                    Path(self.output_path).unlink()
 
         except Exception as e:
             logger.exception(f"Exception in ImportWorkerThread.run(): {e}")
@@ -234,6 +243,240 @@ class _ImportWorkerThread(QThread):
                     self.db_connection.close()
             except Exception as e:
                 logger.error(f"Error closing database connection: {e}")
+
+    def _build_segments(self, time: np.ndarray) -> list[tuple[int, int]]:
+        """Return (start, end_exclusive) index pairs for contiguous segments.
+
+        A new segment begins wherever the gap between consecutive time values
+        exceeds _SEGMENT_GAP_FACTOR times the median step for this vehicle.
+        Segments with fewer than _MIN_SEGMENT_PTS points are discarded.
+        """
+        if len(time) < self._MIN_SEGMENT_PTS:
+            return []
+
+        diffs = np.diff(time)
+        median_step = np.median(diffs[diffs > 0]) if np.any(diffs > 0) else 1.0
+        threshold = self._SEGMENT_GAP_FACTOR * median_step
+
+        breaks = np.where(diffs > threshold)[0] + 1
+        starts = np.concatenate(([0], breaks))
+        ends   = np.concatenate((breaks, [len(time)]))
+
+        return [
+            (int(s), int(e))
+            for s, e in zip(starts, ends)
+            if e - s >= self._MIN_SEGMENT_PTS
+        ]
+
+    def _interp_at(
+        self,
+        segments: list[tuple[int, int]],
+        x_arr:    np.ndarray,
+        y_arr:    np.ndarray,
+        x_query:  float,
+    ) -> float:
+        """Linearly interpolate y at x_query within the appropriate segment.
+
+        Returns NaN if x_query falls outside every segment or if the segment
+        has a zero x-span at the query point.
+        """
+        for s, e in segments:
+            xs = x_arr[s:e]
+            if x_query < xs[0] or x_query > xs[-1]:
+                continue
+            idx = int(np.searchsorted(xs, x_query, side="right")) - 1
+            idx = max(0, min(idx, len(xs) - 2))
+            x0, x1 = xs[idx], xs[idx + 1]
+            span = x1 - x0
+            if span == 0.0:
+                return float(y_arr[s + idx])
+            t = (x_query - x0) / span
+            return float(y_arr[s + idx] * (1.0 - t) + y_arr[s + idx + 1] * t)
+        return float("nan")
+
+    def _compute_gap_headway(self) -> bool:
+        """Compute gap and time-headway for every (event_id, lane_id) pair.
+
+        Definitions
+        -----------
+        gap_f   Distance from subject vehicle to the nearest vehicle ahead at
+                the same instant in time (positive = leader exists ahead).
+        gap_b   Distance from subject vehicle to the nearest vehicle behind at
+                the same instant in time (positive = follower exists behind).
+        hway_f  Time since the nearest leading vehicle passed the same
+                location (positive = leader passed earlier).
+        hway_b  Time until the nearest following vehicle reaches the same
+                location (positive = follower arrives later).
+
+        Vehicles are treated as points so vehicle length is not used.
+
+        Returns True on clean completion, False if interrupted or on error.
+        """
+        try:
+            cursor = self.db_connection.cursor()
+
+            cursor.execute("""
+                SELECT DISTINCT event_id, lane_id
+                FROM   events
+                WHERE  lane_id IS NOT NULL
+                ORDER  BY event_id, lane_id
+            """)
+            pairs = cursor.fetchall()
+
+            if not pairs:
+                self.log_signal.emit("Info: No event/lane pairs found; skipping gap/headway.", True)
+                return True
+
+            total = len(pairs)
+            self.log_signal.emit("Info: Computing gap and headway values", True)
+            self.log_signal.emit(
+                f"Info: {total} unique event_id/lane_id combination(s) to process", True
+            )
+            logger.debug(f"Gap/headway: {total} event/lane pairs")
+
+            for idx, (event_id, lane_id) in enumerate(pairs):
+                if self.interrupt_flag:
+                    return False
+
+                logger.debug(f"Gap/headway: event {event_id}, lane {lane_id} ({idx+1}/{total})")
+
+                # ── load ──────────────────────────────────────────────────────
+                cursor.execute("""
+                    SELECT veh_id, veh_time, veh_dist_trav
+                    FROM   events
+                    WHERE  event_id = ? AND lane_id = ?
+                    ORDER  BY veh_id, veh_time
+                """, (event_id, lane_id))
+
+                raw: dict[int, dict] = {}
+                for veh_id, veh_time, veh_dist in cursor:
+                    if veh_dist is None:
+                        continue
+                    if veh_id not in raw:
+                        raw[veh_id] = {"times": [], "dists": []}
+                    raw[veh_id]["times"].append(veh_time)
+                    raw[veh_id]["dists"].append(veh_dist)
+
+                if len(raw) < 2:
+                    # Nothing to compare against; leave gap/headway as NULL
+                    self.progress_signal.emit(int(((idx + 1) / total) * 100))
+                    continue
+
+                # Build numpy arrays and segment maps
+                veh_data: dict[int, dict] = {}
+                for veh_id, d in raw.items():
+                    t = np.array(d["times"], dtype=np.float64)
+                    x = np.array(d["dists"], dtype=np.float64)
+                    order = np.argsort(t, kind="stable")
+                    t, x = t[order], x[order]
+                    veh_data[veh_id] = {
+                        "time":       t,
+                        "dist":       x,
+                        "segments_t": self._build_segments(t),
+                        "segments_d": self._build_segments(x),
+                    }
+
+                # ── compute ───────────────────────────────────────────────────
+                veh_ids = list(veh_data.keys())
+                rows: list[tuple] = []
+
+                for veh_id in veh_ids:
+                    if self.interrupt_flag:
+                        return False
+
+                    v     = veh_data[veh_id]
+                    n_pts = len(v["time"])
+
+                    gap_f  = np.full(n_pts, np.nan)
+                    gap_b  = np.full(n_pts, np.nan)
+                    hway_f = np.full(n_pts, np.nan)
+                    hway_b = np.full(n_pts, np.nan)
+
+                    for i in range(n_pts):
+                        t_i = v["time"][i]
+                        d_i = v["dist"][i]
+
+                        best_f_gap  = np.inf
+                        best_b_gap  = np.inf
+                        best_f_hway = np.inf
+                        best_b_hway = np.inf
+
+                        g_f = g_b = h_f = h_b = np.nan
+
+                        for other_id in veh_ids:
+                            if other_id == veh_id:
+                                continue
+
+                            o = veh_data[other_id]
+
+                            # Gap: interpolate other's dist at our time
+                            d_other = self._interp_at(
+                                o["segments_t"], o["time"], o["dist"], t_i
+                            )
+                            if np.isfinite(d_other):
+                                delta = d_other - d_i
+                                if delta >= 0 and delta < best_f_gap:
+                                    best_f_gap = delta
+                                    g_f = delta
+                                elif delta < 0 and (-delta) < best_b_gap:
+                                    best_b_gap = -delta
+                                    g_b = -delta
+
+                            # Headway: interpolate other's time at our dist
+                            t_other = self._interp_at(
+                                o["segments_d"], o["dist"], o["time"], d_i
+                            )
+                            if np.isfinite(t_other):
+                                delta_t = t_i - t_other
+                                if delta_t >= 0 and delta_t < best_f_hway:
+                                    best_f_hway = delta_t
+                                    h_f = delta_t
+                                elif delta_t < 0 and (-delta_t) < best_b_hway:
+                                    best_b_hway = -delta_t
+                                    h_b = -delta_t
+
+                        gap_f[i]  = g_f
+                        gap_b[i]  = g_b
+                        hway_f[i] = h_f
+                        hway_b[i] = h_b
+
+                    for i, t in enumerate(v["time"]):
+                        rows.append((
+                            float(gap_f[i]),
+                            float(gap_b[i]),
+                            float(hway_f[i]),
+                            float(hway_b[i]),
+                            event_id,
+                            veh_id,
+                            float(t),
+                        ))
+
+                # ── flush ─────────────────────────────────────────────────────
+                for batch_start in range(0, len(rows), self._DB_BATCH):
+                    if self.interrupt_flag:
+                        return False
+                    self.db_connection.executemany("""
+                        UPDATE events
+                        SET    gap_f  = ?,
+                               gap_b  = ?,
+                               hway_f = ?,
+                               hway_b = ?
+                        WHERE  event_id = ? AND veh_id = ? AND veh_time = ?
+                    """, rows[batch_start : batch_start + self._DB_BATCH])
+                    self.db_connection.commit()
+
+                self.progress_signal.emit(int(((idx + 1) / total) * 100))
+
+            return True
+
+        except sqlite3.Error as e:
+            self.log_signal.emit(f"Error: Database error during gap/headway: {e}", False)
+            logger.exception("Gap/headway sqlite error")
+            return False
+        except Exception as e:
+            self.log_signal.emit(f"Error: Unexpected error during gap/headway: {e}", False)
+            logger.exception("Gap/headway unexpected error")
+            return False
 
 
 class ImportDialog(QDialog):
