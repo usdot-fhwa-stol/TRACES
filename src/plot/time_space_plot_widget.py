@@ -104,17 +104,13 @@ class TimeSpacePlotWidget(QWidget):
         self._speed_toggle = ToggleSwitch()
         self._speed_toggle.toggled.connect(self._on_speed_gradient_toggled)
         speed_toggle_label = QLabel("Show Speed") # speed toggle label
-        speed_toggle_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        speed_toggle_label.setStyleSheet("font-weight: bold;")
-        left_layout.addWidget(speed_toggle_label)
-        left_layout.addWidget(self._speed_toggle)
+        left_layout.addWidget(speed_toggle_label, alignment=Qt.AlignmentFlag.AlignHCenter)
+        left_layout.addWidget(self._speed_toggle, alignment=Qt.AlignmentFlag.AlignHCenter)
 
         self._gap_headway_toggle = ToggleSwitch()
         gap_headway_toggle_label = QLabel("Show Gap\nHeadway") # gap/headway toggle label
-        gap_headway_toggle_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        gap_headway_toggle_label.setStyleSheet("font-weight: bold;")
-        left_layout.addWidget(gap_headway_toggle_label)
-        left_layout.addWidget(self._gap_headway_toggle)
+        left_layout.addWidget(gap_headway_toggle_label, alignment=Qt.AlignmentFlag.AlignHCenter)
+        left_layout.addWidget(self._gap_headway_toggle, alignment=Qt.AlignmentFlag.AlignHCenter)
 
         main_layout.addLayout(left_layout)
 
@@ -234,6 +230,7 @@ class TimeSpacePlotWidget(QWidget):
         self._dist_range = (dist_min, dist_max)
         self._time_range = (time_min, time_max)
         self._lane_ids = event_summary.get('lane_id', [])
+        print(self._lane_ids)
         self._veh_ids = event_summary.get('veh_id', [])
         self._clear_selection_box()
         self._selected_series.clear()
@@ -288,39 +285,31 @@ class TimeSpacePlotWidget(QWidget):
         """Populate the lane combobox using the provided lane ID pairs."""
         self._lane_combobox.blockSignals(True)
         self._lane_combobox.clear()
-    
+
         for pair in self._lane_ids:
             lane_id = pair[0]
             orig_lane_id = pair[1] if len(pair) > 1 else None
-            tooltip = f"Orig Lane ID: {orig_lane_id}" if orig_lane_id is not None else ""
             self._lane_combobox.addItem(
                 f"Lane {lane_id:2d}",
-                {'lane_id': lane_id, 'lane_series': set()}
+                {'lane_id': lane_id, 'orig_lane_id': orig_lane_id}
             )
-            self._lane_combobox.setItemData(
-                self._lane_combobox.count() - 1,
-                tooltip,
-                Qt.ItemDataRole.ToolTipRole
-            )
-    
+
         self._lane_combobox.blockSignals(False)
         if self._lane_ids:
             self._lane_combobox.setCurrentIndex(0)
-            first_tooltip = self._lane_combobox.itemData(0, Qt.ItemDataRole.ToolTipRole)
-            self._lane_combobox.setToolTip(first_tooltip or "")
             QTimer.singleShot(0, self._update_plot_data)
-    
+
         logger.debug(f"Populated lane combobox with {len(self._lane_ids)} lanes")
 
     def _on_lane_changed(self, index: int):
         """Handle lane combobox selection change.
-        
+
         Args:
             index (int): Selected combobox index.
         """
         if index >= 0:
-            tooltip = self._lane_combobox.itemData(index, Qt.ItemDataRole.ToolTipRole)
-            self._lane_combobox.setToolTip(tooltip or "")
+            data = self._lane_combobox.currentData()
+            self._lane_combobox.setToolTip(f"Orig: {data['orig_lane_id']}")
             self._clear_selection_box()
             QTimer.singleShot(0, self._update_plot_data)
 
@@ -427,7 +416,8 @@ class TimeSpacePlotWidget(QWidget):
 
             logger.debug(
                 f"Updated plot data for event {self._current_event_id}, "
-                f"lane {self._lane_combobox.currentData()['lane_id']}"
+                f"lane {self._lane_combobox.currentData()['lane_id']}, "
+                f"orig lane {self._lane_combobox.currentData()['orig_lane_id']}"
             )
 
         except sqlite3.Error as e:

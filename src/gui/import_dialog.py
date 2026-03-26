@@ -245,6 +245,21 @@ class _ImportWorkerThread(QThread):
             except Exception as e:
                 logger.error(f"Error closing database connection: {e}")
 
+    @staticmethod
+    def _build_segment_meta(
+        segments: list[tuple[int, int]],
+        arr: np.ndarray,
+    ) -> list[tuple[int, int, float, float]]:
+        """Return (start, end, min_val, max_val) for each segment.
+
+        Pre-computing the range of each segment enables O(1) early-out checks
+        in _interp_at without re-scanning the array on every query.
+        """
+        return [
+            (s, e, float(arr[s]), float(arr[e - 1]))   # arr is sorted, so [s] is min
+            for s, e in segments
+        ]
+
     def _build_segments(self, time: np.ndarray) -> list[tuple[int, int]]:
         """Return (start, end_exclusive) index pairs for contiguous segments.
 
@@ -269,50 +284,79 @@ class _ImportWorkerThread(QThread):
             if e - s >= self._MIN_SEGMENT_PTS
         ]
 
+    @staticmethod
     def _interp_at(
-        self,
-        segments: list[tuple[int, int]],
-        x_arr:    np.ndarray,
-        y_arr:    np.ndarray,
-        x_query:  float,
+        seg_meta:  list[tuple[int, int, float, float]],
+        x_arr:     np.ndarray,
+        y_arr:     np.ndarray,
+        x_query:   float,
+        cursor:    list[int],          # cursor[0] = last segment index used
     ) -> float:
-        """Linearly interpolate y at x_query within the appropriate segment.
+        """Linearly interpolate y at x_query using pre-built segment metadata.
 
-        Returns NaN if x_query falls outside every segment or if the segment
-        has a zero x-span at the query point.
+        Optimizations over the original:
+        1. Segment early-out  – each segment's [min, max] is checked with a
+           scalar compare before touching any numpy slice.  Because segments
+           are in ascending order a break is issued as soon as seg_min >
+           x_query, so later segments are never visited.
+        2. Cursor (last-index)– the caller passes a single-element list that
+           remembers the last intra-segment index used.  On the next call the
+           search starts there rather than at the segment start, exploiting the
+           fact that query values are non-decreasing across the outer loop.
+        3. Linear index estimate – when a forward search is required the
+           fractional position of x_query in [x0, x_end] is used to compute a
+           cheap starting index, reducing the searchsorted window to ~1 step
+           for uniformly-spaced data.
+
+        Returns NaN if x_query falls outside every segment.
         """
-        for s, e in segments:
-            xs = x_arr[s:e]
-            if x_query < xs[0] or x_query > xs[-1]:
+        n_segs = len(seg_meta)
+        for si in range(n_segs):
+            s, e, seg_min, seg_max = seg_meta[si]
+
+            # Early-out: query is below this segment's range.
+            if x_query < seg_min:
+                break                       # segments are ordered; none later will match
+
+            # Early-out: query is above this segment's range.
+            if x_query > seg_max:
                 continue
-            idx = int(np.searchsorted(xs, x_query, side="right")) - 1
-            idx = max(0, min(idx, len(xs) - 2))
+
+            # x_query is within [seg_min, seg_max].
+            seg_len = e - s                 # number of points in segment
+            lo = cursor[0]                  # last index used (relative to segment start)
+
+            # Clamp cursor to this segment's valid range.
+            if lo >= seg_len - 1:
+                lo = 0
+
+            # Linear estimate of the intra-segment index.
+            span = seg_max - seg_min
+            if span > 0.0:
+                frac   = (x_query - seg_min) / span
+                est    = int(frac * (seg_len - 2))
+                lo     = max(lo, max(0, est - 1))   # never go backward
+
+            # Narrow searchsorted to [lo, seg_len-1].
+            xs     = x_arr[s:e]
+            lo     = min(lo, seg_len - 2)
+            idx    = int(np.searchsorted(xs[lo:], x_query, side="right")) - 1 + lo
+            idx    = max(0, min(idx, seg_len - 2))
+
+            # Persist cursor for the next call.
+            cursor[0] = idx
+
             x0, x1 = xs[idx], xs[idx + 1]
-            span = x1 - x0
-            if span == 0.0:
+            dx = x1 - x0
+            if dx == 0.0:
                 return float(y_arr[s + idx])
-            t = (x_query - x0) / span
+            t = (x_query - x0) / dx
             return float(y_arr[s + idx] * (1.0 - t) + y_arr[s + idx + 1] * t)
+
         return float("nan")
 
     def _compute_gap_headway(self) -> bool:
-        """Compute gap and time-headway for every (event_id, lane_id) pair.
-
-        Definitions
-        -----------
-        gap_f   Distance from subject vehicle to the nearest vehicle ahead at
-                the same instant in time (positive = leader exists ahead).
-        gap_b   Distance from subject vehicle to the nearest vehicle behind at
-                the same instant in time (positive = follower exists behind).
-        hway_f  Time since the nearest leading vehicle passed the same
-                location (positive = leader passed earlier).
-        hway_b  Time until the nearest following vehicle reaches the same
-                location (positive = follower arrives later).
-
-        Vehicles are treated as points so vehicle length is not used.
-
-        Returns True on clean completion, False if interrupted or on error.
-        """
+        """Compute gap and time-headway for every (event_id, lane_id) pair."""
         try:
             cursor = self.db_connection.cursor()
 
@@ -333,13 +377,10 @@ class _ImportWorkerThread(QThread):
             self.log_signal.emit(
                 f"Info: {total} unique event_id/lane_id combination(s) to process", True
             )
-            logger.debug(f"Gap/headway: {total} event/lane pairs")
 
             for idx, (event_id, lane_id) in enumerate(pairs):
                 if self.interrupt_flag:
                     return False
-
-                logger.debug(f"Gap/headway: event {event_id}, lane {lane_id} ({idx+1}/{total})")
 
                 # ── load ──────────────────────────────────────────────────────
                 cursor.execute("""
@@ -359,34 +400,36 @@ class _ImportWorkerThread(QThread):
                     raw[veh_id]["dists"].append(veh_dist)
 
                 if len(raw) < 2:
-                    # Nothing to compare against; leave gap/headway as NULL
                     self.progress_signal.emit(int(((idx + 1) / total) * 100))
                     continue
 
-                # Build numpy arrays and segment maps
+                # ── build arrays + segment metadata ───────────────────────────
                 veh_data: dict[int, dict] = {}
                 for veh_id, d in raw.items():
                     t = np.array(d["times"], dtype=np.float64)
                     x = np.array(d["dists"], dtype=np.float64)
                     order = np.argsort(t, kind="stable")
                     t, x = t[order], x[order]
+                    segs_t = self._build_segments(t)
+                    segs_d = self._build_segments(x)
                     veh_data[veh_id] = {
                         "time":       t,
                         "dist":       x,
-                        "segments_t": self._build_segments(t),
-                        "segments_d": self._build_segments(x),
+                        "meta_t":     self._build_segment_meta(segs_t, t),
+                        "meta_d":     self._build_segment_meta(segs_d, x),
                     }
 
                 # ── compute ───────────────────────────────────────────────────
                 veh_ids = list(veh_data.keys())
                 rows: list[tuple] = []
 
+                _cursors: dict[tuple, list[int]] = {}
                 for veh_id in veh_ids:
                     if self.interrupt_flag:
                         return False
 
-                    v     = veh_data[veh_id]
-                    n_pts = len(v["time"])
+                    v      = veh_data[veh_id]
+                    n_pts  = len(v["time"])
 
                     gap_f  = np.full(n_pts, np.nan)
                     gap_b  = np.full(n_pts, np.nan)
@@ -410,9 +453,20 @@ class _ImportWorkerThread(QThread):
 
                             o = veh_data[other_id]
 
+                            # Each cursor is per-(subject, other, query_type) and
+                            # persists across the i-loop because t_i / d_i are
+                            # non-decreasing.  Stored as a 1-element list so the
+                            # static method can mutate it without a nonlocal.
+                            cur_t_key = (veh_id, other_id, "t")
+                            cur_d_key = (veh_id, other_id, "d")
+                            if cur_t_key not in _cursors:
+                                _cursors[cur_t_key] = [0]
+                                _cursors[cur_d_key] = [0]
+
                             # Gap: interpolate other's dist at our time
                             d_other = self._interp_at(
-                                o["segments_t"], o["time"], o["dist"], t_i
+                                o["meta_t"], o["time"], o["dist"],
+                                t_i, _cursors[cur_t_key]
                             )
                             if np.isfinite(d_other):
                                 delta = d_other - d_i
@@ -425,7 +479,8 @@ class _ImportWorkerThread(QThread):
 
                             # Headway: interpolate other's time at our dist
                             t_other = self._interp_at(
-                                o["segments_d"], o["dist"], o["time"], d_i
+                                o["meta_d"], o["dist"], o["time"],
+                                d_i, _cursors[cur_d_key]
                             )
                             if np.isfinite(t_other):
                                 delta_t = t_i - t_other
@@ -478,7 +533,6 @@ class _ImportWorkerThread(QThread):
             self.log_signal.emit(f"Error: Unexpected error during gap/headway: {e}", False)
             logger.exception("Gap/headway unexpected error")
             return False
-
 
 class ImportDialog(QDialog):
     """Modal dialog for importing trajectory data into SQLite databases.
