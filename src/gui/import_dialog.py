@@ -5,8 +5,8 @@ import math
 import numpy as np
 from datetime import datetime
 from pathlib import Path
-from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QProgressBar, QTextEdit, QFileDialog, QMessageBox
-from PyQt6.QtCore import QThread, QTimer, pyqtSignal
+from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QProgressBar, QTextEdit, QFileDialog, QMessageBox, QLabel
+from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
 from data_import.base_process import BaseProcess
 from utils import get_user_data_path
 import importlib
@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 class _ImportWorkerThread(QThread):
     """Worker thread for handling import operations."""
 
-    _SEGMENT_GAP_FACTOR = 2.5   # multiple of median step that marks a break
+    _SEGMENT_GAP_FACTOR = 3     # multiple of median step that marks a break
     _MIN_SEGMENT_PTS    = 2     # minimum points required per segment
     _DB_BATCH           = 2000  # rows per executemany UPDATE call
 
@@ -31,6 +31,7 @@ class _ImportWorkerThread(QThread):
         self.output_path = output_path
         self.db_connection = None
         self.interrupt_flag = False
+        self._continue_to_plot = False
         logger.debug(f"ImportWorkerThread initialized with input: {input_path}, output: {output_path}")
 
     def run(self):
@@ -531,6 +532,11 @@ class ImportDialog(QDialog):
         self._output_button = QPushButton("Output")
         self._import_button = QPushButton("Import")
         self._interrupt_button = QPushButton("Interrupt")
+
+        self._input_button.setToolTip("Select the input file to import")
+        self._output_button.setToolTip("Set the database output path")
+        self._import_button.setToolTip("Begin importing the selected file")
+        self._interrupt_button.setToolTip("Stop the running import process")
         
         self._input_button.setEnabled(False)
         self._output_button.setEnabled(False)
@@ -710,43 +716,99 @@ class ImportDialog(QDialog):
         self._interrupt_button.setEnabled(False)
         self._log_message("Warning: Interrupt requested", False)
 
+    def _show_completion_popup(self, success: bool):
+        """Show a completion popup with context-appropriate buttons.
+        
+        Args:
+            success (bool): Whether the import completed successfully.
+        """
+        popup = QDialog(self)
+        popup.setWindowTitle("Import Complete" if success else "Import Unsuccessful")
+        popup.setFixedSize(400, 150)
+        popup.setWindowFlags(
+            popup.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
+        )
+    
+        layout = QVBoxLayout(popup)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(16)
+    
+        # Message label
+        if success:
+            msg = QLabel(
+                "The file was imported successfully.\n\n"
+                "Click Continue to open the plot settings.\n"
+                "Click Back to import another file."
+            )
+        else:
+            msg = QLabel(
+                "The import did not complete successfully.\n\n"
+                "Click Back to review the import log for details."
+            )
+        msg.setWordWrap(True)
+        msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(msg)
+    
+        # Button row
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+    
+        back_btn = QPushButton("Back")
+        back_btn.setMinimumWidth(80)
+        back_btn.clicked.connect(popup.reject)
+        btn_layout.addWidget(back_btn)
+    
+        if success:
+            continue_btn = QPushButton("Continue")
+            continue_btn.setMinimumWidth(80)
+            continue_btn.setDefault(True)
+            continue_btn.clicked.connect(popup.accept)
+            btn_layout.addWidget(continue_btn)
+    
+        btn_layout.addStretch()
+        layout.addLayout(btn_layout)
+    
+        result = popup.exec()
+    
+        if success and result == QDialog.DialogCode.Accepted:
+            self._continue_to_plot = True
+            self.close()  # triggers closeEvent which emits import_finished
+    
     def _finish_import(self):
         """Handle import completion without closing dialog."""
         logger.debug("Import process completed")
-        
-        # Always reset progress bar to 0
+    
         self._progress_bar.setValue(0)
-        
-        # Check if import was successful (not interrupted and output file exists)
-        if (not getattr(self._worker_thread, 'interrupt_flag', False) and 
-            self._output_path and 
-            Path(self._output_path).exists()):
+    
+        if (not getattr(self._worker_thread, 'interrupt_flag', False) and
+                self._output_path and
+                Path(self._output_path).exists()):
             self._import_completed = True
-            self._successful_import_path = self._output_path  # Store successful path
+            self._successful_import_path = self._output_path
             logger.debug("Import completed successfully")
         else:
             self._import_completed = False
-            self._successful_import_path = ""  # Clear on failure
+            self._successful_import_path = ""
             logger.debug("Import was interrupted or failed")
-        
-        # Clean up thread
+    
         if self._worker_thread:
-            self._worker_thread.wait()  # Wait for thread to finish
+            self._worker_thread.wait()
             self._worker_thread.deleteLater()
             self._worker_thread = None
-        
-        # Reset UI for next import - clear paths and reset button states
+    
         self._input_path = ""
         self._output_path = ""
         self._selected_file_type = ""
-        
-        # Reset button states: only Input enabled, others disabled
+    
         self._input_button.setEnabled(True)
         self._output_button.setEnabled(False)
         self._import_button.setEnabled(False)
         self._interrupt_button.setEnabled(False)
-        
+    
         logger.debug("Import process finished, dialog ready for next import")
+    
+        # Show completion popup after UI is fully reset
+        self._show_completion_popup(self._import_completed)
 
     def closeEvent(self, event):
         """Handle dialog close event and emit the output path."""
