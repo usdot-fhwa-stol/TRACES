@@ -5,6 +5,7 @@ import logging
 import sys
 from PyQt6.QtWidgets import QApplication
 from gui.main_window import MainWindow
+from utils import initialize_user_config
 
 def main():
     """Entry point for the Trajectory Tools application."""
@@ -15,6 +16,7 @@ def main():
     # Set up Python logging
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
+    initialize_user_config()   # seed APPDATA configs before GUI starts
     app = QApplication(sys.argv)
     window = MainWindow()
     window.show()

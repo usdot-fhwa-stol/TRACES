@@ -10,6 +10,7 @@ from .about_dialog import AboutDialog
 from .export_dialog import ExportDialog
 from plot.time_space_plot_settings_dialog import TimeSpacePlotSettingsDialog
 from plot.time_space_plot_widget import TimeSpacePlotWidget
+from utils import get_user_data_path
 
 class MainWindow(QMainWindow):
     """Main window for the Trajectory Tools application.
@@ -120,28 +121,13 @@ class MainWindow(QMainWindow):
         if self._home_widget:
             self._home_widget.refresh(self._recent_files)
 
-    def _generate_recent_files_html(self):
-        """Generate HTML for recent files list."""
-        if not self._recent_files:
-            return "<p class='empty-state'>No recent files</p>"
-        
-        html_parts = ["<ul>"]
-        for file_path in self._recent_files:
-            file_name = Path(file_path).name
-            # Use forward slashes for HTML, will be converted back in the receiving method
-            html_file_path = file_path.replace('\\', '/')
-            html_parts.append(f'<li onclick="openRecentFile(\'{html_file_path}\')"><a href="#">{file_name}</a><div class="file-path">{html_file_path}</div></li>')
-        html_parts.append("</ul>")
-        
-        return "\n".join(html_parts)
-
     def _load_settings(self):
         """Load window settings and recent files from configuration file.
 
         Reads from 'trajectory_tools.conf' in the application directory.
         Sets default window size (80% of desktop) if config is invalid or missing.
         """
-        config_path = Path("trajectory_tools.conf")
+        config_path = get_user_data_path("trajectory_tools.conf")
         desktop = QApplication.primaryScreen()
         screen_rect = desktop.availableGeometry()
         default_width = int(screen_rect.width() * 0.8)
@@ -200,7 +186,7 @@ class MainWindow(QMainWindow):
 
     def _save_settings(self):
         """Save window settings and recent files to configuration file."""
-        config_path = Path("trajectory_tools.conf")
+        config_path = get_user_data_path("trajectory_tools.conf")
         maximized = 'true' if self.isMaximized() else 'false'
         geometry = self.normalGeometry() if not self.isMaximized() else self.geometry()
         config_data = [f"{geometry.x()},{geometry.y()},{geometry.width()},{geometry.height()},{maximized}"]

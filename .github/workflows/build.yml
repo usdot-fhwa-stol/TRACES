@@ -5,29 +5,126 @@ jobs:
     runs-on: windows-latest
     steps:
     - uses: actions/checkout@v4
+
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
         python-version: '3.9'
+
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install pyinstaller numpy pyqt6 pyqtgraph superqt utm
+
     - name: Build with PyInstaller
       shell: powershell
       run: |
         pyinstaller --name "trajectory_tools" --onedir --windowed `
           --add-data "src/config;config" `
-          --add-data "src/home.html;." `
-          --add-data "src/about.html;." `
           --add-data "src/data_import;data_import" `
           --add-data "src/gui;gui" `
+          --add-data "src/plot;plot" `
           --hidden-import PyQt6 `
+          --hidden-import pyqtgraph `
+          --hidden-import superqt `
           --hidden-import utm `
+          --hidden-import data_import.base_process `
+          --hidden-import data_import.csv_algorithms `
+          --hidden-import data_import.csv_process `
           src/trajectory_tools.py
-    - name: Upload artifact
+
+    - name: Install NSIS
+      run: choco install nsis --yes
+
+    - name: Write NSIS script
+      shell: powershell
+      run: |
+        $nsis = @'
+        Unicode True
+        !define APP_NAME      "Trajectory Tools"
+        !define APP_VERSION   "0.1"
+        !define APP_EXE       "trajectory_tools.exe"
+        !define INSTALL_REG   "Software\TrajectoryTools"
+        !define UNINSTALL_REG "Software\Microsoft\Windows\CurrentVersion\Uninstall\TrajectoryTools"
+
+        Name "${APP_NAME} ${APP_VERSION}"
+        OutFile "trajectory_tools_setup.exe"
+        InstallDir "$PROGRAMFILES64\TrajectoryTools"
+        InstallDirRegKey HKLM "${INSTALL_REG}" "InstallDir"
+        RequestExecutionLevel admin
+
+        ;-- Modern UI pages
+        !include "MUI2.nsh"
+        !insertmacro MUI_PAGE_WELCOME
+        !insertmacro MUI_PAGE_DIRECTORY
+        !insertmacro MUI_PAGE_INSTFILES
+        !insertmacro MUI_PAGE_FINISH
+        !insertmacro MUI_UNPAGE_CONFIRM
+        !insertmacro MUI_UNPAGE_INSTFILES
+        !insertmacro MUI_LANGUAGE "English"
+
+        ;------------------------------------------------------------
+        Section "Install"
+          SetOutPath "$INSTDIR"
+
+          ;-- Copy entire PyInstaller onedir output
+          File /r "dist\trajectory_tools\*.*"
+
+          ;-- Start Menu shortcut
+          CreateDirectory "$SMPROGRAMS\TrajectoryTools"
+          CreateShortcut "$SMPROGRAMS\TrajectoryTools\Trajectory Tools.lnk" \
+                         "$INSTDIR\${APP_EXE}"
+          CreateShortcut "$SMPROGRAMS\TrajectoryTools\Uninstall.lnk" \
+                         "$INSTDIR\uninstall.exe"
+
+          ;-- Desktop shortcut
+          CreateShortcut "$DESKTOP\Trajectory Tools.lnk" "$INSTDIR\${APP_EXE}"
+
+          ;-- Registry: record install dir and version
+          WriteRegStr   HKLM "${INSTALL_REG}" "InstallDir" "$INSTDIR"
+          WriteRegStr   HKLM "${INSTALL_REG}" "Version"    "${APP_VERSION}"
+
+          ;-- Registry: Add/Remove Programs entry
+          WriteRegStr   HKLM "${UNINSTALL_REG}" "DisplayName"     "${APP_NAME}"
+          WriteRegStr   HKLM "${UNINSTALL_REG}" "DisplayVersion"  "${APP_VERSION}"
+          WriteRegStr   HKLM "${UNINSTALL_REG}" "Publisher"       "Trajectory Tools"
+          WriteRegStr   HKLM "${UNINSTALL_REG}" "UninstallString" "$INSTDIR\uninstall.exe"
+          WriteRegStr   HKLM "${UNINSTALL_REG}" "InstallLocation" "$INSTDIR"
+          WriteRegDWORD HKLM "${UNINSTALL_REG}" "NoModify"        1
+          WriteRegDWORD HKLM "${UNINSTALL_REG}" "NoRepair"        1
+
+          WriteUninstaller "$INSTDIR\uninstall.exe"
+        SectionEnd
+
+        ;------------------------------------------------------------
+        Section "Uninstall"
+          ;-- Remove install tree (does not touch APPDATA user configs)
+          RMDir /r "$INSTDIR"
+
+          ;-- Remove shortcuts
+          Delete "$DESKTOP\Trajectory Tools.lnk"
+          RMDir /r "$SMPROGRAMS\TrajectoryTools"
+
+          ;-- Remove registry keys
+          DeleteRegKey HKLM "${INSTALL_REG}"
+          DeleteRegKey HKLM "${UNINSTALL_REG}"
+        SectionEnd
+        '@
+        $nsis | Out-File -FilePath installer.nsi -Encoding utf8
+
+    - name: Build installer
+      run: makensis installer.nsi
+
+    - name: Upload portable build
       uses: actions/upload-artifact@v4
       with:
-        name: trajectory_tools
+        name: trajectory_tools_portable
         path: dist/trajectory_tools/*
+        retention-days: 7
+
+    - name: Upload installer
+      uses: actions/upload-artifact@v4
+      with:
+        name: trajectory_tools_installer
+        path: trajectory_tools_setup.exe
         retention-days: 7

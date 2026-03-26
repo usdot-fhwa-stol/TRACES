@@ -8,7 +8,7 @@ from pathlib import Path
 from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QProgressBar, QTextEdit, QFileDialog, QMessageBox
 from PyQt6.QtCore import QThread, QTimer, pyqtSignal
 from data_import.base_process import BaseProcess
-from utils import get_resource_path
+from utils import get_user_data_path
 import importlib
 
 # Set up logger
@@ -497,8 +497,8 @@ class ImportDialog(QDialog):
         self._configs = {}
         self._selected_file_type = ""
         self._worker_thread = None
-        # Use get_resource_path for log file to work in both development and PyInstaller environments
-        self._log_file = Path(get_resource_path("trajectory_tools.log"))
+        # Use get_user_data_path for log file to work in both development and PyInstaller environments
+        self._log_file = get_user_data_path("trajectory_tools.log")
         self._import_completed = False  # Track if import completed successfully
         self._successful_import_path = ""  # Store path of successful import
         logger.debug("ImportDialog initialized")
@@ -574,8 +574,8 @@ class ImportDialog(QDialog):
         if self._log_file.exists():
             self._log_file.unlink()
         
-        # Use get_resource_path for config directory to work in both development and PyInstaller environments
-        config_dir = Path(get_resource_path("config"))
+        # Use get_user_data_path for config directory to work in both development and PyInstaller environments
+        config_dir = get_user_data_path("config")
         config_dir.mkdir(exist_ok=True)
         
         # Check JSON configuration files

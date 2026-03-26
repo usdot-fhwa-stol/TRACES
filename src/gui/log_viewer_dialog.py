@@ -3,7 +3,7 @@ from pathlib import Path
 from PyQt6.QtWidgets import QDialog, QVBoxLayout, QTextEdit
 from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtGui import QFont
-from utils import get_resource_path
+from utils import get_user_data_path
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +41,7 @@ class LogViewerDialog(QDialog):
         super().__init__(parent, Qt.WindowType.Window)   # Window flag gives all three OS buttons
         self.setWindowTitle("System Log Viewer")
 
-        self._log_path = Path(get_resource_path("trajectory_tools.log"))
+        self._log_path = get_user_data_path("trajectory_tools.log")
         self._last_size = 0
         self._poll_timer = QTimer(self)
 
