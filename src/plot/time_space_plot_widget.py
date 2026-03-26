@@ -10,6 +10,8 @@ import pyqtgraph as pg
 from superqt import QLabeledRangeSlider
 from .time_space_plot_settings_dialog import TimeSpacePlotSettingsDialog
 from .custom_view_box import CustomViewBox
+from .vertical_gradient_value import GradientConfig, VerticalGradientValue
+from gui.toggle_switch import ToggleSwitch
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -66,6 +68,9 @@ class TimeSpacePlotWidget(QWidget):
         self._lane_combobox = None
         self._dist_slider = None
         self._time_slider = None
+        self._vertical_gradient = None
+        self._speed_toggle = None
+        self._gap_headway_toggle = None
         self._current_event_id = None
         self._time_range = (0.0, 0.0)
         self._dist_range = (0.0, 0.0)
@@ -73,6 +78,7 @@ class TimeSpacePlotWidget(QWidget):
         self._tooltip = None
         self._last_queried_point = None
         self._selected_series = set()
+        self._speed_gradient_enabled = False
         self._last_mouse_move_time = 0.0
         self._lane_ids = []
         self._veh_ids = []
@@ -86,9 +92,26 @@ class TimeSpacePlotWidget(QWidget):
         # Create main horizontal layout
         main_layout = QHBoxLayout(self)
         
-        # Left side: QVBoxLayout with plot on top and time controls below
+        # Left side: QVBoxLayout with vertical speed gradient and toggle switches
         left_layout = QVBoxLayout()
         
+        # Vertical speed color gradient
+        gradient_config = GradientConfig(title="Speed m/s", ranges=[[0, 40, 0, 100, 5]])
+        self._vertical_gradient = VerticalGradientValue(gradient_config)
+        left_layout.addWidget(self._vertical_gradient, stretch=1)
+
+        # Toggle switches
+        self._speed_toggle = ToggleSwitch()
+        self._speed_toggle.toggled.connect(self._on_speed_gradient_toggled)
+        self._gap_headway_toggle = ToggleSwitch()
+        left_layout.addWidget(self._speed_toggle)
+        left_layout.addWidget(self._gap_headway_toggle)
+
+        main_layout.addLayout(left_layout)
+
+        # middle: QVBoxLayout with plot on top and time controls below
+        mid_layout = QVBoxLayout()
+
         # Plot widget - pass self to CustomViewBox
         custom_viewbox = CustomViewBox(parent_widget=self)
         self._scatter_plot = pg.PlotWidget(viewBox=custom_viewbox)
@@ -105,7 +128,7 @@ class TimeSpacePlotWidget(QWidget):
         # Disable default mouse interactions
         self._scatter_plot.getViewBox().setMouseEnabled(x=False, y=False)
         
-        left_layout.addWidget(self._scatter_plot, stretch=1)
+        mid_layout.addWidget(self._scatter_plot, stretch=1)
         
         # Time controls below plot
         time_layout = QHBoxLayout()
@@ -121,35 +144,35 @@ class TimeSpacePlotWidget(QWidget):
         self._time_slider.valueChanged.connect(self._on_slider_changed)
         time_layout.addWidget(self._time_slider, stretch=1)
         
-        left_layout.addLayout(time_layout)
+        mid_layout.addLayout(time_layout)
         
-        main_layout.addLayout(left_layout, stretch=1)
+        main_layout.addLayout(mid_layout, stretch=1)
         
         # Right side: control set (rearranged)
-        control_layout = QVBoxLayout()
+        right_layout = QVBoxLayout()
         
         # Event button
         self._event_button = QPushButton(" ")
         self._event_button.clicked.connect(self._open_settings_dialog)
-        control_layout.addWidget(self._event_button)
+        right_layout.addWidget(self._event_button)
 
         # Distance slider section
         dist_label = QLabel("Dist (m)")
         dist_label.setStyleSheet("font-weight: bold;")
         dist_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        control_layout.addWidget(dist_label)
+        right_layout.addWidget(dist_label)
         
         self._dist_slider = QLabeledRangeSlider()
         self._dist_slider.setOrientation(Qt.Orientation.Vertical)
         self._dist_slider.valueChanged.connect(self._on_slider_changed)
-        control_layout.addWidget(self._dist_slider, stretch=1)
+        right_layout.addWidget(self._dist_slider, stretch=1)
         
         # Lane combobox next
         self._lane_combobox = QComboBox()
         self._lane_combobox.currentIndexChanged.connect(self._on_lane_changed)
-        control_layout.addWidget(self._lane_combobox)
+        right_layout.addWidget(self._lane_combobox)
         
-        main_layout.addLayout(control_layout)
+        main_layout.addLayout(right_layout)
         
         # Create tooltip
         self._tooltip = QLabel(self._scatter_plot)
@@ -201,7 +224,7 @@ class TimeSpacePlotWidget(QWidget):
         self._current_event_id = event_id
         self._dist_range = (dist_min, dist_max)
         self._time_range = (time_min, time_max)
-        self._lane_ids = event_summary.get('lane_id', [])
+        self._lane_ids = [pair[0] for pair in event_summary.get('lane_id', [])]
         self._veh_ids = event_summary.get('veh_id', [])
         self._clear_selection_box()
         self._selected_series.clear()
@@ -251,22 +274,36 @@ class TimeSpacePlotWidget(QWidget):
             self._series[veh_id] = series_dict
 
         logger.debug(f"Initialized {len(self._series)} vehicle series for event {self._current_event_id}")
-        
+
     def _populate_lane_combobox_from_ids(self):
         """Populate the lane combobox using the provided lane IDs."""
+        self._lane_combobox.blockSignals(True)
         self._lane_combobox.clear()
-        
-        # Populate combobox with provided lane_ids
-        for lane_id in self._lane_ids:
-            self._lane_combobox.addItem(f"Lane {lane_id:2d}", {'lane_id': lane_id, 'lane_series': set()})
-            
-        # Default to first item and update plot
-        if self._lane_ids:
+    
+        lane_pairs = self._event_summary.get('lane_id', [])
+        for pair in lane_pairs:
+            lane_id = pair[0]
+            orig_lane_id = pair[1] if len(pair) > 1 else None
+            tooltip = f"Orig Lane ID: {orig_lane_id}" if orig_lane_id is not None else ""
+            self._lane_combobox.addItem(
+                f"Lane {lane_id:2d}",
+                {'lane_id': lane_id, 'lane_series': set()}
+            )
+            self._lane_combobox.setItemData(
+                self._lane_combobox.count() - 1,
+                tooltip,
+                Qt.ItemDataRole.ToolTipRole
+            )
+    
+        self._lane_combobox.blockSignals(False)
+        if lane_pairs:
             self._lane_combobox.setCurrentIndex(0)
+            first_tooltip = self._lane_combobox.itemData(0, Qt.ItemDataRole.ToolTipRole)
+            self._lane_combobox.setToolTip(first_tooltip or "")
             QTimer.singleShot(0, self._update_plot_data)
-            
-        logger.debug(f"Populated lane combobox with {len(self._lane_ids)} lanes")
-            
+    
+        logger.debug(f"Populated lane combobox with {len(lane_pairs)} lanes")
+        
     def _on_lane_changed(self, index: int):
         """Handle lane combobox selection change.
         
@@ -274,116 +311,120 @@ class TimeSpacePlotWidget(QWidget):
             index (int): Selected combobox index.
         """
         if index >= 0:
+            tooltip = self._lane_combobox.itemData(index, Qt.ItemDataRole.ToolTipRole)
+            self._lane_combobox.setToolTip(tooltip or "")
             self._clear_selection_box()
             QTimer.singleShot(0, self._update_plot_data)
-            
-    def _create_scatter_plot_for_vehicle(self, veh_id: int, times_list: list, distances_list: list, 
-                                        time_min: float, time_max: float, dist_min: float, dist_max: float):
-        """Create scatter plot for a vehicle with given data and filter ranges.
-        
+
+    def _create_scatter_plot_for_vehicle(self, veh_id, times_list, distances_list, speeds_list,
+                                          time_min, time_max, dist_min, dist_max):
+        """Create a scatter plot item for a single vehicle.
+
         Args:
             veh_id (int): Vehicle ID.
-            times_list (list): List of time values.
-            distances_list (list): List of distance values.
-            time_min (float): Minimum time filter value.
-            time_max (float): Maximum time filter value.
-            dist_min (float): Minimum distance filter value.
-            dist_max (float): Maximum distance filter value.
+            times_list (list): Time values.
+            distances_list (list): Distance values.
+            speeds_list (list): Speed values (elements may be None).
+            time_min (float): Minimum time filter.
+            time_max (float): Maximum time filter.
+            dist_min (float): Minimum distance filter.
+            dist_max (float): Maximum distance filter.
         """
         if not times_list or veh_id not in self._series:
             return
-            
-        # Convert to numpy arrays
+
         times = np.array(times_list, dtype=np.float64)
         distances = np.array(distances_list, dtype=np.float64)
-        
-        # Store arrays in series
+        # Store speeds as float array; Python None → np.nan so indexing is safe
+        speeds = np.array(
+            [s if s is not None else np.nan for s in speeds_list],
+            dtype=np.float64
+        )
+
         series = self._series[veh_id]
         series['veh_time'] = times
         series['veh_dist_trav'] = distances
-        
-        # Only create plot item if there are points to display
-        if len(times) > 0:
-            # Set color based on _selected_series
-            color = series['color'] if veh_id in self._selected_series or not self._selected_series else '#a9a9a9'
-            
-            # Create scatter plot item with filtered data
-            scatter_item = pg.ScatterPlotItem(
-                x=times, 
-                y=distances, 
-                pen=pg.mkPen(color=color), 
-                brush=pg.mkBrush(color=color), 
-                size=4
-            )
-            scatter_item.veh_id = veh_id
-            
-            # Add to plot and store reference
-            self._scatter_plot.addItem(scatter_item)
-            series['plot_item'] = scatter_item
+        series['veh_speed'] = speeds               # <── always cached
+
+        if len(times) == 0:
+            return
+
+        pens, brushes = self._get_point_brushes(veh_id)
+
+        scatter_item = pg.ScatterPlotItem(
+            x=times,
+            y=distances,
+            pen=pens,
+            brush=brushes,
+            size=4,
+        )
+        scatter_item.veh_id = veh_id
+        self._scatter_plot.addItem(scatter_item)
+        series['plot_item'] = scatter_item
 
     def _update_plot_data(self):
         """Update the plot data for the current event and lane using streaming approach."""
         if not self._db_connection or self._current_event_id is None or self._lane_combobox.count() == 0:
             return
-            
+
         try:
-            # Clear existing plot items and selection box
             self._scatter_plot.clear()
             self._clear_selection_box()
 
-            # Reset arrays for each series but keep the series structure
             for series in self._series.values():
                 series['plot_item'] = None
                 series['veh_time'] = np.array([], dtype=np.float64)
                 series['veh_dist_trav'] = np.array([], dtype=np.float64)
-            
-            # Get current slider ranges for filtering
+                series['veh_speed'] = np.array([], dtype=np.float64)  # <── always reset
+
             time_min, time_max = self._time_slider.value()
             dist_min, dist_max = self._dist_slider.value()
-            
+
             cursor = self._db_connection.cursor()
             cursor.execute("""
-                SELECT veh_id, veh_time, veh_dist_trav 
-                FROM events 
-                WHERE event_id = ? AND lane_id = ? 
+                SELECT veh_id, veh_time, veh_dist_trav, veh_speed
+                FROM events
+                WHERE event_id = ? AND lane_id = ?
                 ORDER BY veh_id, veh_time
             """, (self._current_event_id, self._lane_combobox.currentData()['lane_id']))
-            
-            # Process records one by one using streaming approach
+
             prev_veh_id = -1
             current_times = []
             current_distances = []
-            
-            # Stream through database results
+            current_speeds = []
+
             for row in cursor:
-                veh_id, veh_time, veh_dist_trav = row
-                
-                # Check if we've moved to a new vehicle
+                veh_id, veh_time, veh_dist_trav, veh_speed = row
+
                 if veh_id != prev_veh_id:
-                    # Create scatter plot for previous vehicle if we have data
                     if prev_veh_id != -1 and current_times:
-                        self._create_scatter_plot_for_vehicle(prev_veh_id, current_times, current_distances,
-                                                            time_min, time_max, dist_min, dist_max)
-                    
-                    # Start collecting data for new vehicle
+                        self._create_scatter_plot_for_vehicle(
+                            prev_veh_id, current_times, current_distances, current_speeds,
+                            time_min, time_max, dist_min, dist_max
+                        )
                     prev_veh_id = veh_id
                     current_times = []
                     current_distances = []
-                
-                # Add current record to collections
+                    current_speeds = []
+
                 current_times.append(veh_time)
                 current_distances.append(veh_dist_trav)
-            
-            # Handle the last vehicle after loop ends
-            if prev_veh_id != -1 and current_times:
-                self._create_scatter_plot_for_vehicle(prev_veh_id, current_times, current_distances,
-                                                    time_min, time_max, dist_min, dist_max)
+                current_speeds.append(veh_speed)   # may be None
 
-            logger.debug(f"Updated plot data for event {self._current_event_id}, lane {self._lane_combobox.currentData()['lane_id']}")
+            if prev_veh_id != -1 and current_times:
+                self._create_scatter_plot_for_vehicle(
+                    prev_veh_id, current_times, current_distances, current_speeds,
+                    time_min, time_max, dist_min, dist_max
+                )
+
+            logger.debug(
+                f"Updated plot data for event {self._current_event_id}, "
+                f"lane {self._lane_combobox.currentData()['lane_id']}"
+            )
 
         except sqlite3.Error as e:
             logger.error(f"Error updating plot data: {e}")
-            
+
     def _on_slider_changed(self):
         """Handle changes to distance or time sliders by filtering the plot data and updating view."""
         if not self._series:
@@ -516,14 +557,81 @@ class TimeSpacePlotWidget(QWidget):
             event.accept()
         else:
             super().keyPressEvent(event)
-    
+
     def _update_plot_colors(self):
-        """Update scatter plot item colors based on _selected_series."""
-        # Update colors for all series
+        """Update scatter plot item colors based on _selected_series and color mode.
+
+        Uses _get_point_brushes so the gradient / flat / dimmed decision is
+        made in one place.  Works in-place on existing ScatterPlotItems; no
+        database round-trip required.
+        """
         for series in self._series.values():
             if series['plot_item'] is not None:
                 veh_id = series['veh_id']
-                color = series['color'] if veh_id in self._selected_series or not self._selected_series else '#a9a9a9'
-                series['plot_item'].setPen(pg.mkPen(color=color))
-                series['plot_item'].setBrush(pg.mkBrush(color=color))
-        logger.debug("Updated plot colors based on selected series")
+                pens, brushes = self._get_point_brushes(veh_id)
+                series['plot_item'].setPen(pens)
+                series['plot_item'].setBrush(brushes)
+        logger.debug("Updated plot colors based on selected series and color mode")
+    
+    def _on_speed_gradient_toggled(self, checked: bool):
+        """Handle speed gradient toggle switch.
+
+        When on, each point of every active (non-dimmed) trajectory is coloured
+        by its speed via the vertical gradient.  When off, trajectories return
+        to their flat per-vehicle series colour.  Either way only the brushes
+        are updated in-place; no database round-trip is needed.
+
+        Args:
+            checked (bool): True when the toggle is switched on.
+        """
+        self._speed_gradient_enabled = checked
+        if self._series:
+            self._update_plot_colors()
+        logger.debug(f"Speed gradient toggled: {checked}")
+
+    def _get_point_brushes(self, veh_id: int):
+        """Return per-point (pens, brushes) lists for a vehicle.
+
+        Decision tree:
+          1. Dimmed (unselected while a selection exists) → flat neutral grey.
+          2. Speed-gradient mode active → per-point colour from gradient lookup.
+          3. Default → flat per-vehicle series colour.
+
+        Args:
+            veh_id (int): Vehicle ID.
+
+        Returns:
+            tuple[list, list]: (pens, brushes) — one entry per data point.
+        """
+        series = self._series[veh_id]
+        n = len(series['veh_time'])
+
+        # Determine whether this vehicle is dimmed
+        is_dimmed = bool(self._selected_series) and veh_id not in self._selected_series
+
+        if is_dimmed:
+            # Flat neutral grey for every point
+            pen = pg.mkPen(color='#a9a9a9')
+            brush = pg.mkBrush(color='#a9a9a9')
+            return [pen] * n, [brush] * n
+
+        if self._speed_gradient_enabled:
+            # Per-point colour from the speed → gradient lookup
+            speeds = series.get('veh_speed')
+            pens = []
+            brushes = []
+            for i in range(n):
+                spd = speeds[i] if speeds is not None and i < len(speeds) else None
+                if spd is not None and not np.isnan(spd):
+                    hex_color = self._vertical_gradient.value_to_color_hex(float(spd))
+                else:
+                    hex_color = '#808080'   # grey for missing/NaN speed
+                pens.append(pg.mkPen(color=hex_color))
+                brushes.append(pg.mkBrush(color=hex_color))
+            return pens, brushes
+
+        # Default: flat per-vehicle series colour
+        color = series['color']
+        pen = pg.mkPen(color=color)
+        brush = pg.mkBrush(color=color)
+        return [pen] * n, [brush] * n

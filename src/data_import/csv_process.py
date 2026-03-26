@@ -5,6 +5,9 @@ import os
 from typing import Dict, Any, Callable
 from .base_process import BaseProcess
 from .csv_algorithms import CsvAlgorithms
+from .units import Units
+
+_units = Units()
 
 class ByteCountingStream(io.BufferedReader):
     """A buffered reader that tracks the number of bytes read."""
@@ -91,6 +94,32 @@ class CsvProcess(BaseProcess):
                 col_def.setdefault("units", "")
                 col_def.setdefault("func", "copy")
                 col_def.setdefault("parms", [])
+
+                src_u = col_def["units"]
+                dst_u = _units.system_units(key)   # "" for unitless columns
+                
+                if src_u:                          # units were specified in the JSON
+                    if not _units.is_known(src_u):
+                        worker.log_signal.emit(
+                            f"Error: Unknown units '{src_u}' for column '{key}' "
+                            f"in col_defs[{i}].", False
+                        )
+                        error_count += 1
+                    else:
+                        try:
+                            _units.factor(src_u, dst_u)
+                        except KeyError:
+                            worker.log_signal.emit(
+                                f"Error: No conversion from '{src_u}' to '{dst_u}' "
+                                f"for column '{key}' in col_defs[{i}].", False
+                            )
+                            error_count += 1
+                        else:
+                            # Pre-compute and cache factor so the hot loop never does
+                            # a dict lookup per row.
+                            col_def["_factor"] = _units.factor(src_u, dst_u)
+                else:
+                    col_def["_factor"] = 1.0      # identity — no conversion needed
 
                 if col_def["src_col"] >= 0:
                     self._min_cols = max(self._min_cols, col_def["src_col"] + 1)
@@ -321,6 +350,9 @@ class CsvProcess(BaseProcess):
                     for key, col_def in col_def_set.items():
                         try:
                             value = self._func_dict[col_def["func"]](row, col_def)
+                            src_u = col_def["units"]
+                            if value is not None and src_u:
+                                value = _units.convert(src_u, _units.system_units(key), value)
                             record[key] = value
                         except Exception as e:
                             worker.log_signal.emit(

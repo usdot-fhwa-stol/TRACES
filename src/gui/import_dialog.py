@@ -182,11 +182,11 @@ class _ImportWorkerThread(QThread):
                     
                     # Get unique lane IDs
                     cursor.execute("""
-                        SELECT DISTINCT lane_id FROM events
+                        SELECT DISTINCT lane_id, orig_lane_id FROM events
                         WHERE event_id = ?
                         ORDER BY lane_id
                     """, (event_id,))
-                    lane_ids = [row[0] for row in cursor.fetchall() if row[0] is not None]
+                    lane_ids = [[row[0], row[1]] for row in cursor.fetchall() if row[0] is not None]
                     
                     # Get unique vehicle IDs
                     cursor.execute("""

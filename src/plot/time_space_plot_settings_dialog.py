@@ -249,7 +249,8 @@ class TimeSpacePlotSettingsDialog(QDialog):
             self._event_name.setText(summary.get("event_name", ""))
 
             # Update lane list from summary
-            lane_ids = summary.get("lane_id", [])
+            lane_pairs = summary.get("lane_id", [])
+            lane_ids = [str(pair[0]) for pair in lane_pairs]
             self._lane_count_label.setText(', '.join(map(str, lane_ids)))
 
             # Update vehicle count from summary
