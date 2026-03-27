@@ -19,7 +19,7 @@ class _ImportWorkerThread(QThread):
 
     _SEGMENT_GAP_FACTOR = 3     # multiple of median step that marks a break
     _MIN_SEGMENT_PTS    = 2     # minimum points required per segment
-    _DB_BATCH           = 2000  # rows per executemany UPDATE call
+    _DB_BATCH           = 10000 # rows per executemany UPDATE call
 
     log_signal = pyqtSignal(str, bool)
     progress_signal = pyqtSignal(int)
@@ -31,6 +31,7 @@ class _ImportWorkerThread(QThread):
         self.output_path = output_path
         self.db_connection = None
         self.interrupt_flag = False
+        self.success = False
         self._continue_to_plot = False
         logger.debug(f"ImportWorkerThread initialized with input: {input_path}, output: {output_path}")
 
@@ -245,6 +246,10 @@ class _ImportWorkerThread(QThread):
             except Exception as e:
                 logger.error(f"Error closing database connection: {e}")
 
+        if error_count == 0 and not self.interrupt_flag:
+            self.log_signal.emit("Info: Import completed successfully.", True)
+            self.success = True
+                
     @staticmethod
     def _build_segment_meta(
         segments: list[tuple[int, int]],
@@ -762,13 +767,37 @@ class ImportDialog(QDialog):
         logger.debug("Starting worker thread")
         self._worker_thread.start()
 
+    def _confirm_interrupt(self) -> bool:
+        """Ask the user to confirm interrupting the running import.
+
+        Returns:
+            bool: True if the user confirmed (Yes), False if they declined (No).
+        """
+        reply = QMessageBox.question(
+            self,
+            "Import In Progress",
+            "An import process is currently running. Do you want to interrupt it?\n\n"
+            "Warning: Interrupting the import will cancel the process and any "
+            "partial results will be lost.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No   # default to No for safety
+        )
+        return reply == QMessageBox.StandardButton.Yes
+
     def _interrupt_import(self):
         """Handle interrupt button click."""
         logger.debug("Interrupt requested")
-        if self._worker_thread:
-            self._worker_thread.interrupt_flag = True
+        if not self._worker_thread:
+            return
+
+        if not self._confirm_interrupt():
+            logger.debug("User declined interrupt")
+            return
+
+        self._worker_thread.interrupt_flag = True
         self._interrupt_button.setEnabled(False)
-        self._log_message("Warning: Interrupt requested", False)
+        self._log_message("Warning: Import interrupted by user", False)
+        logger.debug("Interrupt confirmed and flagged")
 
     def _show_completion_popup(self, success: bool):
         """Show a completion popup with context-appropriate buttons.
@@ -827,16 +856,14 @@ class ImportDialog(QDialog):
         if success and result == QDialog.DialogCode.Accepted:
             self._continue_to_plot = True
             self.close()  # triggers closeEvent which emits import_finished
-    
+
     def _finish_import(self):
         """Handle import completion without closing dialog."""
         logger.debug("Import process completed")
-    
+
         self._progress_bar.setValue(0)
-    
-        if (not getattr(self._worker_thread, 'interrupt_flag', False) and
-                self._output_path and
-                Path(self._output_path).exists()):
+
+        if getattr(self._worker_thread, 'success', False):   # ← CHANGED
             self._import_completed = True
             self._successful_import_path = self._output_path
             logger.debug("Import completed successfully")
@@ -844,70 +871,59 @@ class ImportDialog(QDialog):
             self._import_completed = False
             self._successful_import_path = ""
             logger.debug("Import was interrupted or failed")
-    
+
         if self._worker_thread:
             self._worker_thread.wait()
             self._worker_thread.deleteLater()
             self._worker_thread = None
-    
+
         self._input_path = ""
         self._output_path = ""
         self._selected_file_type = ""
-    
+
         self._input_button.setEnabled(True)
         self._output_button.setEnabled(False)
         self._import_button.setEnabled(False)
         self._interrupt_button.setEnabled(False)
-    
+
         logger.debug("Import process finished, dialog ready for next import")
-    
+
         # Show completion popup after UI is fully reset
         self._show_completion_popup(self._import_completed)
 
     def closeEvent(self, event):
         """Handle dialog close event and emit the output path."""
         logger.debug("Dialog close event triggered")
-        
-        # If import is running, ask user for confirmation
+
         if self._worker_thread and self._worker_thread.isRunning():
             logger.debug("Import is running, asking user for confirmation")
-            
-            reply = QMessageBox.question(
-                self,
-                "Import In Progress",
-                "An import process is currently running. Do you want to interrupt it and close the dialog?\n\n"
-                "Warning: Interrupting the import will cancel the process and any partial results will be lost.",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
-                QMessageBox.StandardButton.Cancel  # Default to Cancel for safety
-            )
-            
-            if reply == QMessageBox.StandardButton.Cancel:
-                logger.debug("User chose to cancel dialog close")
-                event.ignore()  # Prevent the dialog from closing
+
+            if not self._confirm_interrupt():      # ← REUSES SAME HELPER
+                logger.debug("User chose not to interrupt; keeping dialog open")
+                event.ignore()
                 return
-            
-            # User chose Yes - interrupt the import
-            logger.debug("User confirmed to interrupt import and close dialog")
+
+            # User confirmed — interrupt the import
+            logger.debug("User confirmed interrupt; closing dialog")
             self._worker_thread.interrupt_flag = True
             self._log_message("Warning: Import interrupted by user", False)
-            
-            # Wait for thread to finish
+
             self._worker_thread.quit()
-            success = self._worker_thread.wait(3000)
-            if not success:
+            if not self._worker_thread.wait(3000):
                 logger.warning("Forcing thread termination")
                 self._worker_thread.terminate()
                 self._worker_thread.wait()
-            
-            # Mark import as not completed since it was interrupted
+
             self._import_completed = False
-        
-        # Only emit signal if import was completed successfully
-        if self._import_completed and self._successful_import_path and Path(self._successful_import_path).exists():
-            logger.debug(f"Emitting import_finished signal with path: {self._successful_import_path}")
+
+        # Emit result signal
+        if (self._import_completed
+                and self._successful_import_path
+                and Path(self._successful_import_path).exists()):
+            logger.debug(f"Emitting import_finished signal: {self._successful_import_path}")
             self.import_finished.emit(self._successful_import_path)
         else:
             logger.debug("No valid output path to emit or import was not completed")
             self.import_finished.emit("")
-        
+
         event.accept()

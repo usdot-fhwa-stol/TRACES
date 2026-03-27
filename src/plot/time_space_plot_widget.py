@@ -82,6 +82,9 @@ class TimeSpacePlotWidget(QWidget):
         self._last_mouse_move_time = 0.0
         self._lane_ids = []
         self._veh_ids = []
+        self._gh_mode_enabled   = False
+        self._gh_locked_point   = None   # (veh_id, veh_time) | None
+        self._gh_overlay_items  = []     # pg items currently on the plot
 
         logger.debug("TimeSpacePlotWidget initialized")
         
@@ -108,6 +111,7 @@ class TimeSpacePlotWidget(QWidget):
         left_layout.addWidget(self._speed_toggle, alignment=Qt.AlignmentFlag.AlignHCenter)
 
         self._gap_headway_toggle = ToggleSwitch()
+        self._gap_headway_toggle.toggled.connect(self._on_gap_headway_toggled)
         gap_headway_toggle_label = QLabel("Show Gap\nHeadway") # gap/headway toggle label
         left_layout.addWidget(gap_headway_toggle_label, alignment=Qt.AlignmentFlag.AlignHCenter)
         left_layout.addWidget(self._gap_headway_toggle, alignment=Qt.AlignmentFlag.AlignHCenter)
@@ -445,70 +449,114 @@ class TimeSpacePlotWidget(QWidget):
         logger.debug(f"Applied slider filters: time=[{time_min}, {time_max}], dist=[{dist_min}, {dist_max}]")
 
     def _handle_mouse_moved(self, pos):
-        """Handle mouse movement for showing tooltips with hysteresis.
-    
+        """Handle mouse movement: gap/headway overlay or normal tooltip.
+
         Args:
             pos (QPointF): Mouse position in scene coordinates.
         """
         if not self._series:
             return
-    
-        # Debounce to limit processing frequency
+
+        # Debounce
         current_time = time.time()
-        if (current_time - self._last_mouse_move_time) < 0.05:  # 50ms debounce
+        if (current_time - self._last_mouse_move_time) < 0.05:
             return
         self._last_mouse_move_time = current_time
-    
-        view_box = self._scatter_plot.getViewBox()
+
+        view_box   = self._scatter_plot.getViewBox()
         mouse_point = view_box.mapSceneToView(pos)
-        mx, my = mouse_point.x(), mouse_point.y()
-    
-        min_dist = float('inf')
+        mx, my     = mouse_point.x(), mouse_point.y()
+
+        time_tolerance       = 0.05
+        pixel_tolerance_show = 3
+        pixel_tolerance_hide = 6
+
+        # ── find closest point (shared by both modes) ─────────────────────
+        min_dist     = float('inf')
         closest_data = None
-        time_tolerance = 0.05  # Time tolerance in seconds
-        pixel_tolerance_show = 3  # Pixel distance to show tooltip
-        pixel_tolerance_hide = 6  # Pixel distance to hide tooltip (hysteresis)
-    
+
         for series in self._series.values():
             if series["plot_item"] and len(series["veh_time"]) > 0:
-                mask = (series["veh_time"] >= mx - time_tolerance) & (series["veh_time"] <= mx + time_tolerance)
-                x_filtered = series["veh_time"][mask]
-                y_filtered = series["veh_dist_trav"][mask]
-                
-                if len(x_filtered) > 0:
-                    distances = np.abs(y_filtered - my)
-                    min_idx = np.argmin(distances)
-                    if distances[min_idx] < min_dist:
-                        min_dist = distances[min_idx]
-                        closest_data = (series["veh_id"], series["color"], series["text_color"], x_filtered[min_idx], y_filtered[min_idx])
-    
-        # Initialize last queried point if not exists
+                mask = ((series["veh_time"] >= mx - time_tolerance) &
+                        (series["veh_time"] <= mx + time_tolerance))
+                x_f = series["veh_time"][mask]
+                y_f = series["veh_dist_trav"][mask]
+                if len(x_f) > 0:
+                    distances = np.abs(y_f - my)
+                    idx = np.argmin(distances)
+                    if distances[idx] < min_dist:
+                        min_dist     = distances[idx]
+                        closest_data = (series["veh_id"],
+                                        series["color"],
+                                        series["text_color"],
+                                        x_f[idx], y_f[idx])
+
+        # ── gap/headway mode ──────────────────────────────────────────────
+        if self._gh_mode_enabled:
+            # If a point is locked, always show its overlay; ignore hover.
+            if self._gh_locked_point is not None:
+                return
+
+            # Hover: show overlay for closest point when within tolerance
+            if closest_data and min_dist < pixel_tolerance_show:
+                veh_id, _, _, veh_time, veh_dist = closest_data
+                current_point = (veh_id, veh_time, self._current_event_id)
+
+                if self._last_queried_point != current_point:
+                    try:
+                        cursor = self._db_connection.cursor()
+                        cursor.execute("""
+                            SELECT gap_b, gap_f, hway_b, hway_f
+                            FROM   events
+                            WHERE  event_id = ? AND veh_id = ? AND veh_time = ?
+                        """, (self._current_event_id, veh_id, veh_time))
+                        row = cursor.fetchone()
+                    except Exception as e:
+                        logger.error(f"GH query error: {e}")
+                        return
+
+                    if row:
+                        self._draw_gh_overlay(veh_id, veh_time, veh_dist, *row)
+                        self._last_queried_point = current_point
+                    else:
+                        self._clear_gh_overlay()
+                        self._last_queried_point = None
+
+            elif min_dist > pixel_tolerance_hide or not closest_data:
+                # Mouse moved away — clear transient overlay
+                if self._gh_locked_point is None:
+                    self._clear_gh_overlay()
+                    self._last_queried_point = None
+
+            # Hide the normal tooltip in this mode
+            self._tooltip.hide()
+            return
+
+        # ── normal tooltip mode (unchanged) ──────────────────────────────
         if not hasattr(self, '_last_queried_point'):
             self._last_queried_point = None
-    
+
         if closest_data and min_dist < pixel_tolerance_show:
             veh_id, color, text_color, veh_time, veh_dist_trav = closest_data
-    
-            # Check if the point is the same as the last queried point
             current_point = (veh_id, veh_time, self._current_event_id)
+
             if self._last_queried_point != current_point:
-                # Query database for new point
                 cursor = self._db_connection.cursor()
                 cursor.execute("""
                     SELECT lane_id, veh_speed, veh_accel, veh_automation, veh_length
-                    FROM events
-                    WHERE event_id = ? AND veh_id = ? AND veh_time = ?
+                    FROM   events
+                    WHERE  event_id = ? AND veh_id = ? AND veh_time = ?
                 """, (self._current_event_id, veh_id, veh_time))
                 row = cursor.fetchone()
-                
+
                 if row:
-                    lane_id = f"{row[0]:d}" if row[0] is not None else " "
+                    lane_id   = f"{row[0]:d}"   if row[0] is not None else " "
                     veh_speed = f"{row[1]:.2f}" if row[1] is not None else " "
                     veh_accel = f"{row[2]:.2f}" if row[2] is not None else " "
-                    veh_auto = f"{row[3]:d}" if row[3] is not None else " "
-                    veh_length = f"{row[4]:.2f}" if row[4] is not None else " "
-    
-                    tooltip_text = (
+                    veh_auto  = f"{row[3]:d}"   if row[3] is not None else " "
+                    veh_len   = f"{row[4]:.2f}" if row[4] is not None else " "
+
+                    self._tooltip.setText(
                         f"Vehicle ID: {veh_id}\n"
                         f"Time: {veh_time:.2f} s\n"
                         f"Lane ID: {lane_id}\n"
@@ -516,25 +564,21 @@ class TimeSpacePlotWidget(QWidget):
                         f"Speed: {veh_speed} m/s\n"
                         f"Acceleration: {veh_accel} m/s²\n"
                         f"Automation: {veh_auto}\n"
-                        f"Length: {veh_length} m"
+                        f"Length: {veh_len} m"
                     )
-                    self._tooltip.setText(tooltip_text)
                     self._last_queried_point = current_point
                 else:
                     self._tooltip.hide()
                     self._last_queried_point = None
                     return
-    
-            # Update tooltip style and position
-            color = '#000'
-            text_color = '#fff'
+
             self._tooltip.setStyleSheet(
-                f"QLabel {{ background-color: {color}; color: {text_color}; padding: 5px; }}"
+                "QLabel { background-color: #000; color: #fff; padding: 5px; }"
             )
             self._tooltip.move(int(pos.x()) + 10, int(pos.y()) + 10)
             self._tooltip.show()
+
         else:
-            # Only hide tooltip if distance exceeds hide tolerance (hysteresis)
             if min_dist > pixel_tolerance_hide or not closest_data:
                 self._tooltip.hide()
                 self._last_queried_point = None
@@ -633,3 +677,133 @@ class TimeSpacePlotWidget(QWidget):
         pen = pg.mkPen(color=color)
         brush = pg.mkBrush(color=color)
         return [pen] * n, [brush] * n
+
+    def _clear_gh_overlay(self):
+        """Remove every gap/headway line and label from the plot."""
+        for item in self._gh_overlay_items:
+            self._scatter_plot.removeItem(item)
+        self._gh_overlay_items.clear()
+
+    def _on_gap_headway_toggled(self, checked: bool):
+        """Enable or disable gap/headway overlay mode.
+
+        When enabled:
+          - Normal trajectory selection is suppressed.
+          - Hovering a point draws live gap/headway lines.
+          - Clicking a point locks those lines; clicking again unlocks.
+
+        When disabled:
+          - All overlay graphics are removed.
+          - Normal selection behaviour is restored.
+        """
+        self._gh_mode_enabled = checked
+        if not checked:
+            self._clear_gh_overlay()
+            self._gh_locked_point = None
+            self._tooltip.hide()
+        logger.debug(f"Gap/headway mode toggled: {checked}")
+
+    def _draw_gh_overlay(self, veh_id: int, veh_time: float, veh_dist: float,
+                         gap_b, gap_f, hway_b, hway_f):
+        """Draw gap and headway lines + labels for the given point.
+
+        Axes convention (same as the plot):
+            x-axis → time (s)
+            y-axis → distance (m)
+
+        gap_b / gap_f  are distances (m) → drawn as vertical segments
+                        (same time, ± distance).
+        hway_b / hway_f are times   (s) → drawn as horizontal segments
+                        (same distance, ± time).
+
+        All items are added to _gh_overlay_items so they can be removed
+        atomically before the next redraw.
+
+        Args:
+            veh_id   : vehicle identifier (used only for logging).
+            veh_time : x-coordinate of the source point (s).
+            veh_dist : y-coordinate of the source point (m).
+            gap_b, gap_f   : backward/forward spatial gap (m); may be None/NaN.
+            hway_b, hway_f : backward/forward time headway (s); may be None/NaN.
+        """
+        self._clear_gh_overlay()
+
+        import math
+
+        LINE_PEN   = pg.mkPen(color=(120, 120, 120), width=3,
+                              style=Qt.PenStyle.SolidLine)
+        LABEL_COLOR = (80, 80, 80)
+
+        def _finite(v):
+            """Return float if v is a finite number, else None."""
+            try:
+                f = float(v)
+                return f if math.isfinite(f) else None
+            except (TypeError, ValueError):
+                return None
+
+        def _add_line(x0, y0, x1, y1):
+            item = pg.PlotDataItem([x0, x1], [y0, y1], pen=LINE_PEN)
+            self._scatter_plot.addItem(item)
+            self._gh_overlay_items.append(item)
+
+        def _add_label(x, y, text, anchor, angle=0):
+            item = pg.TextItem(text=text, color=LABEL_COLOR, anchor=anchor,
+                               angle=angle)
+            item.setPos(x, y)
+            item.setFont(pg.QtGui.QFont("Arial", 8))
+            self._scatter_plot.addItem(item)
+            self._gh_overlay_items.append(item)
+
+        # ── vertical lines (gap — same time, different distance) ─────────────
+        #
+        # gap_f: other vehicle is at higher dist at same time → line goes UP
+        #        label: rotated 90°, right of and above source point
+        # gap_b: other vehicle is at lower dist at same time  → line goes DOWN
+        #        label: rotated 90°, left of and below source point
+
+        gf = _finite(gap_f)
+        if gf is not None and gf > 0:
+            y_end = veh_dist + gf
+            _add_line(veh_time, veh_dist, veh_time, y_end)
+            _add_label(veh_time, veh_dist,
+                       f"{gf:.2f} m",
+                       anchor=(0.0, 0.0),   # left-aligned, below source → right and above
+                       angle=90)
+
+        gb = _finite(gap_b)
+        if gb is not None and gb > 0:
+            y_end = veh_dist - gb
+            _add_line(veh_time, veh_dist, veh_time, y_end)
+            _add_label(veh_time, veh_dist,
+                       f"{gb:.2f} m",
+                       anchor=(1.0, 1.0),   # right-aligned, above source → left and below
+                       angle=90)
+
+        # ── horizontal lines (headway — same distance, different time) ───────
+        #
+        # hway_f: other vehicle passed this distance earlier → line goes LEFT
+        #         label: left of and above source point
+        # hway_b: other vehicle passed this distance later   → line goes RIGHT
+        #         label: right of and below source point
+
+        hf = _finite(hway_f)
+        if hf is not None and hf > 0:
+            x_end = veh_time - hf           # earlier time = left
+            _add_line(veh_time, veh_dist, x_end, veh_dist)
+            _add_label(veh_time, veh_dist,
+                       f"{hf:.2f} s",
+                       anchor=(1.0, 1.0))   # right-aligned → sits left of point, above
+
+        hb = _finite(hway_b)
+        if hb is not None and hb > 0:
+            x_end = veh_time + hb           # later time = right
+            _add_line(veh_time, veh_dist, x_end, veh_dist)
+            _add_label(veh_time, veh_dist,
+                       f"{hb:.2f} s",
+                       anchor=(0.0, 0.0))   # left-aligned → sits right of point, below
+
+        logger.debug(
+            f"Drew GH overlay for veh {veh_id} at t={veh_time:.2f}: "
+            f"gap_b={gb}, gap_f={gf}, hway_b={hb}, hway_f={hf}"
+        )

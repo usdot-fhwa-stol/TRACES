@@ -120,6 +120,74 @@ class CustomViewBox(pg.ViewBox):
             # Calculate how much we moved and how long the press was
             move_distance = (ev.scenePos() - self._press_pos).manhattanLength()
             press_duration = time.time() - self._press_time
+
+            # ── gap/headway click handling ────────────────────────────────
+            if self.parent_widget._gh_mode_enabled:
+                if move_distance < 5 and press_duration < 0.5:
+                    mouse_point = self.mapSceneToView(ev.scenePos())
+                    mx, my = mouse_point.x(), mouse_point.y()
+                    clicked_veh = self._find_clicked_vehicle(mx, my)
+
+                    if clicked_veh is not None:
+                        # Find the exact (veh_time, veh_dist) for this vehicle
+                        series   = self.parent_widget._series.get(clicked_veh)
+                        time_tol = 0.05
+                        veh_time = veh_dist = None
+
+                        if series is not None:
+                            mask = ((series["veh_time"] >= mx - time_tol) &
+                                    (series["veh_time"] <= mx + time_tol))
+                            x_f = series["veh_time"][mask]
+                            y_f = series["veh_dist_trav"][mask]
+                            if len(x_f) > 0:
+                                idx      = int(np.argmin(np.abs(y_f - my)))
+                                veh_time = float(x_f[idx])
+                                veh_dist = float(y_f[idx])
+
+                        if veh_time is not None:
+                            locked = self.parent_widget._gh_locked_point
+                            new_pt = (clicked_veh, veh_time)
+
+                            if locked == new_pt:
+                                # Same point clicked — unlock
+                                self.parent_widget._gh_locked_point = None
+                                self.parent_widget._clear_gh_overlay()
+                                self.parent_widget._last_queried_point = None
+                                logger.debug(f"GH unlocked point {new_pt}")
+                            else:
+                                # Different (or no) point — lock this one
+                                self.parent_widget._gh_locked_point = new_pt
+                                self.parent_widget._last_queried_point = None
+
+                                try:
+                                    cursor = self.parent_widget._db_connection.cursor()
+                                    cursor.execute("""
+                                        SELECT gap_b, gap_f, hway_b, hway_f
+                                        FROM   events
+                                        WHERE  event_id = ? AND veh_id = ?
+                                               AND veh_time = ?
+                                    """, (self.parent_widget._current_event_id,
+                                          clicked_veh, veh_time))
+                                    row = cursor.fetchone()
+                                except Exception as e:
+                                    logger.error(f"GH lock query error: {e}")
+                                    row = None
+
+                                if row:
+                                    self.parent_widget._draw_gh_overlay(
+                                        clicked_veh, veh_time, veh_dist, *row
+                                    )
+                                    self.parent_widget._last_queried_point = (
+                                        clicked_veh, veh_time,
+                                        self.parent_widget._current_event_id
+                                    )
+                                    logger.debug(f"GH locked point {new_pt}")
+
+                self._press_pos   = None
+                self._press_time  = None
+                self._is_selecting = False
+                ev.accept()
+                return
             
             if self._is_selecting:
                 # Complete selection box
