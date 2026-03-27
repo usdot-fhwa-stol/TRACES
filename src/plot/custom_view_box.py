@@ -151,11 +151,13 @@ class CustomViewBox(pg.ViewBox):
                             if locked == new_pt:
                                 # Same point clicked — unlock
                                 self.parent_widget._gh_locked_point = None
-                                self.parent_widget._clear_gh_overlay()
+                                self.parent_widget._clear_gh_locked()
                                 self.parent_widget._last_queried_point = None
                                 logger.debug(f"GH unlocked point {new_pt}")
                             else:
-                                # Different (or no) point — lock this one
+                                # Different (or no) point — lock this one,
+                                # clearing any previous lock first
+                                self.parent_widget._clear_gh_locked()
                                 self.parent_widget._gh_locked_point = new_pt
                                 self.parent_widget._last_queried_point = None
 
@@ -175,7 +177,8 @@ class CustomViewBox(pg.ViewBox):
 
                                 if row:
                                     self.parent_widget._draw_gh_overlay(
-                                        clicked_veh, veh_time, veh_dist, *row
+                                        clicked_veh, veh_time, veh_dist, *row,
+                                        target_list=self.parent_widget._gh_locked_items
                                     )
                                     self.parent_widget._last_queried_point = (
                                         clicked_veh, veh_time,
@@ -188,6 +191,7 @@ class CustomViewBox(pg.ViewBox):
                 self._is_selecting = False
                 ev.accept()
                 return
+            # ── end gap/headway block ─────────────────────────────────────
             
             if self._is_selecting:
                 # Complete selection box

@@ -16,6 +16,117 @@ from gui.toggle_switch import ToggleSwitch
 # Set up logger
 logger = logging.getLogger(__name__)
 
+def _interp_at(
+    seg_meta: list[tuple[int, int, float, float]],
+    x_arr:    np.ndarray,
+    y_arr:    np.ndarray,
+    x_query:  float,
+) -> float:
+    """Linearly interpolate y at x_query using pre-built segment metadata.
+
+    Args:
+        seg_meta : list of (start, end_exclusive, seg_min, seg_max) tuples.
+        x_arr    : sorted x values (e.g. veh_time).
+        y_arr    : corresponding y values (e.g. veh_dist_trav).
+        x_query  : value to interpolate at.
+
+    Returns:
+        y_interpolated, or nan if x_query is outside every segment.
+    """
+    for s, e, seg_min, seg_max in seg_meta:
+        if x_query < seg_min:
+            break
+        if x_query > seg_max:
+            continue
+
+        xs  = x_arr[s:e]
+        idx = int(np.searchsorted(xs, x_query, side="right")) - 1
+        idx = max(0, min(idx, len(xs) - 2))
+
+        x0, x1 = xs[idx], xs[idx + 1]
+        dx = x1 - x0
+        if dx == 0.0:
+            return float(y_arr[s + idx])
+
+        t = (x_query - x0) / dx
+        return float(y_arr[s + idx] * (1.0 - t) + y_arr[s + idx + 1] * t)
+
+    return float("nan")
+
+
+def _interp_time_at_dist(
+    seg_meta_d: list[tuple[int, int, float, float]],
+    d_arr:      np.ndarray,
+    t_arr:      np.ndarray,
+    subj_dist:  float,
+    before:     float | None = None,
+    after:      float | None = None,
+) -> float:
+    """Find the time at which a vehicle crosses subj_dist, with an optional
+    time-window constraint to separate lane-change ambiguity.
+
+    Iterates all segments (a vehicle may cross the same distance more than
+    once across different lane passages) and returns the crossing time that
+    satisfies the time constraint and is closest to the boundary:
+
+        before : crossing must have occurred at time <= before  (forward headway)
+        after  : crossing must occur at time >= after           (backward headway)
+
+    Returns the best qualifying crossing time, or nan if none found.
+
+    Args:
+        seg_meta_d : segment metadata indexed by distance.
+        d_arr      : distance array (generally monotone within each segment).
+        t_arr      : time array (sorted).
+        subj_dist  : distance value to find a crossing for.
+        before     : upper time bound (forward headway constraint).
+        after      : lower time bound (backward headway constraint).
+
+    Returns:
+        Best crossing time as a float, or nan.
+    """
+    best = float("nan")
+    best_gap = np.inf   # how close the crossing is to the time boundary
+
+    for s, e, dmin, dmax in seg_meta_d:
+        if subj_dist < dmin or subj_dist > dmax:
+            continue
+
+        d_slice = d_arr[s:e]
+        t_slice = t_arr[s:e]
+
+        # searchsorted on the distance slice to bracket the crossing
+        idx = int(np.searchsorted(d_slice, subj_dist, side="right")) - 1
+        idx = max(0, min(idx, len(d_slice) - 2))
+
+        d0, d1 = d_slice[idx], d_slice[idx + 1]
+        dd = d1 - d0
+        if dd == 0.0:
+            t_cross = float(t_slice[idx])
+        else:
+            frac    = (subj_dist - d0) / dd
+            t_cross = float(t_slice[idx] * (1.0 - frac) + t_slice[idx + 1] * frac)
+
+        if not np.isfinite(t_cross):
+            continue
+
+        if before is not None:
+            if t_cross > before:
+                continue
+            gap = before - t_cross      # smaller = closer to subj_time
+        elif after is not None:
+            if t_cross < after:
+                continue
+            gap = t_cross - after
+        else:
+            gap = 0.0
+
+        if gap < best_gap:
+            best_gap = gap
+            best     = t_cross
+
+    return best
+
 class TimeSpacePlotWidget(QWidget):
     """Widget for displaying time-space trajectory plots with interactive controls.
     
@@ -55,6 +166,8 @@ class TimeSpacePlotWidget(QWidget):
         '#ffffff', '#ffffff', '#ffffff'
     ]
 
+    _SERIES_SEG_THRESHOLD = 0.3   # seconds; max intra-segment time gap
+
     def __init__(self, parent=None):
         """Initialize the TimeSpacePlotWidget.
         
@@ -82,9 +195,10 @@ class TimeSpacePlotWidget(QWidget):
         self._last_mouse_move_time = 0.0
         self._lane_ids = []
         self._veh_ids = []
-        self._gh_mode_enabled   = False
-        self._gh_locked_point   = None   # (veh_id, veh_time) | None
-        self._gh_overlay_items  = []     # pg items currently on the plot
+        self._gh_mode_enabled       = False
+        self._gh_locked_point       = None   # (veh_id, veh_time) | None
+        self._gh_overlay_items      = []     # transient hover items
+        self._gh_locked_items       = []     # persistent locked-point items
 
         logger.debug("TimeSpacePlotWidget initialized")
         
@@ -214,7 +328,60 @@ class TimeSpacePlotWidget(QWidget):
             logger.debug("Settings dialog accepted")
         else:
             logger.debug("Settings dialog cancelled")
-            
+
+    def _build_series_segments(self, veh_id: int) -> None:
+        """Build and cache segment metadata for a vehicle's time and distance arrays.
+
+        Segments are contiguous runs where the time gap between consecutive
+        points is less than _SERIES_SEG_THRESHOLD seconds.  Two metadata
+        lists are stored on the series dict:
+
+            'seg_meta_t'  — segments indexed by veh_time   (for gap lookup)
+            'seg_meta_d'  — segments indexed by veh_dist_trav (for headway lookup)
+
+        Each entry is (start, end_exclusive, range_min, range_max).
+
+        Args:
+            veh_id: Key into self._series.
+        """
+        series = self._series.get(veh_id)
+        if series is None:
+            return
+
+        t = series['veh_time']
+        d = series['veh_dist_trav']
+
+        if len(t) < 2:
+            series['seg_meta_t'] = []
+            series['seg_meta_d'] = []
+            return
+
+        # ── segment boundaries on time ────────────────────────────────────
+        diffs  = np.diff(t)
+        breaks = np.where(diffs > self._SERIES_SEG_THRESHOLD)[0] + 1
+        starts = np.concatenate(([0], breaks))
+        ends   = np.concatenate((breaks, [len(t)]))
+
+        seg_pairs = [(int(s), int(e)) for s, e in zip(starts, ends) if e - s >= 2]
+
+        # meta_t: ranges are over time (t is sorted)
+        series['seg_meta_t'] = [
+            (s, e, float(t[s]), float(t[e - 1]))
+            for s, e in seg_pairs
+        ]
+
+        # meta_d: ranges are over distance — distance is generally monotone
+        # within a lane but may not be perfectly sorted, so use min/max.
+        series['seg_meta_d'] = [
+            (s, e, float(np.min(d[s:e])), float(np.max(d[s:e])))
+            for s, e in seg_pairs
+        ]
+
+        logger.debug(
+            f"Built {len(seg_pairs)} segment(s) for veh {veh_id} "
+            f"({len(t)} points, threshold={self._SERIES_SEG_THRESHOLD} s)"
+        )
+
     def _apply_settings(self, event_id: int, time_min: float, time_max: float, 
                        dist_min: float, dist_max: float, event_summary: dict):
         """Apply settings from the settings dialog.
@@ -346,6 +513,7 @@ class TimeSpacePlotWidget(QWidget):
         series['veh_time'] = times
         series['veh_dist_trav'] = distances
         series['veh_speed'] = speeds               # <── always cached
+        self._build_series_segments(veh_id) # series segments for gap/headway
 
         if len(times) == 0:
             return
@@ -493,16 +661,20 @@ class TimeSpacePlotWidget(QWidget):
 
         # ── gap/headway mode ──────────────────────────────────────────────
         if self._gh_mode_enabled:
-            # If a point is locked, always show its overlay; ignore hover.
-            if self._gh_locked_point is not None:
-                return
-
-            # Hover: show overlay for closest point when within tolerance
+            # Hover: show transient overlay for closest unlocked point.
+            # If the hovered point IS the locked point, skip the hover draw
+            # (the locked lines already cover it) but still clear any stale
+            # hover lines left from a previously hovered point.
             if closest_data and min_dist < pixel_tolerance_show:
                 veh_id, _, _, veh_time, veh_dist = closest_data
                 current_point = (veh_id, veh_time, self._current_event_id)
+                is_locked = (self._gh_locked_point == (veh_id, veh_time))
 
-                if self._last_queried_point != current_point:
+                if is_locked:
+                    # Hovering the locked point — clear stale hover lines only
+                    self._clear_gh_overlay()
+                    self._last_queried_point = current_point
+                elif self._last_queried_point != current_point:
                     try:
                         cursor = self._db_connection.cursor()
                         cursor.execute("""
@@ -512,23 +684,21 @@ class TimeSpacePlotWidget(QWidget):
                         """, (self._current_event_id, veh_id, veh_time))
                         row = cursor.fetchone()
                     except Exception as e:
-                        logger.error(f"GH query error: {e}")
+                        logger.error(f"GH hover query error: {e}")
                         return
 
+                    self._clear_gh_overlay()
                     if row:
-                        self._draw_gh_overlay(veh_id, veh_time, veh_dist, *row)
+                        self._draw_gh_overlay(veh_id, veh_time, veh_dist, *row,
+                                              target_list=self._gh_overlay_items)
                         self._last_queried_point = current_point
                     else:
-                        self._clear_gh_overlay()
                         self._last_queried_point = None
 
             elif min_dist > pixel_tolerance_hide or not closest_data:
-                # Mouse moved away — clear transient overlay
-                if self._gh_locked_point is None:
-                    self._clear_gh_overlay()
-                    self._last_queried_point = None
+                self._clear_gh_overlay()
+                self._last_queried_point = None
 
-            # Hide the normal tooltip in this mode
             self._tooltip.hide()
             return
 
@@ -679,10 +849,16 @@ class TimeSpacePlotWidget(QWidget):
         return [pen] * n, [brush] * n
 
     def _clear_gh_overlay(self):
-        """Remove every gap/headway line and label from the plot."""
+        """Remove transient hover gap/headway lines and labels from the plot."""
         for item in self._gh_overlay_items:
             self._scatter_plot.removeItem(item)
         self._gh_overlay_items.clear()
+
+    def _clear_gh_locked(self):
+        """Remove persistent locked-point gap/headway lines and labels from the plot."""
+        for item in self._gh_locked_items:
+            self._scatter_plot.removeItem(item)
+        self._gh_locked_items.clear()
 
     def _on_gap_headway_toggled(self, checked: bool):
         """Enable or disable gap/headway overlay mode.
@@ -699,111 +875,235 @@ class TimeSpacePlotWidget(QWidget):
         self._gh_mode_enabled = checked
         if not checked:
             self._clear_gh_overlay()
+            self._clear_gh_locked()
             self._gh_locked_point = None
             self._tooltip.hide()
         logger.debug(f"Gap/headway mode toggled: {checked}")
 
     def _draw_gh_overlay(self, veh_id: int, veh_time: float, veh_dist: float,
-                         gap_b, gap_f, hway_b, hway_f):
-        """Draw gap and headway lines + labels for the given point.
+                             gap_b, gap_f, hway_b, hway_f, *,
+                             target_list: list):
+            """Draw gap and headway lines + labels for the given point.
+    
+            Items are appended to `target_list` (either _gh_overlay_items for
+            transient hover lines or _gh_locked_items for persistent locked lines)
+            so the two sets can be cleared independently.  The caller is
+            responsible for clearing the appropriate list before calling.
+    
+            Axes convention (same as the plot):
+                x-axis → time (s)
+                y-axis → distance (m)
+    
+            gap_b / gap_f  are distances (m) → drawn as vertical segments
+                            (same time, ± distance).
+            hway_b / hway_f are times   (s) → drawn as horizontal segments
+                            (same distance, ± time).
+    
+            Args:
+                veh_id      : vehicle identifier (used only for logging).
+                veh_time    : x-coordinate of the source point (s).
+                veh_dist    : y-coordinate of the source point (m).
+                gap_b, gap_f   : backward/forward spatial gap (m); may be None/NaN.
+                hway_b, hway_f : backward/forward time headway (s); may be None/NaN.
+                target_list    : list to append created pg items to.
+            """
+            import math
+    
+            LINE_PEN    = pg.mkPen(color=(120, 120, 120), width=3,
+                                   style=Qt.PenStyle.SolidLine)
+            LABEL_COLOR = (80, 80, 80)
+    
+            def _finite(v):
+                """Return float if v is a finite number, else None."""
+                try:
+                    f = float(v)
+                    return f if math.isfinite(f) else None
+                except (TypeError, ValueError):
+                    return None
+    
+            def _add_line(x0, y0, x1, y1):
+                item = pg.PlotDataItem([x0, x1], [y0, y1], pen=LINE_PEN)
+                self._scatter_plot.addItem(item)
+                target_list.append(item)
+    
+            def _add_label(x, y, text, anchor, angle=0):
+                item = pg.TextItem(text=text, color=LABEL_COLOR, anchor=anchor,
+                                   angle=angle)
+                item.setPos(x, y)
+                item.setFont(pg.QtGui.QFont("Arial", 8))
+                self._scatter_plot.addItem(item)
+                target_list.append(item)
+    
+            # ── vertical lines (gap — same time, different distance) ─────────────
+            #
+            # gap_f: other vehicle is at higher dist at same time → line goes UP
+            #        label: rotated 90°, right of and above source point
+            # gap_b: other vehicle is at lower dist at same time  → line goes DOWN
+            #        label: rotated 90°, left of and below source point
+    
+            gf = _finite(gap_f)
+            if gf is not None and gf > 0:
+                y_end = veh_dist + gf
+                _add_line(veh_time, veh_dist, veh_time, y_end)
+                _add_label(veh_time, veh_dist,
+                           f"{gf:.2f} m",
+                           anchor=(0.0, 0.0),
+                           angle=90)
+    
+            gb = _finite(gap_b)
+            if gb is not None and gb > 0:
+                y_end = veh_dist - gb
+                _add_line(veh_time, veh_dist, veh_time, y_end)
+                _add_label(veh_time, veh_dist,
+                           f"{gb:.2f} m",
+                           anchor=(1.0, 1.0),
+                           angle=90)
+    
+            # ── horizontal lines (headway — same distance, different time) ───────
+            #
+            # hway_f: other vehicle passed this distance earlier → line goes LEFT
+            #         label: left of and above source point
+            # hway_b: other vehicle passed this distance later   → line goes RIGHT
+            #         label: right of and below source point
+    
+            hf = _finite(hway_f)
+            if hf is not None and hf > 0:
+                x_end = veh_time - hf
+                _add_line(veh_time, veh_dist, x_end, veh_dist)
+                _add_label(veh_time, veh_dist,
+                           f"{hf:.2f} s",
+                           anchor=(1.0, 1.0))
+    
+            hb = _finite(hway_b)
+            if hb is not None and hb > 0:
+                x_end = veh_time + hb
+                _add_line(veh_time, veh_dist, x_end, veh_dist)
+                _add_label(veh_time, veh_dist,
+                           f"{hb:.2f} s",
+                           anchor=(0.0, 0.0))
+    
+            logger.debug(
+                f"Drew GH overlay for veh {veh_id} at t={veh_time:.2f}: "
+                f"gap_b={gb}, gap_f={gf}, hway_b={hb}, hway_f={hf}"
+            )
 
-        Axes convention (same as the plot):
-            x-axis → time (s)
-            y-axis → distance (m)
+    def _find_gap_headway(
+        self,
+        subj_time:   float,
+        subj_series: dict,
+    ) -> tuple[float, float, float, float]:
+        """Compute gap and time-headway at a single subject-vehicle point.
 
-        gap_b / gap_f  are distances (m) → drawn as vertical segments
-                        (same time, ± distance).
-        hway_b / hway_f are times   (s) → drawn as horizontal segments
-                        (same distance, ± time).
+        Definitions (matching the import-time computation):
+            gap_f   — forward  spatial gap  (m): distance to the nearest vehicle
+                      ahead  (higher dist) at the same time.  Positive.
+            gap_b   — backward spatial gap  (m): distance to the nearest vehicle
+                      behind (lower  dist) at the same time.  Positive.
+            hway_f  — forward  time headway (s): time since the nearest vehicle
+                      ahead crossed the subject's current distance.  Positive.
+            hway_b  — backward time headway (s): time until the nearest vehicle
+                      behind crosses the subject's current distance.  Positive.
 
-        All items are added to _gh_overlay_items so they can be removed
-        atomically before the next redraw.
+        Gap and headway are computed independently across all other series so
+        that a lane-change by another vehicle does not corrupt either result.
+        The gap search finds the closest vehicle ahead/behind at subj_time.
+        The headway search finds the most recent crossing of subj_dist before
+        subj_time (forward) and the next crossing after subj_time (backward),
+        across all other series regardless of which vehicle won the gap search.
 
         Args:
-            veh_id   : vehicle identifier (used only for logging).
-            veh_time : x-coordinate of the source point (s).
-            veh_dist : y-coordinate of the source point (m).
-            gap_b, gap_f   : backward/forward spatial gap (m); may be None/NaN.
-            hway_b, hway_f : backward/forward time headway (s); may be None/NaN.
+            subj_time   : veh_time of the clicked/hovered point (seconds).
+            subj_series : the _series dict entry for the subject vehicle.
+
+        Returns:
+            (gap_f, hway_f, gap_b, hway_b) — NaN for any value that cannot
+            be determined from the loaded series data.
         """
-        self._clear_gh_overlay()
+        t_subj = subj_series['veh_time']
+        d_subj = subj_series['veh_dist_trav']
+        subj_id = subj_series['veh_id']
 
-        import math
+        # ── 1.  Subject distance at subj_time ────────────────────────────
+        meta_t_subj = subj_series.get('seg_meta_t', [])
+        subj_dist = _interp_at(meta_t_subj, t_subj, d_subj, subj_time)
 
-        LINE_PEN   = pg.mkPen(color=(120, 120, 120), width=3,
-                              style=Qt.PenStyle.SolidLine)
-        LABEL_COLOR = (80, 80, 80)
+        if not np.isfinite(subj_dist):
+            return float("nan"), float("nan"), float("nan"), float("nan")
 
-        def _finite(v):
-            """Return float if v is a finite number, else None."""
-            try:
-                f = float(v)
-                return f if math.isfinite(f) else None
-            except (TypeError, ValueError):
-                return None
+        # ── 2.  Gap pass: interpolate every other series at subj_time ────
+        # Collect signed deltas so we can sort for the headway pass.
+        gap_candidates: list[tuple[float, dict]] = []   # (signed_delta, series)
 
-        def _add_line(x0, y0, x1, y1):
-            item = pg.PlotDataItem([x0, x1], [y0, y1], pen=LINE_PEN)
-            self._scatter_plot.addItem(item)
-            self._gh_overlay_items.append(item)
+        for other in self._series.values():
+            if other['veh_id'] == subj_id:
+                continue
+            meta_t = other.get('seg_meta_t')
+            if not meta_t:
+                continue
+            d_other = _interp_at(meta_t, other['veh_time'], other['veh_dist_trav'],
+                                  subj_time)
+            if np.isfinite(d_other):
+                gap_candidates.append((d_other - subj_dist, other))
 
-        def _add_label(x, y, text, anchor, angle=0):
-            item = pg.TextItem(text=text, color=LABEL_COLOR, anchor=anchor,
-                               angle=angle)
-            item.setPos(x, y)
-            item.setFont(pg.QtGui.QFont("Arial", 8))
-            self._scatter_plot.addItem(item)
-            self._gh_overlay_items.append(item)
+        # Best gap values
+        fwd = [(delta, s) for delta, s in gap_candidates if delta >= 0]
+        bwd = [(delta, s) for delta, s in gap_candidates if delta <  0]
 
-        # ── vertical lines (gap — same time, different distance) ─────────────
-        #
-        # gap_f: other vehicle is at higher dist at same time → line goes UP
-        #        label: rotated 90°, right of and above source point
-        # gap_b: other vehicle is at lower dist at same time  → line goes DOWN
-        #        label: rotated 90°, left of and below source point
+        gap_f = min((d for d, _ in fwd), default=float("nan"))
+        gap_b = min((-d for d, _ in bwd), default=float("nan"))
 
-        gf = _finite(gap_f)
-        if gf is not None and gf > 0:
-            y_end = veh_dist + gf
-            _add_line(veh_time, veh_dist, veh_time, y_end)
-            _add_label(veh_time, veh_dist,
-                       f"{gf:.2f} m",
-                       anchor=(0.0, 0.0),   # left-aligned, below source → right and above
-                       angle=90)
+        # ── 3.  Headway pass: search series sorted by gap proximity ──────
+        # Starting from the closest vehicle in each direction means the first
+        # valid crossing sets a tight time bound that prunes later searches.
+        # Forward headway — sort ascending by gap delta (closest ahead first)
+        fwd_sorted = sorted(fwd, key=lambda x: x[0])
+        # Backward headway — sort ascending by abs gap delta (closest behind first)
+        bwd_sorted = sorted(bwd, key=lambda x: -x[0])
 
-        gb = _finite(gap_b)
-        if gb is not None and gb > 0:
-            y_end = veh_dist - gb
-            _add_line(veh_time, veh_dist, veh_time, y_end)
-            _add_label(veh_time, veh_dist,
-                       f"{gb:.2f} m",
-                       anchor=(1.0, 1.0),   # right-aligned, above source → left and below
-                       angle=90)
+        hway_f    = float("nan")
+        best_hf   = np.inf
 
-        # ── horizontal lines (headway — same distance, different time) ───────
-        #
-        # hway_f: other vehicle passed this distance earlier → line goes LEFT
-        #         label: left of and above source point
-        # hway_b: other vehicle passed this distance later   → line goes RIGHT
-        #         label: right of and below source point
+        for _, other in fwd_sorted:
+            d_o     = other['veh_dist_trav']
+            t_o     = other['veh_time']
+            meta_d  = other.get('seg_meta_d')
+            if not meta_d:
+                continue
+            t_cross = _interp_time_at_dist(
+                meta_d, d_o, t_o, subj_dist,
+                before=subj_time,
+            )
+            if np.isfinite(t_cross):
+                delta_hf = subj_time - t_cross
+                if delta_hf < best_hf:
+                    best_hf = delta_hf
+                    hway_f  = delta_hf
+                    # Any further series is at least as far ahead spatially;
+                    # their headway crossing cannot be more recent than this.
+                    break
 
-        hf = _finite(hway_f)
-        if hf is not None and hf > 0:
-            x_end = veh_time - hf           # earlier time = left
-            _add_line(veh_time, veh_dist, x_end, veh_dist)
-            _add_label(veh_time, veh_dist,
-                       f"{hf:.2f} s",
-                       anchor=(1.0, 1.0))   # right-aligned → sits left of point, above
+        hway_b    = float("nan")
+        best_hb   = np.inf
 
-        hb = _finite(hway_b)
-        if hb is not None and hb > 0:
-            x_end = veh_time + hb           # later time = right
-            _add_line(veh_time, veh_dist, x_end, veh_dist)
-            _add_label(veh_time, veh_dist,
-                       f"{hb:.2f} s",
-                       anchor=(0.0, 0.0))   # left-aligned → sits right of point, below
+        for _, other in bwd_sorted:
+            d_o     = other['veh_dist_trav']
+            t_o     = other['veh_time']
+            meta_d  = other.get('seg_meta_d')
+            if not meta_d:
+                continue
+            t_cross = _interp_time_at_dist(
+                meta_d, d_o, t_o, subj_dist,
+                after=subj_time,
+            )
+            if np.isfinite(t_cross):
+                delta_hb = t_cross - subj_time
+                if delta_hb < best_hb:
+                    best_hb = delta_hb
+                    hway_b  = delta_hb
+                    break
 
         logger.debug(
-            f"Drew GH overlay for veh {veh_id} at t={veh_time:.2f}: "
-            f"gap_b={gb}, gap_f={gf}, hway_b={hb}, hway_f={hf}"
+            f"_find_gap_headway veh={subj_id} t={subj_time:.3f}: "
+            f"gf={gap_f:.3f} hf={hway_f:.3f} gb={gap_b:.3f} hb={hway_b:.3f}"
         )
+        return gap_f, hway_f, gap_b, hway_b
