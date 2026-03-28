@@ -154,15 +154,12 @@ class CustomViewBox(pg.ViewBox):
                             else:
                                 # Lock this point — add to list
                                 locked_items_for_pt = []
-                                if self.parent_widget._last_gh_values is not None:
-                                    gap_f, gap_b, hway_f, hway_b = self.parent_widget._last_gh_values
-                                else:
-                                    gap_f, gap_b = self.parent_widget._find_gap(
-                                        clicked_veh, veh_time, veh_dist
-                                    )
-                                    hway_f, hway_b = self.parent_widget._find_hway(
-                                        clicked_veh, veh_time, veh_dist
-                                    )
+                                gap_f, gap_b = self.parent_widget._find_gap(
+                                    clicked_veh, veh_time, veh_dist
+                                )
+                                hway_f, hway_b = self.parent_widget._find_hway(
+                                    clicked_veh, veh_time, veh_dist
+                                )
                                 self.parent_widget._draw_gh_overlay(
                                     clicked_veh, veh_time, veh_dist,
                                     gap_b, gap_f, hway_b, hway_f,
@@ -202,12 +199,15 @@ class CustomViewBox(pg.ViewBox):
                         if np.any(mask):
                             selected_vehicles.add(series['veh_id'])
                 
-                # Update selected_series
-                self.parent_widget._selected_series.update(selected_vehicles)
-                # Clear selected_series if all vehicles are selected
-                if len(self.parent_widget._selected_series) == len(self.parent_widget._series):
-                    self.parent_widget._selected_series.clear()
-                
+                # Update selected_series: add or remove based on Shift key
+                if ev.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+                    self.parent_widget._selected_series -= selected_vehicles
+                else:
+                    self.parent_widget._selected_series.update(selected_vehicles)
+                    # Clear selected_series if all vehicles are selected
+                    if len(self.parent_widget._selected_series) == len(self.parent_widget._series):
+                        self.parent_widget._selected_series.clear()
+
                 # Update plot colors
                 self.parent_widget._update_plot_colors()
                 
