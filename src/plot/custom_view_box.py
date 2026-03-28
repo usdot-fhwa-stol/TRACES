@@ -154,10 +154,7 @@ class CustomViewBox(pg.ViewBox):
                             else:
                                 # Lock this point — add to list
                                 locked_items_for_pt = []
-                                gap_f, gap_b = self.parent_widget._find_gap(
-                                    clicked_veh, veh_time, veh_dist
-                                )
-                                hway_f, hway_b = self.parent_widget._find_hway(
+                                gap_f, gap_b, hway_f, hway_b = self.parent_widget._find_gap_hway(
                                     clicked_veh, veh_time, veh_dist
                                 )
                                 self.parent_widget._draw_gh_overlay(
