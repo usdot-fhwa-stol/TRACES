@@ -34,7 +34,7 @@ jobs:
           src/trajectory_tools.py
 
     - name: Install NSIS
-      run: choco install nsis --yes
+      run: choco install nsis --yes --no-progress
 
     - name: Write NSIS script
       shell: powershell
@@ -113,7 +113,11 @@ jobs:
         $nsis | Out-File -FilePath installer.nsi -Encoding utf8
 
     - name: Build installer
-      run: makensis installer.nsi
+      shell: powershell
+      run: |
+        $makensis = "C:\Program Files (x86)\NSIS\makensis.exe"
+        & $makensis installer.nsi
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
     - name: Upload portable build
       uses: actions/upload-artifact@v4
