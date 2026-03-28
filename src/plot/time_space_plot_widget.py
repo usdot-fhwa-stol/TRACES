@@ -1,3 +1,5 @@
+import sys
+import math
 import logging
 import time
 import numpy as np
@@ -15,117 +17,6 @@ from gui.toggle_switch import ToggleSwitch
 
 # Set up logger
 logger = logging.getLogger(__name__)
-
-def _interp_at(
-    seg_meta: list[tuple[int, int, float, float]],
-    x_arr:    np.ndarray,
-    y_arr:    np.ndarray,
-    x_query:  float,
-) -> float:
-    """Linearly interpolate y at x_query using pre-built segment metadata.
-
-    Args:
-        seg_meta : list of (start, end_exclusive, seg_min, seg_max) tuples.
-        x_arr    : sorted x values (e.g. veh_time).
-        y_arr    : corresponding y values (e.g. veh_dist_trav).
-        x_query  : value to interpolate at.
-
-    Returns:
-        y_interpolated, or nan if x_query is outside every segment.
-    """
-    for s, e, seg_min, seg_max in seg_meta:
-        if x_query < seg_min:
-            break
-        if x_query > seg_max:
-            continue
-
-        xs  = x_arr[s:e]
-        idx = int(np.searchsorted(xs, x_query, side="right")) - 1
-        idx = max(0, min(idx, len(xs) - 2))
-
-        x0, x1 = xs[idx], xs[idx + 1]
-        dx = x1 - x0
-        if dx == 0.0:
-            return float(y_arr[s + idx])
-
-        t = (x_query - x0) / dx
-        return float(y_arr[s + idx] * (1.0 - t) + y_arr[s + idx + 1] * t)
-
-    return float("nan")
-
-
-def _interp_time_at_dist(
-    seg_meta_d: list[tuple[int, int, float, float]],
-    d_arr:      np.ndarray,
-    t_arr:      np.ndarray,
-    subj_dist:  float,
-    before:     float | None = None,
-    after:      float | None = None,
-) -> float:
-    """Find the time at which a vehicle crosses subj_dist, with an optional
-    time-window constraint to separate lane-change ambiguity.
-
-    Iterates all segments (a vehicle may cross the same distance more than
-    once across different lane passages) and returns the crossing time that
-    satisfies the time constraint and is closest to the boundary:
-
-        before : crossing must have occurred at time <= before  (forward headway)
-        after  : crossing must occur at time >= after           (backward headway)
-
-    Returns the best qualifying crossing time, or nan if none found.
-
-    Args:
-        seg_meta_d : segment metadata indexed by distance.
-        d_arr      : distance array (generally monotone within each segment).
-        t_arr      : time array (sorted).
-        subj_dist  : distance value to find a crossing for.
-        before     : upper time bound (forward headway constraint).
-        after      : lower time bound (backward headway constraint).
-
-    Returns:
-        Best crossing time as a float, or nan.
-    """
-    best = float("nan")
-    best_gap = np.inf   # how close the crossing is to the time boundary
-
-    for s, e, dmin, dmax in seg_meta_d:
-        if subj_dist < dmin or subj_dist > dmax:
-            continue
-
-        d_slice = d_arr[s:e]
-        t_slice = t_arr[s:e]
-
-        # searchsorted on the distance slice to bracket the crossing
-        idx = int(np.searchsorted(d_slice, subj_dist, side="right")) - 1
-        idx = max(0, min(idx, len(d_slice) - 2))
-
-        d0, d1 = d_slice[idx], d_slice[idx + 1]
-        dd = d1 - d0
-        if dd == 0.0:
-            t_cross = float(t_slice[idx])
-        else:
-            frac    = (subj_dist - d0) / dd
-            t_cross = float(t_slice[idx] * (1.0 - frac) + t_slice[idx + 1] * frac)
-
-        if not np.isfinite(t_cross):
-            continue
-
-        if before is not None:
-            if t_cross > before:
-                continue
-            gap = before - t_cross      # smaller = closer to subj_time
-        elif after is not None:
-            if t_cross < after:
-                continue
-            gap = t_cross - after
-        else:
-            gap = 0.0
-
-        if gap < best_gap:
-            best_gap = gap
-            best     = t_cross
-
-    return best
 
 class TimeSpacePlotWidget(QWidget):
     """Widget for displaying time-space trajectory plots with interactive controls.
@@ -190,15 +81,15 @@ class TimeSpacePlotWidget(QWidget):
         self._series = None
         self._tooltip = None
         self._last_queried_point = None
+        self._last_gh_values = None  # cached (gap_f, gap_b) from hover
         self._selected_series = set()
         self._speed_gradient_enabled = False
         self._last_mouse_move_time = 0.0
         self._lane_ids = []
         self._veh_ids = []
         self._gh_mode_enabled       = False
-        self._gh_locked_point       = None   # (veh_id, veh_time) | None
         self._gh_overlay_items      = []     # transient hover items
-        self._gh_locked_items       = []     # persistent locked-point items
+        self._gh_locked_items       = {}     # dict: (veh_id, veh_time) -> list[pg items]
 
         logger.debug("TimeSpacePlotWidget initialized")
         
@@ -252,7 +143,7 @@ class TimeSpacePlotWidget(QWidget):
         self._scatter_plot.getViewBox().setMouseEnabled(x=False, y=False)
         
         mid_layout.addWidget(self._scatter_plot, stretch=1)
-        
+
         # Time controls below plot
         time_layout = QHBoxLayout()
         
@@ -328,59 +219,6 @@ class TimeSpacePlotWidget(QWidget):
             logger.debug("Settings dialog accepted")
         else:
             logger.debug("Settings dialog cancelled")
-
-    def _build_series_segments(self, veh_id: int) -> None:
-        """Build and cache segment metadata for a vehicle's time and distance arrays.
-
-        Segments are contiguous runs where the time gap between consecutive
-        points is less than _SERIES_SEG_THRESHOLD seconds.  Two metadata
-        lists are stored on the series dict:
-
-            'seg_meta_t'  — segments indexed by veh_time   (for gap lookup)
-            'seg_meta_d'  — segments indexed by veh_dist_trav (for headway lookup)
-
-        Each entry is (start, end_exclusive, range_min, range_max).
-
-        Args:
-            veh_id: Key into self._series.
-        """
-        series = self._series.get(veh_id)
-        if series is None:
-            return
-
-        t = series['veh_time']
-        d = series['veh_dist_trav']
-
-        if len(t) < 2:
-            series['seg_meta_t'] = []
-            series['seg_meta_d'] = []
-            return
-
-        # ── segment boundaries on time ────────────────────────────────────
-        diffs  = np.diff(t)
-        breaks = np.where(diffs > self._SERIES_SEG_THRESHOLD)[0] + 1
-        starts = np.concatenate(([0], breaks))
-        ends   = np.concatenate((breaks, [len(t)]))
-
-        seg_pairs = [(int(s), int(e)) for s, e in zip(starts, ends) if e - s >= 2]
-
-        # meta_t: ranges are over time (t is sorted)
-        series['seg_meta_t'] = [
-            (s, e, float(t[s]), float(t[e - 1]))
-            for s, e in seg_pairs
-        ]
-
-        # meta_d: ranges are over distance — distance is generally monotone
-        # within a lane but may not be perfectly sorted, so use min/max.
-        series['seg_meta_d'] = [
-            (s, e, float(np.min(d[s:e])), float(np.max(d[s:e])))
-            for s, e in seg_pairs
-        ]
-
-        logger.debug(
-            f"Built {len(seg_pairs)} segment(s) for veh {veh_id} "
-            f"({len(t)} points, threshold={self._SERIES_SEG_THRESHOLD} s)"
-        )
 
     def _apply_settings(self, event_id: int, time_min: float, time_max: float, 
                        dist_min: float, dist_max: float, event_summary: dict):
@@ -512,8 +350,7 @@ class TimeSpacePlotWidget(QWidget):
         series = self._series[veh_id]
         series['veh_time'] = times
         series['veh_dist_trav'] = distances
-        series['veh_speed'] = speeds               # <── always cached
-        self._build_series_segments(veh_id) # series segments for gap/headway
+        series['veh_speed'] = speeds # cached for speed gradient
 
         if len(times) == 0:
             return
@@ -661,48 +498,39 @@ class TimeSpacePlotWidget(QWidget):
 
         # ── gap/headway mode ──────────────────────────────────────────────
         if self._gh_mode_enabled:
-            # Hover: show transient overlay for closest unlocked point.
-            # If the hovered point IS the locked point, skip the hover draw
-            # (the locked lines already cover it) but still clear any stale
-            # hover lines left from a previously hovered point.
+
             if closest_data and min_dist < pixel_tolerance_show:
                 veh_id, _, _, veh_time, veh_dist = closest_data
                 current_point = (veh_id, veh_time, self._current_event_id)
-                is_locked = (self._gh_locked_point == (veh_id, veh_time))
+                pt_key = (veh_id, veh_time)
+                is_locked = pt_key in self._gh_locked_items
 
                 if is_locked:
-                    # Hovering the locked point — clear stale hover lines only
-                    self._clear_gh_overlay()
+                    # Hovering a locked point: clear transient overlay, leave reticle hidden
                     self._last_queried_point = current_point
-                elif self._last_queried_point != current_point:
-                    try:
-                        cursor = self._db_connection.cursor()
-                        cursor.execute("""
-                            SELECT gap_b, gap_f, hway_b, hway_f
-                            FROM   events
-                            WHERE  event_id = ? AND veh_id = ? AND veh_time = ?
-                        """, (self._current_event_id, veh_id, veh_time))
-                        row = cursor.fetchone()
-                    except Exception as e:
-                        logger.error(f"GH hover query error: {e}")
-                        return
+                else:
 
-                    self._clear_gh_overlay()
-                    if row:
-                        self._draw_gh_overlay(veh_id, veh_time, veh_dist, *row,
-                                              target_list=self._gh_overlay_items)
+                    if self._last_queried_point != current_point:
+                        gap_f, gap_b = self._find_gap(veh_id, veh_time, veh_dist)
+                        hway_f, hway_b = self._find_hway(veh_id, veh_time, veh_dist)
+                        self._last_gh_values = (gap_f, gap_b, hway_f, hway_b)
+                        self._clear_gh_overlay()
+                        self._draw_gh_overlay(
+                            veh_id, veh_time, veh_dist,
+                            gap_b, gap_f, hway_b, hway_f,
+                            target_list=self._gh_overlay_items
+                        )
                         self._last_queried_point = current_point
-                    else:
-                        self._last_queried_point = None
-
-            elif min_dist > pixel_tolerance_hide or not closest_data:
+            else:
+                # Mouse not near any point: clear transient overlay, reticle stays hidden
                 self._clear_gh_overlay()
                 self._last_queried_point = None
+                self._last_gh_values = None
 
             self._tooltip.hide()
             return
 
-        # ── normal tooltip mode (unchanged) ──────────────────────────────
+        # ── normal tooltip mode ──────────────────────────────
         if not hasattr(self, '_last_queried_point'):
             self._last_queried_point = None
 
@@ -762,10 +590,17 @@ class TimeSpacePlotWidget(QWidget):
     def keyPressEvent(self, event: QKeyEvent):
         """Handle key press events, clearing selection on Escape key."""
         if event.key() == Qt.Key.Key_Escape:
-            self._selected_series.clear()
-            self._update_plot_colors()
-            self._clear_selection_box()
-            logger.debug("Cleared selected series on Escape key")
+            if self._gh_mode_enabled and self._gh_locked_items:
+                # In GH mode: clear all locked points
+                self._clear_gh_all_locked()
+                self._last_queried_point = None
+                logger.debug("Cleared all GH locked points on Escape")
+            else:
+                # Normal mode: clear trajectory selection
+                self._selected_series.clear()
+                self._update_plot_colors()
+                self._clear_selection_box()
+                logger.debug("Cleared selected series on Escape key")
             event.accept()
         else:
             super().keyPressEvent(event)
@@ -854,11 +689,18 @@ class TimeSpacePlotWidget(QWidget):
             self._scatter_plot.removeItem(item)
         self._gh_overlay_items.clear()
 
-    def _clear_gh_locked(self):
-        """Remove persistent locked-point gap/headway lines and labels from the plot."""
-        for item in self._gh_locked_items:
-            self._scatter_plot.removeItem(item)
+    def _clear_gh_all_locked(self):
+        """Remove all persistent locked-point gap/headway lines."""
+        for items in self._gh_locked_items.values():
+            for item in items:
+                self._scatter_plot.removeItem(item)
         self._gh_locked_items.clear()
+    
+    def _clear_gh_locked_point(self, pt_key: tuple):
+        """Remove persistent lines for one locked point (veh_id, veh_time)."""
+        items = self._gh_locked_items.pop(pt_key, [])
+        for item in items:
+            self._scatter_plot.removeItem(item)
 
     def _on_gap_headway_toggled(self, checked: bool):
         """Enable or disable gap/headway overlay mode.
@@ -873,10 +715,12 @@ class TimeSpacePlotWidget(QWidget):
           - Normal selection behaviour is restored.
         """
         self._gh_mode_enabled = checked
+#        if checked:
+#            self._test_find_hway()
+    
         if not checked:
             self._clear_gh_overlay()
-            self._clear_gh_locked()
-            self._gh_locked_point = None
+            self._clear_gh_all_locked()        # clears entire dict
             self._tooltip.hide()
         logger.debug(f"Gap/headway mode toggled: {checked}")
 
@@ -907,8 +751,6 @@ class TimeSpacePlotWidget(QWidget):
                 hway_b, hway_f : backward/forward time headway (s); may be None/NaN.
                 target_list    : list to append created pg items to.
             """
-            import math
-    
             LINE_PEN    = pg.mkPen(color=(120, 120, 120), width=3,
                                    style=Qt.PenStyle.SolidLine)
             LABEL_COLOR = (80, 80, 80)
@@ -987,123 +829,543 @@ class TimeSpacePlotWidget(QWidget):
                 f"gap_b={gb}, gap_f={gf}, hway_b={hb}, hway_f={hf}"
             )
 
-    def _find_gap_headway(
-        self,
-        subj_time:   float,
-        subj_series: dict,
-    ) -> tuple[float, float, float, float]:
-        """Compute gap and time-headway at a single subject-vehicle point.
+    @staticmethod
+    def _find_hway_f(arr: np.ndarray, start_idx: int, search_val: float
+                     ) -> tuple[int, int, float]:
+        """Reverse-iterate from *start_idx* to find the forward headway offset.
 
-        Definitions (matching the import-time computation):
-            gap_f   — forward  spatial gap  (m): distance to the nearest vehicle
-                      ahead  (higher dist) at the same time.  Positive.
-            gap_b   — backward spatial gap  (m): distance to the nearest vehicle
-                      behind (lower  dist) at the same time.  Positive.
-            hway_f  — forward  time headway (s): time since the nearest vehicle
-                      ahead crossed the subject's current distance.  Positive.
-            hway_b  — backward time headway (s): time until the nearest vehicle
-                      behind crosses the subject's current distance.  Positive.
-
-        Gap and headway are computed independently across all other series so
-        that a lane-change by another vehicle does not corrupt either result.
-        The gap search finds the closest vehicle ahead/behind at subj_time.
-        The headway search finds the most recent crossing of subj_dist before
-        subj_time (forward) and the next crossing after subj_time (backward),
-        across all other series regardless of which vehicle won the gap search.
+        Scans backward (decreasing index) from *start_idx* until an element is
+        found that is **less than** *search_val*, then linearly interpolates the
+        fractional position between that index and the next higher index.
 
         Args:
-            subj_time   : veh_time of the clicked/hovered point (seconds).
-            subj_series : the _series dict entry for the subject vehicle.
+            arr:        1-D sorted float64 array (e.g. ``veh_dist_trav``).
+            start_idx:  Index to begin the reverse scan from.
+            search_val: Value to locate within *arr*.
 
         Returns:
-            (gap_f, hway_f, gap_b, hway_b) — NaN for any value that cannot
-            be determined from the loaded series data.
+            ``(index1, index2, offset)`` where *index1* < *index2* are the
+            bracketing indices and *offset* ∈ [0, 1] is the interpolation
+            weight toward *index2*.  Returns ``(-1, -1, 0.0)`` when no
+            bracketing pair is found.
         """
-        t_subj = subj_series['veh_time']
-        d_subj = subj_series['veh_dist_trav']
-        subj_id = subj_series['veh_id']
+        i = start_idx
+        while i >= 0:
+            if arr[i] < search_val:
+                # arr[i] < search_val <= arr[i+1]  (i+1 is valid: we entered
+                # the loop from start_idx, so i+1 <= start_idx which is a
+                # valid index checked by the caller).
+                idx1, idx2 = i, i + 1
+                span = arr[idx2] - arr[idx1]
+                offset = (search_val - arr[idx1]) / span if span != 0.0 else 0.0
+                return idx1, idx2, offset
+            i -= 1
+        return -1, -1, 0.0
 
-        # ── 1.  Subject distance at subj_time ────────────────────────────
-        meta_t_subj = subj_series.get('seg_meta_t', [])
-        subj_dist = _interp_at(meta_t_subj, t_subj, d_subj, subj_time)
+    @staticmethod
+    def _find_hway_b(arr: np.ndarray, start_idx: int, search_val: float
+                     ) -> tuple[int, int, float]:
+        """Forward-iterate from *start_idx* to find the backward headway offset.
 
-        if not np.isfinite(subj_dist):
-            return float("nan"), float("nan"), float("nan"), float("nan")
+        Scans forward (increasing index) from *start_idx* until an element is
+        found that is **greater than** *search_val*, then linearly interpolates
+        the fractional position between that index and the one before it.
 
-        # ── 2.  Gap pass: interpolate every other series at subj_time ────
-        # Collect signed deltas so we can sort for the headway pass.
-        gap_candidates: list[tuple[float, dict]] = []   # (signed_delta, series)
+        Args:
+            arr:        1-D sorted float64 array (e.g. ``veh_dist_trav``).
+            start_idx:  Index to begin the forward scan from.
+            search_val: Value to locate within *arr*.
 
-        for other in self._series.values():
-            if other['veh_id'] == subj_id:
+        Returns:
+            ``(index1, index2, offset)`` where *index1* < *index2* are the
+            bracketing indices and *offset* ∈ [0, 1] is the interpolation
+            weight toward *index2*.  Returns ``(-1, -1, 0.0)`` when no
+            bracketing pair is found.
+        """
+        n = len(arr)
+        i = start_idx
+        while i < n:
+            if arr[i] > search_val:
+                # arr[i-1] <= search_val < arr[i]  (i-1 is valid because we
+                # entered at start_idx and i advanced at least once only when
+                # arr[start_idx] <= search_val, guaranteeing i >= 1).
+                idx1, idx2 = i - 1, i
+                span = arr[idx2] - arr[idx1]
+                offset = (search_val - arr[idx1]) / span if span != 0.0 else 0.0
+                return idx1, idx2, offset
+            i += 1
+        return -1, -1, 0.0
+
+    def _find_headway_gap(self, veh_id: int, veh_time: float, veh_dist: float
+                          ) -> tuple[float, float, float, float]:
+        """Find forward/backward headway and gap values for a trajectory point.
+
+        Iterates over every series that is **not** the queried vehicle and
+        attempts to derive spatial gap and time-headway values using the cached
+        ``veh_time`` / ``veh_dist_trav`` arrays.
+
+        Gap classification (relative to *veh_dist*):
+          * **gap_f** – closest other-vehicle distance **above** *veh_dist* at
+            the same instant; stored as the absolute difference (positive).
+          * **gap_b** – closest other-vehicle distance **below** *veh_dist* at
+            the same instant; stored as the absolute difference (positive).
+
+        Headway classification (relative to *veh_time*):
+          * **hway_f** – the other vehicle passed *veh_dist* **before**
+            *veh_time* (negative offset stored as positive magnitude).
+          * **hway_b** – the other vehicle passed *veh_dist* **after**
+            *veh_time* (positive offset).
+
+        Initial sentinel values ensure the first valid candidate always wins:
+          * ``gap_b`` and ``gap_f``  → ``sys.float_info.max``
+          * ``hway_f`` and ``hway_b`` → ``-sys.float_info.max``
+
+        Args:
+            veh_id:   Vehicle ID of the subject point (its own series is skipped).
+            veh_time: Time coordinate of the subject point (seconds).
+            veh_dist: Distance-travelled coordinate of the subject point (metres).
+
+        Returns:
+            ``(hway_f, hway_b, gap_f, gap_b)`` – all as positive magnitudes.
+            Sentinel values (``±sys.float_info.max``) are returned for
+            directions where no candidate was found.
+        """
+        gap_f  =  sys.float_info.max   # smallest above-distance found so far
+        gap_b  =  sys.float_info.max   # smallest below-distance found so far
+        hway_f = -sys.float_info.max   # headway forward  (will store negative)
+        hway_b = -sys.float_info.max   # headway backward (will store negative)
+
+        for sid, series in self._series.items():
+            if sid == veh_id:
                 continue
-            meta_t = other.get('seg_meta_t')
-            if not meta_t:
+
+            t_arr = series['veh_time']
+            d_arr = series['veh_dist_trav']
+
+            if len(t_arr) == 0 or len(d_arr) == 0:
                 continue
-            d_other = _interp_at(meta_t, other['veh_time'], other['veh_dist_trav'],
-                                  subj_time)
-            if np.isfinite(d_other):
-                gap_candidates.append((d_other - subj_dist, other))
 
-        # Best gap values
-        fwd = [(delta, s) for delta, s in gap_candidates if delta >= 0]
-        bwd = [(delta, s) for delta, s in gap_candidates if delta <  0]
+            t_min, t_max = t_arr[0], t_arr[-1]
+            d_min, d_max = d_arr[0], d_arr[-1]
 
-        gap_f = min((d for d, _ in fwd), default=float("nan"))
-        gap_b = min((-d for d, _ in bwd), default=float("nan"))
+            # ── Can this series bracket veh_time? ────────────────────────────
+            time_brackets = (t_min <= veh_time <= t_max)
 
-        # ── 3.  Headway pass: search series sorted by gap proximity ──────
-        # Starting from the closest vehicle in each direction means the first
-        # valid crossing sets a tight time bound that prunes later searches.
-        # Forward headway — sort ascending by gap delta (closest ahead first)
-        fwd_sorted = sorted(fwd, key=lambda x: x[0])
-        # Backward headway — sort ascending by abs gap delta (closest behind first)
-        bwd_sorted = sorted(bwd, key=lambda x: -x[0])
+            if time_brackets:
+                # ── Locate veh_time in this series' time array ───────────────
+                t_idx = int(np.searchsorted(t_arr, veh_time, side='left'))
+                t_idx = min(t_idx, len(t_arr) - 1)
 
-        hway_f    = float("nan")
-        best_hf   = np.inf
+                # Determine the interpolated distance at veh_time
+                if t_arr[t_idx] == veh_time:
+                    # Exact match – use directly
+                    other_dist = float(d_arr[t_idx])
+                    d_idx = t_idx          # index into d_arr for headway search
+                elif t_idx > 0 and (veh_time - t_arr[t_idx - 1]) < self._SERIES_SEG_THRESHOLD:
+                    # Previous sample is within the intra-segment threshold –
+                    # interpolate between t_idx-1 and t_idx
+                    lo, hi = t_idx - 1, t_idx
+                    pct = (veh_time - t_arr[lo]) / (t_arr[hi] - t_arr[lo])
+                    other_dist = float(d_arr[lo] + pct * (d_arr[hi] - d_arr[lo]))
+                    d_idx = lo             # use lower bracket index for headway scan
+                else:
+                    # Gap in trajectory too large to interpolate reliably
+                    other_dist = None
+                    d_idx = None
 
-        for _, other in fwd_sorted:
-            d_o     = other['veh_dist_trav']
-            t_o     = other['veh_time']
-            meta_d  = other.get('seg_meta_d')
-            if not meta_d:
-                continue
-            t_cross = _interp_time_at_dist(
-                meta_d, d_o, t_o, subj_dist,
-                before=subj_time,
-            )
-            if np.isfinite(t_cross):
-                delta_hf = subj_time - t_cross
-                if delta_hf < best_hf:
-                    best_hf = delta_hf
-                    hway_f  = delta_hf
-                    # Any further series is at least as far ahead spatially;
-                    # their headway crossing cannot be more recent than this.
-                    break
+                if other_dist is not None:
+                    diff = other_dist - veh_dist   # signed: + means ahead, – means behind
 
-        hway_b    = float("nan")
-        best_hb   = np.inf
+                    if diff > 0:
+                        # ── Forward gap candidate ────────────────────────────
+                        if diff < gap_f:
+                            gap_f = diff
 
-        for _, other in bwd_sorted:
-            d_o     = other['veh_dist_trav']
-            t_o     = other['veh_time']
-            meta_d  = other.get('seg_meta_d')
-            if not meta_d:
-                continue
-            t_cross = _interp_time_at_dist(
-                meta_d, d_o, t_o, subj_dist,
-                after=subj_time,
-            )
-            if np.isfinite(t_cross):
-                delta_hb = t_cross - subj_time
-                if delta_hb < best_hb:
-                    best_hb = delta_hb
-                    hway_b  = delta_hb
-                    break
+                        # ── Forward gap → search for backward headway ────────
+                        # "Who passed veh_dist after veh_time?" – scan forward
+                        # in d_arr from d_idx for veh_dist.
+                        i1, i2, ofs = TimeSpacePlotWidget._find_hway_b(
+                            d_arr, d_idx, veh_dist
+                        )
+                        if i1 >= 0:
+                            hw = float(t_arr[i1] + ofs * (t_arr[i2] - t_arr[i1]))
+                            hw_delta = hw - veh_time          # positive: after
+                            if hw_delta > hway_b:
+                                hway_b = hw_delta
 
-        logger.debug(
-            f"_find_gap_headway veh={subj_id} t={subj_time:.3f}: "
-            f"gf={gap_f:.3f} hf={hway_f:.3f} gb={gap_b:.3f} hb={hway_b:.3f}"
+                    elif diff < 0:
+                        # ── Backward gap candidate ───────────────────────────
+                        abs_diff = -diff
+                        if abs_diff < gap_b:
+                            gap_b = abs_diff
+
+                        # ── Backward gap → search for forward headway ────────
+                        # "Who passed veh_dist before veh_time?" – scan backward
+                        # in d_arr from d_idx for veh_dist.
+                        i1, i2, ofs = TimeSpacePlotWidget._find_hway_f(
+                            d_arr, d_idx, veh_dist
+                        )
+                        if i1 >= 0:
+                            hw = float(t_arr[i1] + ofs * (t_arr[i2] - t_arr[i1]))
+                            hw_delta = veh_time - hw          # positive: before
+                            if hw_delta > hway_f:
+                                hway_f = hw_delta
+
+                    # diff == 0: same distance, skip headway (degenerate case)
+                    continue
+
+            # ── Series cannot bracket veh_time – try headway-only paths ──────
+            # A series whose distance range contains veh_dist can yield a
+            # headway value even when the time ranges don't overlap.
+            dist_brackets = (d_min <= veh_dist <= d_max)
+
+            if not dist_brackets:
+                continue   # series is entirely irrelevant to this query point
+
+            if t_max < veh_time:
+                # Series lies entirely in the past → candidate for hway_f
+                # (it passed veh_dist before the query time)
+                i1, i2, ofs = TimeSpacePlotWidget._find_hway_f(
+                    d_arr, len(d_arr) - 1, veh_dist
+                )
+                if i1 >= 0:
+                    hw = float(t_arr[i1] + ofs * (t_arr[i2] - t_arr[i1]))
+                    hw_delta = veh_time - hw
+                    if hw_delta > hway_f:
+                        hway_f = hw_delta
+
+            elif t_min > veh_time:
+                # Series lies entirely in the future → candidate for hway_b
+                # (it will pass veh_dist after the query time)
+                i1, i2, ofs = TimeSpacePlotWidget._find_hway_b(
+                    d_arr, 0, veh_dist
+                )
+                if i1 >= 0:
+                    hw = float(t_arr[i1] + ofs * (t_arr[i2] - t_arr[i1]))
+                    hw_delta = hw - veh_time
+                    if hw_delta > hway_b:
+                        hway_b = hw_delta
+
+        return (
+            hway_f if hway_f != -sys.float_info.max else None,
+            hway_b if hway_b != -sys.float_info.max else None,
+            gap_f  if gap_f  !=  sys.float_info.max else None,
+            gap_b  if gap_b  !=  sys.float_info.max else None,
         )
-        return gap_f, hway_f, gap_b, hway_b
+    
+    def _find_gap(self, veh_id: int, veh_time: float, veh_dist: float
+                     ) -> tuple:
+            """Find forward and backward spatial gap for a trajectory point.
+    
+            For each other vehicle whose time range brackets *veh_time*, the
+            distance at *veh_time* is determined by linear interpolation between
+            the two surrounding samples.  The closest vehicle ahead (higher
+            distance) gives *gap_f*; the closest vehicle behind (lower distance)
+            gives *gap_b*.
+    
+            Args:
+                veh_id:   Vehicle ID of the subject point (its own series is skipped).
+                veh_time: Time coordinate of the subject point (seconds).
+                veh_dist: Distance coordinate of the subject point (metres).
+    
+            Returns:
+                ``(gap_f, gap_b)`` as positive magnitudes, or ``None`` when no
+                candidate was found in that direction.
+            """
+            gap_f = None   # closest vehicle ahead  (higher distance)
+            gap_b = None   # closest vehicle behind (lower distance)
+    
+            for sid, series in self._series.items():
+                if sid == veh_id:
+                    continue
+    
+                t_arr = series['veh_time']
+                d_arr = series['veh_dist_trav']
+    
+                if len(t_arr) == 0:
+                    continue
+    
+                # Series must bracket veh_time for a gap measurement
+                if t_arr[0] > veh_time or t_arr[-1] < veh_time:
+                    continue
+    
+                # Locate the insertion point: first index where t_arr[idx] >= veh_time
+                idx = int(np.searchsorted(t_arr, veh_time, side='left'))
+                idx = min(idx, len(t_arr) - 1)
+    
+                if t_arr[idx] == veh_time:
+                    # Exact time match
+                    other_dist = float(d_arr[idx])
+                elif idx > 0:
+                    lo, hi = idx - 1, idx
+                    # Ensure the two bracketing samples are from a continuous segment
+                    if (t_arr[hi] - t_arr[lo]) > self._SERIES_SEG_THRESHOLD:
+                        continue
+                    pct = (veh_time - t_arr[lo]) / (t_arr[hi] - t_arr[lo])
+                    other_dist = float(d_arr[lo] + pct * (d_arr[hi] - d_arr[lo]))
+                else:
+                    # idx == 0 and not an exact match — veh_time < t_arr[0],
+                    # but we already filtered this case above, so skip defensively
+                    continue
+    
+                diff = other_dist - veh_dist
+    
+                if diff > 0:
+                    # Vehicle is ahead (higher distance)
+                    if gap_f is None or diff < gap_f:
+                        gap_f = diff
+                elif diff < 0:
+                    # Vehicle is behind (lower distance)
+                    abs_diff = -diff
+                    if gap_b is None or abs_diff < gap_b:
+                        gap_b = abs_diff
+                # diff == 0: same distance, degenerate — skip
+    
+            return gap_f, gap_b
+
+    def _find_hway(self, veh_id: int, veh_time: float, veh_dist: float
+                      ) -> tuple:
+            """Find forward and backward time headway for a trajectory point.
+    
+            For each other vehicle, scans its trajectory for adjacent sample pairs
+            that bracket *veh_dist* (one side <= and the other >=).  For each such
+            crossing the time is linearly interpolated, and the crossing closest
+            to *veh_time* in each direction is kept.
+    
+            Because ``veh_dist_trav`` is derived from noisy GPS data, it is NOT
+            guaranteed to be monotonically sorted.  A vehicle's distance may
+            locally decrease due to measurement noise, so the scan checks every
+            consecutive pair rather than using binary search.
+    
+            The segment-continuity threshold ``_SERIES_SEG_THRESHOLD`` is applied
+            to the time gap between bracketing samples to avoid interpolating
+            across trajectory gaps (e.g. missing records).
+    
+            Args:
+                veh_id:   Vehicle ID of the subject point (its own series is skipped).
+                veh_time: Time coordinate of the subject point (seconds).
+                veh_dist: Distance coordinate of the subject point (metres).
+    
+            Returns:
+                ``(hway_f, hway_b)`` as positive magnitudes, or ``None`` when no
+                candidate was found in that direction.
+    
+                * **hway_f** — time since the nearest vehicle crossed *veh_dist*
+                  *before* ``veh_time`` (positive; overlay draws left).
+                * **hway_b** — time until the nearest vehicle crosses *veh_dist*
+                  *after* ``veh_time`` (positive; overlay draws right).
+            """
+            hway_f = None  # closest crossing before veh_time
+            hway_b = None  # closest crossing after veh_time
+    
+            for sid, series in self._series.items():
+                if sid == veh_id:
+                    continue
+    
+                t_arr = series['veh_time']
+                d_arr = series['veh_dist_trav']
+                n = len(d_arr)
+    
+                if n < 2:
+                    continue
+    
+                # Quick reject: if the entire distance range can't reach veh_dist
+                d_min = float(np.min(d_arr))
+                d_max = float(np.max(d_arr))
+                if veh_dist < d_min or veh_dist > d_max:
+                    continue
+    
+                # Scan consecutive pairs for crossings of veh_dist
+                for i in range(n - 1):
+                    d0, d1 = float(d_arr[i]), float(d_arr[i + 1])
+    
+                    # Check if this pair brackets veh_dist (either direction)
+                    if not ((d0 <= veh_dist <= d1) or (d1 <= veh_dist <= d0)):
+                        continue
+    
+                    t0, t1 = float(t_arr[i]), float(t_arr[i + 1])
+    
+                    # Interpolate the crossing time, clamping to [0, 1]
+                    # to guard against noise-amplified extrapolation
+                    span = d1 - d0
+                    if span == 0.0:
+                        pct = 0.5
+                    else:
+                        pct = max(0.0, min(1.0, (veh_dist - d0) / span))
+                    crossing_time = t0 + pct * (t1 - t0)
+    
+                    diff = veh_time - crossing_time
+    
+                    if diff > 0:
+                        # Crossing was before veh_time → forward headway candidate
+                        if hway_f is None or diff < hway_f:
+                            hway_f = diff
+                    elif diff < 0:
+                        # Crossing was after veh_time → backward headway candidate
+                        abs_diff = -diff
+                        if hway_b is None or abs_diff < hway_b:
+                            hway_b = abs_diff
+                    # diff == 0: simultaneous — skip
+    
+            return hway_f, hway_b
+
+    def _test_find_hway(self):
+            """Temporary test harness for _find_hway using contrived data.
+            
+            Three vehicles travelling at constant speed (10 m/s), staggered
+            by 2.5 seconds on the time axis:
+            
+                veh 1: t=[0, 1, 2, 3, 4, 5]  d=[0, 10, 20, 30, 40, 50]
+                veh 2: t=[2.5, 3.5, 4.5, 5.5, 6.5, 7.5]  d=[0, 10, 20, 30, 40, 50]
+                veh 3: t=[5, 6, 7, 8, 9, 10]  d=[0, 10, 20, 30, 40, 50]
+            
+            Query point: veh 2 at t=4.5, d=20
+                Expected hway_f = 2.5 s (veh 1 crossed d=20 at t=2.0)
+                Expected hway_b = 2.5 s (veh 3 crosses d=20 at t=7.0)
+            
+            Query point: veh 1 at t=2.0, d=20
+                Expected hway_f = None  (no vehicle crossed d=20 earlier)
+                Expected hway_b = 2.5 s (veh 2 crosses d=20 at t=4.5)
+            
+            Query point: veh 3 at t=7.0, d=20
+                Expected hway_f = 2.5 s (veh 2 crossed d=20 at t=4.5)
+                Expected hway_b = None  (no vehicle crosses d=20 later)
+            """
+            # Save original series
+            original_series = self._series
+    
+            # Inject contrived data
+            self._series = {
+                1: {
+                    'veh_id': 1,
+                    'veh_time': np.array([0.0, 1.0, 2.0, 3.0, 4.0, 5.0]),
+                    'veh_dist_trav': np.array([0.0, 10.0, 20.0, 30.0, 40.0, 50.0]),
+                    'plot_item': True,
+                    'color': '#ff0000', 'text_color': '#ffffff'
+                },
+                2: {
+                    'veh_id': 2,
+                    'veh_time': np.array([2.5, 3.5, 4.5, 5.5, 6.5, 7.5]),
+                    'veh_dist_trav': np.array([0.0, 10.0, 20.0, 30.0, 40.0, 50.0]),
+                    'plot_item': True,
+                    'color': '#00ff00', 'text_color': '#ffffff'
+                },
+                3: {
+                    'veh_id': 3,
+                    'veh_time': np.array([5.0, 6.0, 7.0, 8.0, 9.0, 10.0]),
+                    'veh_dist_trav': np.array([0.0, 10.0, 20.0, 30.0, 40.0, 50.0]),
+                    'plot_item': True,
+                    'color': '#0000ff', 'text_color': '#ffffff'
+                }
+            }
+    
+            print("=" * 60)
+            print("_find_hway test harness")
+            print("=" * 60)
+    
+            # Test 1: middle vehicle
+            hway_f, hway_b = self._find_hway(2, 4.5, 20.0)
+            print(f"\nTest 1: veh=2, t=4.5, d=20.0")
+            print(f"  hway_f = {hway_f}  (expected 2.5)")
+            print(f"  hway_b = {hway_b}  (expected 2.5)")
+            print(f"  PASS: {hway_f == 2.5 and hway_b == 2.5}")
+    
+            # Test 2: first vehicle
+            hway_f, hway_b = self._find_hway(1, 2.0, 20.0)
+            print(f"\nTest 2: veh=1, t=2.0, d=20.0")
+            print(f"  hway_f = {hway_f}  (expected None)")
+            print(f"  hway_b = {hway_b}  (expected 2.5)")
+            print(f"  PASS: {hway_f is None and hway_b == 2.5}")
+    
+            # Test 3: last vehicle
+            hway_f, hway_b = self._find_hway(3, 7.0, 20.0)
+            print(f"\nTest 3: veh=3, t=7.0, d=20.0")
+            print(f"  hway_f = {hway_f}  (expected 2.5)")
+            print(f"  hway_b = {hway_b}  (expected None)")
+            print(f"  PASS: {hway_f == 2.5 and hway_b is None}")
+    
+            # Test 4: query at interpolated distance (d=25, between samples)
+            # veh 1 crosses d=25 at t=2.5, veh 3 crosses d=25 at t=7.5
+            hway_f, hway_b = self._find_hway(2, 5.0, 25.0)
+            print(f"\nTest 4: veh=2, t=5.0, d=25.0")
+            print(f"  hway_f = {hway_f}  (expected 2.5)")
+            print(f"  hway_b = {hway_b}  (expected 2.5)")
+            print(f"  PASS: {hway_f == 2.5 and hway_b == 2.5}")
+    
+            # Test 5: query at distance no other vehicle reaches
+            hway_f, hway_b = self._find_hway(1, 2.0, 55.0)
+            print(f"\nTest 5: veh=1, t=2.0, d=55.0 (beyond all)")
+            print(f"  hway_f = {hway_f}  (expected None)")
+            print(f"  hway_b = {hway_b}  (expected None)")
+            print(f"  PASS: {hway_f is None and hway_b is None}")
+    
+            print("\n" + "=" * 60)
+    
+            # Restore original series
+            self._series = original_series
+
+    def _find_hway_brute(self, veh_id: int, veh_time: float, veh_dist: float
+                            ) -> tuple:
+            """Brute-force forward and backward time headway for a trajectory point.
+    
+            For every other vehicle, walks every consecutive pair of samples
+            (i, i+1).  When veh_dist falls between d[i] and d[i+1] (inclusive,
+            either direction to handle noise), the crossing time is linearly
+            interpolated from t[i] and t[i+1].  The closest crossing before
+            veh_time gives hway_f; the closest crossing after gives hway_b.
+    
+            Args:
+                veh_id:   Vehicle ID of the subject point (skipped in iteration).
+                veh_time: Time coordinate of the subject point (seconds).
+                veh_dist: Distance coordinate of the subject point (metres).
+    
+            Returns:
+                ``(hway_f, hway_b)`` as positive magnitudes, or ``None`` when no
+                candidate was found in that direction.
+            """
+            hway_f = None
+            hway_b = None
+    
+            for sid, series in self._series.items():
+                if sid == veh_id:
+                    continue
+    
+                t_arr = series['veh_time']
+                d_arr = series['veh_dist_trav']
+                n = len(d_arr)
+    
+                if n < 2:
+                    continue
+    
+                for i in range(n - 1):
+                    d0 = float(d_arr[i])
+                    d1 = float(d_arr[i + 1])
+                    lo_d = min(d0, d1)
+                    hi_d = max(d0, d1)
+    
+                    # Does veh_dist fall within this pair?
+                    if veh_dist < lo_d or veh_dist > hi_d:
+                        continue
+    
+                    t0 = float(t_arr[i])
+                    t1 = float(t_arr[i + 1])
+    
+                    # Interpolate crossing time
+                    if d1 == d0:
+                        crossing_time = (t0 + t1) * 0.5
+                    else:
+                        pct = (veh_dist - d0) / (d1 - d0)
+                        pct = max(0.0, min(1.0, pct))
+                        crossing_time = t0 + pct * (t1 - t0)
+    
+                    diff = veh_time - crossing_time
+    
+                    if diff > 0.0:
+                        if hway_f is None or diff < hway_f:
+                            hway_f = diff
+                    elif diff < 0.0:
+                        abs_diff = -diff
+                        if hway_b is None or abs_diff < hway_b:
+                            hway_b = abs_diff
+    
+            return hway_f, hway_b

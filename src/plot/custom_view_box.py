@@ -127,13 +127,12 @@ class CustomViewBox(pg.ViewBox):
                     mouse_point = self.mapSceneToView(ev.scenePos())
                     mx, my = mouse_point.x(), mouse_point.y()
                     clicked_veh = self._find_clicked_vehicle(mx, my)
-
+            
                     if clicked_veh is not None:
-                        # Find the exact (veh_time, veh_dist) for this vehicle
                         series   = self.parent_widget._series.get(clicked_veh)
                         time_tol = 0.05
                         veh_time = veh_dist = None
-
+            
                         if series is not None:
                             mask = ((series["veh_time"] >= mx - time_tol) &
                                     (series["veh_time"] <= mx + time_tol))
@@ -143,49 +142,39 @@ class CustomViewBox(pg.ViewBox):
                                 idx      = int(np.argmin(np.abs(y_f - my)))
                                 veh_time = float(x_f[idx])
                                 veh_dist = float(y_f[idx])
-
+            
                         if veh_time is not None:
-                            locked = self.parent_widget._gh_locked_point
-                            new_pt = (clicked_veh, veh_time)
-
-                            if locked == new_pt:
-                                # Same point clicked — unlock
-                                self.parent_widget._gh_locked_point = None
-                                self.parent_widget._clear_gh_locked()
+                            pt_key = (clicked_veh, veh_time)
+            
+                            if pt_key in self.parent_widget._gh_locked_items:
+                                # Already locked — toggle off (remove this one point)
+                                self.parent_widget._clear_gh_locked_point(pt_key)
                                 self.parent_widget._last_queried_point = None
-                                logger.debug(f"GH unlocked point {new_pt}")
+                                logger.debug(f"GH unlocked point {pt_key}")
                             else:
-                                # Different (or no) point — lock this one,
-                                # clearing any previous lock first
-                                self.parent_widget._clear_gh_locked()
-                                self.parent_widget._gh_locked_point = new_pt
-                                self.parent_widget._last_queried_point = None
-
-                                try:
-                                    cursor = self.parent_widget._db_connection.cursor()
-                                    cursor.execute("""
-                                        SELECT gap_b, gap_f, hway_b, hway_f
-                                        FROM   events
-                                        WHERE  event_id = ? AND veh_id = ?
-                                               AND veh_time = ?
-                                    """, (self.parent_widget._current_event_id,
-                                          clicked_veh, veh_time))
-                                    row = cursor.fetchone()
-                                except Exception as e:
-                                    logger.error(f"GH lock query error: {e}")
-                                    row = None
-
-                                if row:
-                                    self.parent_widget._draw_gh_overlay(
-                                        clicked_veh, veh_time, veh_dist, *row,
-                                        target_list=self.parent_widget._gh_locked_items
+                                # Lock this point — add to list
+                                locked_items_for_pt = []
+                                if self.parent_widget._last_gh_values is not None:
+                                    gap_f, gap_b, hway_f, hway_b = self.parent_widget._last_gh_values
+                                else:
+                                    gap_f, gap_b = self.parent_widget._find_gap(
+                                        clicked_veh, veh_time, veh_dist
                                     )
-                                    self.parent_widget._last_queried_point = (
-                                        clicked_veh, veh_time,
-                                        self.parent_widget._current_event_id
+                                    hway_f, hway_b = self.parent_widget._find_hway(
+                                        clicked_veh, veh_time, veh_dist
                                     )
-                                    logger.debug(f"GH locked point {new_pt}")
-
+                                self.parent_widget._draw_gh_overlay(
+                                    clicked_veh, veh_time, veh_dist,
+                                    gap_b, gap_f, hway_b, hway_f,
+                                    target_list=locked_items_for_pt
+                                )
+                                self.parent_widget._gh_locked_items[pt_key] = locked_items_for_pt
+                                self.parent_widget._last_queried_point = (
+                                    clicked_veh, veh_time,
+                                    self.parent_widget._current_event_id
+                                )
+                                logger.debug(f"GH locked point {pt_key}")
+            
                 self._press_pos   = None
                 self._press_time  = None
                 self._is_selecting = False
