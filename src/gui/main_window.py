@@ -18,9 +18,6 @@ class MainWindow(QMainWindow):
         _db_connection (sqlite3.Connection): Current database connection.
         _plot_widget (TimeSpacePlotWidget): Plot widget for displaying trajectory data.
         _selected_export_columns (list): List of selected column names for export.
-        _web_view (QWebEngineView): Web view for displaying HTML home page.
-        _web_bridge (WebBridge): Bridge object for HTML-Python communication.
-        _web_channel (QWebChannel): Web channel for communication.
     """
 
     def __init__(self):
@@ -252,10 +249,6 @@ class MainWindow(QMainWindow):
                 "osm_traffic_control": "INTEGER",
                 "preceding_veh_id": "INTEGER",
                 "veh_dist_trav": "REAL",
-                "gap_b": "REAL",
-                "gap_f": "REAL",
-                "hway_b": "REAL",
-                "hway_f": "REAL",
                 "event_name": "TEXT"
             }
 

@@ -50,10 +50,6 @@ class Units:
         "osm_traffic_control": "",
         "preceding_veh_id"  : "",
         "veh_dist_trav"     : "m",
-        "gap_b"             : "m",
-        "gap_f"             : "m",
-        "hway_b"            : "s",
-        "hway_f"            : "s",
         "event_name"        : "",
     }
 

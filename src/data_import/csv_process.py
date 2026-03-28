@@ -47,11 +47,6 @@ class CsvProcess(BaseProcess):
                 if callable(method):  # Ensure it's a callable method
                     self._func_dict[method_name] = method
 
-    def _count_csv_rows(self, input_path: str, has_header: bool) -> int:
-        """Count total rows in CSV file for progress tracking."""
-        # This method is no longer needed with byte counting approach
-        pass
-
     def _check_configuration(self, config: Dict[str, Any], worker: Any) -> int:
         """Validate the JSON configuration and set up column definitions."""
         worker.log_signal.emit("Info: Checking configured column definitions", True)

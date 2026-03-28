@@ -2,7 +2,6 @@ import json
 import sqlite3
 import logging
 import math
-import numpy as np
 from datetime import datetime
 from pathlib import Path
 from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QProgressBar, QTextEdit, QFileDialog, QMessageBox, QLabel
@@ -16,10 +15,6 @@ logger = logging.getLogger(__name__)
 
 class _ImportWorkerThread(QThread):
     """Worker thread for handling import operations."""
-
-    _SEGMENT_GAP_FACTOR = 3     # multiple of median step that marks a break
-    _MIN_SEGMENT_PTS    = 2     # minimum points required per segment
-    _DB_BATCH           = 10000 # rows per executemany UPDATE call
 
     log_signal = pyqtSignal(str, bool)
     progress_signal = pyqtSignal(int)
@@ -108,10 +103,6 @@ class _ImportWorkerThread(QThread):
                     osm_traffic_control INTEGER,
                     preceding_veh_id INTEGER,
                     veh_dist_trav REAL,
-                    gap_b REAL,
-                    gap_f REAL,
-                    hway_b REAL,
-                    hway_f REAL,
                     event_name TEXT,
                     PRIMARY KEY (event_id, veh_id, veh_time)
                 ) WITHOUT ROWID;
@@ -144,11 +135,6 @@ class _ImportWorkerThread(QThread):
             error_count = processor.process(self.config, self.input_path, self.db_connection, self)
             logger.debug(f"Data processing completed with {error_count} errors")
 
-            if error_count == 0 and not self.interrupt_flag:
-                if not self._compute_gap_headway():
-                    self.log_signal.emit("Import interrupted", False)
-                    error_count += 1
-                
             if error_count == 0 and not self.interrupt_flag:
                 cursor = self.db_connection.cursor()
                 logger.debug("Creating event summaries")
@@ -249,295 +235,6 @@ class _ImportWorkerThread(QThread):
         if error_count == 0 and not self.interrupt_flag:
             self.log_signal.emit("Info: Import completed successfully.", True)
             self.success = True
-                
-    @staticmethod
-    def _build_segment_meta(
-        segments: list[tuple[int, int]],
-        arr: np.ndarray,
-    ) -> list[tuple[int, int, float, float]]:
-        """Return (start, end, min_val, max_val) for each segment.
-
-        Pre-computing the range of each segment enables O(1) early-out checks
-        in _interp_at without re-scanning the array on every query.
-        """
-        return [
-            (s, e, float(arr[s]), float(arr[e - 1]))   # arr is sorted, so [s] is min
-            for s, e in segments
-        ]
-
-    def _build_segments(self, time: np.ndarray) -> list[tuple[int, int]]:
-        """Return (start, end_exclusive) index pairs for contiguous segments.
-
-        A new segment begins wherever the gap between consecutive time values
-        exceeds _SEGMENT_GAP_FACTOR times the median step for this vehicle.
-        Segments with fewer than _MIN_SEGMENT_PTS points are discarded.
-        """
-        if len(time) < self._MIN_SEGMENT_PTS:
-            return []
-
-        diffs = np.diff(time)
-        median_step = np.median(diffs[diffs > 0]) if np.any(diffs > 0) else 1.0
-        threshold = self._SEGMENT_GAP_FACTOR * median_step
-
-        breaks = np.where(diffs > threshold)[0] + 1
-        starts = np.concatenate(([0], breaks))
-        ends   = np.concatenate((breaks, [len(time)]))
-
-        return [
-            (int(s), int(e))
-            for s, e in zip(starts, ends)
-            if e - s >= self._MIN_SEGMENT_PTS
-        ]
-
-    @staticmethod
-    def _interp_at(
-        seg_meta:  list[tuple[int, int, float, float]],
-        x_arr:     np.ndarray,
-        y_arr:     np.ndarray,
-        x_query:   float,
-        cursor:    list[int],          # cursor[0] = last segment index used
-    ) -> float:
-        """Linearly interpolate y at x_query using pre-built segment metadata.
-
-        Optimizations over the original:
-        1. Segment early-out  – each segment's [min, max] is checked with a
-           scalar compare before touching any numpy slice.  Because segments
-           are in ascending order a break is issued as soon as seg_min >
-           x_query, so later segments are never visited.
-        2. Cursor (last-index)– the caller passes a single-element list that
-           remembers the last intra-segment index used.  On the next call the
-           search starts there rather than at the segment start, exploiting the
-           fact that query values are non-decreasing across the outer loop.
-        3. Linear index estimate – when a forward search is required the
-           fractional position of x_query in [x0, x_end] is used to compute a
-           cheap starting index, reducing the searchsorted window to ~1 step
-           for uniformly-spaced data.
-
-        Returns NaN if x_query falls outside every segment.
-        """
-        n_segs = len(seg_meta)
-        for si in range(n_segs):
-            s, e, seg_min, seg_max = seg_meta[si]
-
-            # Early-out: query is below this segment's range.
-            if x_query < seg_min:
-                break                       # segments are ordered; none later will match
-
-            # Early-out: query is above this segment's range.
-            if x_query > seg_max:
-                continue
-
-            # x_query is within [seg_min, seg_max].
-            seg_len = e - s                 # number of points in segment
-            lo = cursor[0]                  # last index used (relative to segment start)
-
-            # Clamp cursor to this segment's valid range.
-            if lo >= seg_len - 1:
-                lo = 0
-
-            # Linear estimate of the intra-segment index.
-            span = seg_max - seg_min
-            if span > 0.0:
-                frac   = (x_query - seg_min) / span
-                est    = int(frac * (seg_len - 2))
-                lo     = max(lo, max(0, est - 1))   # never go backward
-
-            # Narrow searchsorted to [lo, seg_len-1].
-            xs     = x_arr[s:e]
-            lo     = min(lo, seg_len - 2)
-            idx    = int(np.searchsorted(xs[lo:], x_query, side="right")) - 1 + lo
-            idx    = max(0, min(idx, seg_len - 2))
-
-            # Persist cursor for the next call.
-            cursor[0] = idx
-
-            x0, x1 = xs[idx], xs[idx + 1]
-            dx = x1 - x0
-            if dx == 0.0:
-                return float(y_arr[s + idx])
-            t = (x_query - x0) / dx
-            return float(y_arr[s + idx] * (1.0 - t) + y_arr[s + idx + 1] * t)
-
-        return float("nan")
-
-    def _compute_gap_headway(self) -> bool:
-        """Compute gap and time-headway for every (event_id, lane_id) pair."""
-        try:
-            cursor = self.db_connection.cursor()
-
-            cursor.execute("""
-                SELECT DISTINCT event_id, lane_id
-                FROM   events
-                WHERE  lane_id IS NOT NULL
-                ORDER  BY event_id, lane_id
-            """)
-            pairs = cursor.fetchall()
-
-            if not pairs:
-                self.log_signal.emit("Info: No event/lane pairs found; skipping gap/headway.", True)
-                return True
-
-            total = len(pairs)
-            self.log_signal.emit("Info: Computing gap and headway values", True)
-            self.log_signal.emit(
-                f"Info: {total} unique event_id/lane_id combination(s) to process", True
-            )
-
-            for idx, (event_id, lane_id) in enumerate(pairs):
-                if self.interrupt_flag:
-                    return False
-
-                # ── load ──────────────────────────────────────────────────────
-                cursor.execute("""
-                    SELECT veh_id, veh_time, veh_dist_trav
-                    FROM   events
-                    WHERE  event_id = ? AND lane_id = ?
-                    ORDER  BY veh_id, veh_time
-                """, (event_id, lane_id))
-
-                raw: dict[int, dict] = {}
-                for veh_id, veh_time, veh_dist in cursor:
-                    if veh_dist is None:
-                        continue
-                    if veh_id not in raw:
-                        raw[veh_id] = {"times": [], "dists": []}
-                    raw[veh_id]["times"].append(veh_time)
-                    raw[veh_id]["dists"].append(veh_dist)
-
-                if len(raw) < 2:
-                    self.progress_signal.emit(int(((idx + 1) / total) * 100))
-                    continue
-
-                # ── build arrays + segment metadata ───────────────────────────
-                veh_data: dict[int, dict] = {}
-                for veh_id, d in raw.items():
-                    t = np.array(d["times"], dtype=np.float64)
-                    x = np.array(d["dists"], dtype=np.float64)
-                    order = np.argsort(t, kind="stable")
-                    t, x = t[order], x[order]
-                    segs_t = self._build_segments(t)
-                    segs_d = self._build_segments(x)
-                    veh_data[veh_id] = {
-                        "time":       t,
-                        "dist":       x,
-                        "meta_t":     self._build_segment_meta(segs_t, t),
-                        "meta_d":     self._build_segment_meta(segs_d, x),
-                    }
-
-                # ── compute ───────────────────────────────────────────────────
-                veh_ids = list(veh_data.keys())
-                rows: list[tuple] = []
-
-                _cursors: dict[tuple, list[int]] = {}
-                for veh_id in veh_ids:
-                    if self.interrupt_flag:
-                        return False
-
-                    v      = veh_data[veh_id]
-                    n_pts  = len(v["time"])
-
-                    gap_f  = np.full(n_pts, np.nan)
-                    gap_b  = np.full(n_pts, np.nan)
-                    hway_f = np.full(n_pts, np.nan)
-                    hway_b = np.full(n_pts, np.nan)
-
-                    for i in range(n_pts):
-                        t_i = v["time"][i]
-                        d_i = v["dist"][i]
-
-                        best_f_gap  = np.inf
-                        best_b_gap  = np.inf
-                        best_f_hway = np.inf
-                        best_b_hway = np.inf
-
-                        g_f = g_b = h_f = h_b = np.nan
-
-                        for other_id in veh_ids:
-                            if other_id == veh_id:
-                                continue
-
-                            o = veh_data[other_id]
-
-                            # Each cursor is per-(subject, other, query_type) and
-                            # persists across the i-loop because t_i / d_i are
-                            # non-decreasing.  Stored as a 1-element list so the
-                            # static method can mutate it without a nonlocal.
-                            cur_t_key = (veh_id, other_id, "t")
-                            cur_d_key = (veh_id, other_id, "d")
-                            if cur_t_key not in _cursors:
-                                _cursors[cur_t_key] = [0]
-                                _cursors[cur_d_key] = [0]
-
-                            # Gap: interpolate other's dist at our time
-                            d_other = self._interp_at(
-                                o["meta_t"], o["time"], o["dist"],
-                                t_i, _cursors[cur_t_key]
-                            )
-                            if np.isfinite(d_other):
-                                delta = d_other - d_i
-                                if delta >= 0 and delta < best_f_gap:
-                                    best_f_gap = delta
-                                    g_f = delta
-                                elif delta < 0 and (-delta) < best_b_gap:
-                                    best_b_gap = -delta
-                                    g_b = -delta
-
-                            # Headway: interpolate other's time at our dist
-                            t_other = self._interp_at(
-                                o["meta_d"], o["dist"], o["time"],
-                                d_i, _cursors[cur_d_key]
-                            )
-                            if np.isfinite(t_other):
-                                delta_t = t_i - t_other
-                                if delta_t >= 0 and delta_t < best_f_hway:
-                                    best_f_hway = delta_t
-                                    h_f = delta_t
-                                elif delta_t < 0 and (-delta_t) < best_b_hway:
-                                    best_b_hway = -delta_t
-                                    h_b = -delta_t
-
-                        gap_f[i]  = g_f
-                        gap_b[i]  = g_b
-                        hway_f[i] = h_f
-                        hway_b[i] = h_b
-
-                    for i, t in enumerate(v["time"]):
-                        rows.append((
-                            float(gap_f[i]),
-                            float(gap_b[i]),
-                            float(hway_f[i]),
-                            float(hway_b[i]),
-                            event_id,
-                            veh_id,
-                            float(t),
-                        ))
-
-                # ── flush ─────────────────────────────────────────────────────
-                for batch_start in range(0, len(rows), self._DB_BATCH):
-                    if self.interrupt_flag:
-                        return False
-                    self.db_connection.executemany("""
-                        UPDATE events
-                        SET    gap_f  = ?,
-                               gap_b  = ?,
-                               hway_f = ?,
-                               hway_b = ?
-                        WHERE  event_id = ? AND veh_id = ? AND veh_time = ?
-                    """, rows[batch_start : batch_start + self._DB_BATCH])
-                    self.db_connection.commit()
-
-                self.progress_signal.emit(int(((idx + 1) / total) * 100))
-
-            return True
-
-        except sqlite3.Error as e:
-            self.log_signal.emit(f"Error: Database error during gap/headway: {e}", False)
-            logger.exception("Gap/headway sqlite error")
-            return False
-        except Exception as e:
-            self.log_signal.emit(f"Error: Unexpected error during gap/headway: {e}", False)
-            logger.exception("Gap/headway unexpected error")
-            return False
 
 class ImportDialog(QDialog):
     """Modal dialog for importing trajectory data into SQLite databases.

@@ -282,7 +282,9 @@ class TimeSpacePlotWidget(QWidget):
                 'text_color': self.text_color[index % len(self.text_color)],
                 'plot_item': None,
                 'veh_time': np.array([], dtype=np.float64),
-                'veh_dist_trav': np.array([], dtype=np.float64)
+                'veh_dist_trav': np.array([], dtype=np.float64),
+                'veh_speed': np.array([], dtype=np.float64),
+                'segments': []
             }
             self._series[veh_id] = series_dict
 
@@ -409,7 +411,8 @@ class TimeSpacePlotWidget(QWidget):
                 series['plot_item'] = None
                 series['veh_time'] = np.array([], dtype=np.float64)
                 series['veh_dist_trav'] = np.array([], dtype=np.float64)
-                series['veh_speed'] = np.array([], dtype=np.float64)  # <── always reset
+                series['veh_speed'] = np.array([], dtype=np.float64)
+                series['segments'] = []
 
             time_min, time_max = self._time_slider.value()
             dist_min, dist_max = self._dist_slider.value()
