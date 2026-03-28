@@ -43,12 +43,19 @@ class TimeSpacePlotWidget(QWidget):
         series_color (list): Static list of HTML hex colors for series.
         text_color (list): Static list of text colors for tooltip content.
     """
+
+    _DIMMED_COLOR  = '#a9a9a9'
     
     series_color = [
         '#e6194B', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', 
         '#42d4f4', '#f032e6', '#bfef45', '#469990', '#9A6324', '#800000', 
         '#808000', '#000075', '#000000'
     ]
+
+    series_paint: dict[str, tuple] = {
+        c: (pg.mkPen(color=c), pg.mkBrush(color=c)) for c in series_color
+    }
+    series_paint[_DIMMED_COLOR] = (pg.mkPen(color=_DIMMED_COLOR), pg.mkBrush(color=_DIMMED_COLOR))
     
     text_color = [
         '#ffffff', '#ffffff', '#000000', '#ffffff', '#ffffff', '#ffffff', 
@@ -85,9 +92,9 @@ class TimeSpacePlotWidget(QWidget):
         self._last_mouse_move_time = 0.0
         self._lane_ids = []
         self._veh_ids = []
-        self._gh_mode_enabled       = False
-        self._gh_overlay_items      = []     # transient hover items
-        self._gh_locked_items       = {}     # dict: (veh_id, veh_time) -> list[pg items]
+        self._gh_mode_enabled = False
+        self._gh_overlay_items = [] # transient hover items
+        self._gh_locked_items = {}  # dict: (veh_id, veh_time) -> list[pg items]
 
         logger.debug("TimeSpacePlotWidget initialized")
         
@@ -102,7 +109,7 @@ class TimeSpacePlotWidget(QWidget):
         left_layout = QVBoxLayout()
         
         # Vertical speed color gradient
-        gradient_config = GradientConfig(title="Speed m/s", ranges=[[0, 40, 0, 100, 5]])
+        gradient_config = GradientConfig(title="Speed m/s", ranges=[[0, 40, 0, 100, 5]], paint_step=0.1)
         self._vertical_gradient = VerticalGradientValue(gradient_config)
         left_layout.addWidget(self._vertical_gradient, stretch=1)
 
@@ -648,13 +655,13 @@ class TimeSpacePlotWidget(QWidget):
                 series['plot_item'].setPen(pens)
                 series['plot_item'].setBrush(brushes)
         logger.debug("Updated plot colors based on selected series and color mode")
-    
+
     def _on_speed_gradient_toggled(self, checked: bool):
         """Handle speed gradient toggle switch.
 
         When on, each point of every active (non-dimmed) trajectory is colored
-        by its speed via the vertical gradient.  When off, trajectories return
-        to their flat per-vehicle series color.  Either way only the brushes
+        by its speed via the vertical gradient. When off, trajectories return
+        to their flat per-vehicle series color. Either way only the brushes
         are updated in-place; no database round-trip is needed.
 
         Args:
@@ -662,55 +669,49 @@ class TimeSpacePlotWidget(QWidget):
         """
         self._speed_gradient_enabled = checked
         if self._series:
-            self._update_plot_colors()
+            QTimer.singleShot(0, self._update_plot_colors)
         logger.debug(f"Speed gradient toggled: {checked}")
 
     def _get_point_brushes(self, veh_id: int):
         """Return per-point (pens, brushes) lists for a vehicle.
-
+    
+        All pen/brush objects are sourced from pre-built lookup dicts —
+        no pg.mkPen or pg.mkBrush calls are made at paint time.
+    
         Decision tree:
-          1. Dimmed (unselected while a selection exists) → flat neutral grey.
-          2. Speed-gradient mode active → per-point color from gradient lookup.
-          3. Default → flat per-vehicle series color.
-
+          1. Dimmed (unselected while a selection exists) → flat dimmed colour.
+          2. Speed-gradient mode active → per-point colour from gradient lookup,
+             clamped to the configured range (no missing-colour concept).
+          3. Default → flat per-vehicle series colour.
+    
         Args:
             veh_id (int): Vehicle ID.
-
+    
         Returns:
             tuple[list, list]: (pens, brushes) — one entry per data point.
         """
-        series = self._series[veh_id]
-        n = len(series['veh_time'])
-
-        # Determine whether this vehicle is dimmed
+        series    = self._series[veh_id]
+        n         = len(series['veh_time'])
         is_dimmed = bool(self._selected_series) and veh_id not in self._selected_series
-
+    
         if is_dimmed:
-            # Flat neutral grey for every point
-            pen = pg.mkPen(color='#a9a9a9')
-            brush = pg.mkBrush(color='#a9a9a9')
-            return [pen] * n, [brush] * n
-
+            p, b = self.series_paint[self._DIMMED_COLOR]
+            return [p] * n, [b] * n
+    
         if self._speed_gradient_enabled:
-            # Per-point color from the speed → gradient lookup
-            speeds = series.get('veh_speed')
-            pens = []
+            speeds  = series.get('veh_speed')
+            pens    = []
             brushes = []
             for i in range(n):
-                spd = speeds[i] if speeds is not None and i < len(speeds) else None
-                if spd is not None and not np.isnan(spd):
-                    hex_color = self._vertical_gradient.value_to_color_hex(float(spd))
-                else:
-                    hex_color = '#808080'   # grey for missing/NaN speed
-                pens.append(pg.mkPen(color=hex_color))
-                brushes.append(pg.mkBrush(color=hex_color))
+                s = float(speeds[i]) if (speeds is not None and i < len(speeds)
+                                         and not np.isnan(speeds[i])) else 0.0
+                p, b = self._vertical_gradient.get_paint(s)
+                pens.append(p)
+                brushes.append(b)
             return pens, brushes
-
-        # Default: flat per-vehicle series color
-        color = series['color']
-        pen = pg.mkPen(color=color)
-        brush = pg.mkBrush(color=color)
-        return [pen] * n, [brush] * n
+    
+        p, b = self.series_paint[series['color']]
+        return [p] * n, [b] * n
 
     def _clear_gh_overlay(self):
         """Remove transient hover gap/headway lines and labels from the plot."""
@@ -777,6 +778,7 @@ class TimeSpacePlotWidget(QWidget):
                 hway_b, hway_f : backward/forward time headway (s); may be None/NaN.
                 target_list    : list to append created pg items to.
             """
+            NUDGE_PX = 10
             LINE_PEN    = pg.mkPen(color=(120, 120, 120), width=3,
                                    style=Qt.PenStyle.SolidLine)
             LABEL_COLOR = (80, 80, 80)
@@ -785,15 +787,19 @@ class TimeSpacePlotWidget(QWidget):
                 item = pg.PlotDataItem([x0, x1], [y0, y1], pen=LINE_PEN)
                 self._scatter_plot.addItem(item)
                 target_list.append(item)
-    
-            def _add_label(x, y, text, anchor, angle=0):
+
+            def _add_label(x, y, text, anchor, angle=0, dx_px=0, dy_px=0):
                 item = pg.TextItem(text=text, color=LABEL_COLOR, anchor=anchor,
                                    angle=angle)
-                item.setPos(x, y)
                 item.setFont(pg.QtGui.QFont("Arial", 8))
+                if dx_px != 0 or dy_px != 0:
+                    px_w, px_h = self._scatter_plot.getViewBox().viewPixelSize()
+                    x = x + dx_px * px_w
+                    y = y + dy_px * px_h
+                item.setPos(x, y)
                 self._scatter_plot.addItem(item)
                 target_list.append(item)
-    
+                
             # ── vertical lines (gap — same time, different distance) ─────────────
             #
             # gap_f: other vehicle is at higher dist at same time → line goes UP
@@ -807,7 +813,8 @@ class TimeSpacePlotWidget(QWidget):
                 _add_label(veh_time, veh_dist,
                            f"{gap_f:.2f} m",
                            anchor=(0.0, 0.0),
-                           angle=90)
+                           angle=90,
+                           dy_px=NUDGE_PX)
     
             if math.isfinite(gap_b):
                 y_end = veh_dist - gap_b
@@ -815,7 +822,8 @@ class TimeSpacePlotWidget(QWidget):
                 _add_label(veh_time, veh_dist,
                            f"{gap_b:.2f} m",
                            anchor=(1.0, 1.0),
-                           angle=90)
+                           angle=90,
+                           dy_px=-NUDGE_PX)
     
             # ── horizontal lines (headway — same distance, different time) ───────
             #
@@ -829,14 +837,16 @@ class TimeSpacePlotWidget(QWidget):
                 _add_line(veh_time, veh_dist, x_end, veh_dist)
                 _add_label(veh_time, veh_dist,
                            f"{hway_f:.2f} s",
-                           anchor=(1.0, 1.0))
+                           anchor=(1.0, 1.0),
+                           dx_px=-NUDGE_PX)
     
             if math.isfinite(hway_b):
                 x_end = veh_time + hway_b
                 _add_line(veh_time, veh_dist, x_end, veh_dist)
                 _add_label(veh_time, veh_dist,
                            f"{hway_b:.2f} s",
-                           anchor=(0.0, 0.0))
+                           anchor=(0.0, 0.0),
+                           dx_px=NUDGE_PX)
     
             logger.debug(
                 f"Drew GH overlay for veh {veh_id} at t={veh_time:.2f}: "

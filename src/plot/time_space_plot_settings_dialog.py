@@ -93,15 +93,13 @@ class TimeSpacePlotSettingsDialog(QDialog):
         top_layout.addStretch()
         
         # Lane count
-        top_layout.addWidget(QLabel("Lanes:"))
-        self._lane_count_label = QLabel("0")
+        self._lane_count_label = QLabel("Lanes: 0")
         top_layout.addWidget(self._lane_count_label)
         
         top_layout.addStretch()
         
         # Vehicle count
-        top_layout.addWidget(QLabel("Total Vehicles:"))
-        self._veh_count_label = QLabel("0")
+        self._veh_count_label = QLabel("Total Vehicles: 0")
         top_layout.addWidget(self._veh_count_label)
         
         top_layout.addStretch()  # Right spacer
@@ -251,11 +249,17 @@ class TimeSpacePlotSettingsDialog(QDialog):
             # Update lane list from summary
             lane_pairs = summary.get("lane_id", [])
             lane_ids = [str(pair[0]) for pair in lane_pairs]
-            self._lane_count_label.setText(', '.join(map(str, lane_ids)))
+            self._lane_count_label.setText("Lanes: " + ', '.join(lane_ids))
+            
+            orig_lane_ids = [str(pair[1]) for pair in lane_pairs if len(pair) > 1 and pair[1] is not None]
+            if orig_lane_ids:
+                self._lane_count_label.setToolTip("Orig: " + ', '.join(orig_lane_ids))
+            else:
+                self._lane_count_label.setToolTip("")            
 
             # Update vehicle count from summary
             veh_ids = summary.get("veh_id", [])
-            self._veh_count_label.setText(str(len(veh_ids)))
+            self._veh_count_label.setText(f"Total Vehicles: {len(veh_ids)}")
             
             # Update slider ranges from summary
             time_range = summary.get("veh_time", [0, 0])
