@@ -5,12 +5,12 @@ from PyQt6.QtGui import QPainter, QColor
 class ToggleSwitch(QWidget):
     toggled = pyqtSignal(bool)
 
-    def __init__(self, height=20, parent=None):
+    def __init__(self, diameter=20, parent=None):
         super().__init__(parent)
-        self._knob_margin = 2
-        self._knob_size = height - (self._knob_margin * 2)  # fills height with margin
-        self.setFixedSize((height + self._knob_margin) * 2, height)
-        self._checked = False
+        self._knob_size   = diameter
+        self._knob_margin = max(1, round(diameter * 0.1))
+        self.setFixedSize(diameter * 2 + self._knob_margin * 3, diameter + self._knob_margin * 2)
+        self._checked  = False
         self._position = self._knob_margin
         self._animation = QPropertyAnimation(self, b"position", self)
         self._animation.setDuration(120)
