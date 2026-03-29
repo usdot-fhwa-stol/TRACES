@@ -272,7 +272,107 @@ class CustomViewBox(pg.ViewBox):
         
         # For other clicks, use default behavior
         super().mouseClickEvent(ev)
+
+    def wheelEvent(self, ev, axis=None):
+        """Zoom the view on scroll-wheel, preserving aspect ratio.
     
+        Zooms toward the cursor position.  The resulting range is clamped
+        so that neither axis drops below ``_MIN_AXIS_SPAN`` (10 units) and
+        neither edge exceeds the slider's configured min/max.  After
+        clamping, the time and distance sliders are updated, which in turn
+        drives the ViewBox range through ``_on_slider_changed``.
+    
+        Args:
+            ev:   QGraphicsSceneWheelEvent (scene-level wheel event).
+            axis: Unused; kept for signature compatibility with ViewBox.
+        """
+        _BASE_MIN_SPAN = 10.0
+        _ZOOM_FACTOR = 0.9  # <1 means scroll-up zooms in
+    
+        delta = ev.delta()
+        if delta == 0:
+            ev.accept()
+            return
+    
+        # Determine zoom direction
+        scale = _ZOOM_FACTOR if delta > 0 else 1.0 / _ZOOM_FACTOR
+    
+        # Current ranges from the sliders (source of truth)
+        t_lo, t_hi = self.parent_widget._time_slider.value()
+        d_lo, d_hi = self.parent_widget._dist_slider.value()
+        t_span = t_hi - t_lo
+        d_span = d_hi - d_lo
+    
+        # Proportional minimum spans: the larger axis gets a scaled-up floor
+        # so both axes hit their zoom limit at the same relative level.
+        slider_t_min = self.parent_widget._time_slider.minimum()
+        slider_t_max = self.parent_widget._time_slider.maximum()
+        slider_d_min = self.parent_widget._dist_slider.minimum()
+        slider_d_max = self.parent_widget._dist_slider.maximum()
+    
+        total_t = slider_t_max - slider_t_min
+        total_d = slider_d_max - slider_d_min
+    
+        if total_t > 0 and total_d > 0:
+            ratio = max(total_t, total_d) / min(total_t, total_d)
+            if total_t >= total_d:
+                min_t_span = _BASE_MIN_SPAN * ratio
+                min_d_span = _BASE_MIN_SPAN
+            else:
+                min_t_span = _BASE_MIN_SPAN
+                min_d_span = _BASE_MIN_SPAN * ratio
+        else:
+            min_t_span = _BASE_MIN_SPAN
+            min_d_span = _BASE_MIN_SPAN
+    
+        # Cursor position in view coords — zoom centres on this point
+        mouse_point = self.mapSceneToView(ev.scenePos())
+        mx, my = mouse_point.x(), mouse_point.y()
+    
+        # Fractional position of cursor within current window
+        fx = (mx - t_lo) / t_span if t_span else 0.5
+        fy = (my - d_lo) / d_span if d_span else 0.5
+        fx = max(0.0, min(1.0, fx))
+        fy = max(0.0, min(1.0, fy))
+    
+        # New spans (aspect-ratio preserved because both use the same scale)
+        new_t_span = max(t_span * scale, min_t_span)
+        new_d_span = max(d_span * scale, min_d_span)
+    
+        # New edges, keeping cursor at the same fractional position
+        new_t_lo = mx - fx * new_t_span
+        new_t_hi = new_t_lo + new_t_span
+        new_d_lo = my - fy * new_d_span
+        new_d_hi = new_d_lo + new_d_span
+    
+        # Clamp to slider hard limits
+        slider_t_min = self.parent_widget._time_slider.minimum()
+        slider_t_max = self.parent_widget._time_slider.maximum()
+        slider_d_min = self.parent_widget._dist_slider.minimum()
+        slider_d_max = self.parent_widget._dist_slider.maximum()
+    
+        if new_t_lo < slider_t_min:
+            new_t_lo = slider_t_min
+            new_t_hi = new_t_lo + new_t_span
+        if new_t_hi > slider_t_max:
+            new_t_hi = slider_t_max
+            new_t_lo = new_t_hi - new_t_span
+        new_t_lo = max(new_t_lo, slider_t_min)
+    
+        if new_d_lo < slider_d_min:
+            new_d_lo = slider_d_min
+            new_d_hi = new_d_lo + new_d_span
+        if new_d_hi > slider_d_max:
+            new_d_hi = slider_d_max
+            new_d_lo = new_d_hi - new_d_span
+        new_d_lo = max(new_d_lo, slider_d_min)
+    
+        # Push values through the sliders so everything stays in sync
+        self.parent_widget._time_slider.setValue((new_t_lo, new_t_hi))
+        self.parent_widget._dist_slider.setValue((new_d_lo, new_d_hi))
+    
+        ev.accept()
+
     def _show_context_menu(self, ev):
         """Show custom context menu based on click location and current state.
         
