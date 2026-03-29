@@ -375,7 +375,9 @@ class TimeSpacePlotWidget(QWidget):
                 segments.append((
                     seg_start, j,
                     float(seg_times[0]), float(seg_times[-1]),
-                    float(np.min(seg_dists)), float(np.max(seg_dists))
+                    float(np.min(seg_dists)), float(np.max(seg_dists)),
+                    times[seg_start:j],         # seg_t view
+                    distances[seg_start:j]      # seg_d view
                 ))
                 seg_start = j
         # Close final segment
@@ -385,7 +387,9 @@ class TimeSpacePlotWidget(QWidget):
             segments.append((
                 seg_start, len(times),
                 float(seg_times[0]), float(seg_times[-1]),
-                float(np.min(seg_dists)), float(np.max(seg_dists))
+                float(np.min(seg_dists)), float(np.max(seg_dists)),
+                times[seg_start:],          # seg_t view
+                distances[seg_start:]       # seg_d view
             ))
         series['segments'] = segments
 
@@ -901,14 +905,11 @@ class TimeSpacePlotWidget(QWidget):
     
                 t_arr = series['veh_time']
                 d_arr = series['veh_dist_trav']
-    
-                for seg_start, seg_end, t_min, t_max, d_min, d_max in series.get('segments', []):
+
+                for seg_start, seg_end, t_min, t_max, d_min, d_max, seg_t, seg_d in series.get('segments', []):
     
                     # ── Gap check: does this segment bracket veh_time? ────────
                     if t_min <= veh_time <= t_max:
-                        seg_t = t_arr[seg_start:seg_end]
-                        seg_d = d_arr[seg_start:seg_end]
-    
                         idx = int(np.searchsorted(seg_t, veh_time, side='left'))
                         idx = min(idx, len(seg_t) - 1)
     
