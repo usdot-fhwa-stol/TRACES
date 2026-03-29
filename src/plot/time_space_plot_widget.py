@@ -268,7 +268,9 @@ class TimeSpacePlotWidget(QWidget):
         # Set time slider range and values
         self._time_slider.setRange(time_min, time_max)
         self._time_slider.setValue(self._time_range)
-        
+
+        self._compute_min_spans()
+
         # Set initial plot view to match slider ranges
         self._scatter_plot.getViewBox().setRange(
             xRange=[time_min, time_max],
@@ -475,25 +477,72 @@ class TimeSpacePlotWidget(QWidget):
             logger.error(f"Error updating plot data: {e}")
 
     def _on_slider_changed(self):
-        """Handle changes to distance or time sliders by filtering the plot data and updating view."""
+        """Handle changes to distance or time sliders.
+
+        If either slider is narrower than its minimum span the range is
+        expanded symmetrically around its center (clamped to slider limits)
+        and written back to the slider.  The plot view is then updated.
+        """
         if not self._series:
             return
-            
-        # Clear selection box
+
         self._clear_selection_box()
-        
-        # Get current slider ranges
-        time_min, time_max = self._time_slider.value()
-        dist_min, dist_max = self._dist_slider.value()
-        
-        # Update plot view to match slider ranges
+
+        time_lo, time_hi = self._time_slider.value()
+        dist_lo, dist_hi = self._dist_slider.value()
+
+        # ── enforce minimum time span ────────────────────────────────
+        if (time_hi - time_lo) < self._min_time_span:
+            center = (time_lo + time_hi) / 2.0
+            half = self._min_time_span / 2.0
+            time_lo = center - half
+            time_hi = center + half
+
+            # clamp to slider hard limits
+            s_min = self._time_slider.minimum()
+            s_max = self._time_slider.maximum()
+            if time_lo < s_min:
+                time_lo = s_min
+                time_hi = time_lo + self._min_time_span
+            if time_hi > s_max:
+                time_hi = s_max
+                time_lo = time_hi - self._min_time_span
+            time_lo = max(time_lo, s_min)
+
+            self._time_slider.blockSignals(True)
+            self._time_slider.setValue((time_lo, time_hi))
+            self._time_slider.blockSignals(False)
+
+        # ── enforce minimum distance span ────────────────────────────
+        if (dist_hi - dist_lo) < self._min_dist_span:
+            center = (dist_lo + dist_hi) / 2.0
+            half = self._min_dist_span / 2.0
+            dist_lo = center - half
+            dist_hi = center + half
+
+            s_min = self._dist_slider.minimum()
+            s_max = self._dist_slider.maximum()
+            if dist_lo < s_min:
+                dist_lo = s_min
+                dist_hi = dist_lo + self._min_dist_span
+            if dist_hi > s_max:
+                dist_hi = s_max
+                dist_lo = dist_hi - self._min_dist_span
+            dist_lo = max(dist_lo, s_min)
+
+            self._dist_slider.blockSignals(True)
+            self._dist_slider.setValue((dist_lo, dist_hi))
+            self._dist_slider.blockSignals(False)
+
+        # ── update plot view ─────────────────────────────────────────
         self._scatter_plot.getViewBox().setRange(
-            xRange=[time_min, time_max],
-            yRange=[dist_min, dist_max],
+            xRange=[time_lo, time_hi],
+            yRange=[dist_lo, dist_hi],
             padding=0
         )
 
-        logger.debug(f"Applied slider filters: time=[{time_min}, {time_max}], dist=[{dist_min}, {dist_max}]")
+        logger.debug(f"Applied slider filters: time=[{time_lo}, {time_hi}], "
+                      f"dist=[{dist_lo}, {dist_hi}]")
 
     def _handle_mouse_moved(self, pos):
         """Handle mouse movement: gap/headway overlay or normal tooltip.
@@ -613,7 +662,32 @@ class TimeSpacePlotWidget(QWidget):
             self._tooltip.setStyleSheet(
                 "QLabel { background-color: #000; color: #fff; padding: 5px; }"
             )
-            self._tooltip.move(int(pos.x()) + 10, int(pos.y()) + 10)
+            self._tooltip.adjustSize()
+            tip_w = self._tooltip.width()
+            tip_h = self._tooltip.height()
+            plot_rect = self._scatter_plot.rect()
+
+            cursor_x = int(pos.x())
+            cursor_y = int(pos.y())
+            margin = 10
+
+            # Horizontal: prefer right of cursor, flip to left if clipped
+            if cursor_x + margin + tip_w > plot_rect.width():
+                tip_x = cursor_x - margin - tip_w
+            else:
+                tip_x = cursor_x + margin
+
+            # Vertical: prefer below cursor, flip to above if clipped
+            if cursor_y + margin + tip_h > plot_rect.height():
+                tip_y = cursor_y - margin - tip_h
+            else:
+                tip_y = cursor_y + margin
+
+            # Clamp so it never goes past the top-left either
+            tip_x = max(0, tip_x)
+            tip_y = max(0, tip_y)
+
+            self._tooltip.move(tip_x, tip_y)
             self._tooltip.show()
 
         else:
@@ -982,3 +1056,28 @@ class TimeSpacePlotWidget(QWidget):
                                 break
     
             return gap_f, gap_b, hway_f, hway_b
+
+    _BASE_MIN_SPAN = 10.0          # absolute floor for the smaller axis
+
+    def _compute_min_spans(self):
+        """Compute aspect-ratio-aware minimum spans from the current slider limits.
+
+        The shorter axis gets _BASE_MIN_SPAN and the longer axis gets a
+        proportionally larger floor so both hit their zoom limit at the
+        same relative scale.  Results are stored on the widget so both the
+        CustomViewBox wheel handler and the slider handler can use them.
+        """
+        t_total = self._time_slider.maximum() - self._time_slider.minimum()
+        d_total = self._dist_slider.maximum() - self._dist_slider.minimum()
+
+        if t_total > 0 and d_total > 0:
+            ratio = max(t_total, d_total) / min(t_total, d_total)
+            if t_total >= d_total:
+                self._min_time_span = self._BASE_MIN_SPAN * ratio
+                self._min_dist_span = self._BASE_MIN_SPAN
+            else:
+                self._min_time_span = self._BASE_MIN_SPAN
+                self._min_dist_span = self._BASE_MIN_SPAN * ratio
+        else:
+            self._min_time_span = self._BASE_MIN_SPAN
+            self._min_dist_span = self._BASE_MIN_SPAN
