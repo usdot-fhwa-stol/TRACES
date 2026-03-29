@@ -30,6 +30,20 @@ class _ImportWorkerThread(QThread):
         self._continue_to_plot = False
         logger.debug(f"ImportWorkerThread initialized with input: {input_path}, output: {output_path}")
 
+    def _cleanup_failed_import(self):
+        """Close the database connection and remove the output file on failure."""
+        if self.db_connection:
+            try:
+                self.db_connection.close()
+            except Exception as e:
+                logger.error(f"Error closing database connection during cleanup: {e}")
+            self.db_connection = None
+        try:
+            if Path(self.output_path).exists():
+                Path(self.output_path).unlink()
+        except OSError as e:
+            logger.error(f"Could not remove failed output file: {e}")
+
     def run(self):
         """Execute the import process."""
         logger.debug("ImportWorkerThread.run() started")
@@ -128,6 +142,7 @@ class _ImportWorkerThread(QThread):
             if not issubclass(processor_class, BaseProcess):
                 logger.error("Processor class is not a subclass of BaseProcess")
                 self.log_signal.emit("Error: Processor class is not a subclass of BaseProcess.", False)
+                self._cleanup_failed_import()
                 return
 
             processor = processor_class()
@@ -217,20 +232,21 @@ class _ImportWorkerThread(QThread):
                 logger.info(f"Import completed successfully: {self.input_path}")
             else:
                 logger.debug("Import was interrupted, cleaning up")
-                self.log_signal.emit("Import interrupted", False)
-                if Path(self.output_path).exists():
-                    Path(self.output_path).unlink()
+                if self.interrupt_flag:
+                    self.log_signal.emit("Import interrupted", False)
+                self._cleanup_failed_import()   # closes connection, then deletes file
 
         except Exception as e:
             logger.exception(f"Exception in ImportWorkerThread.run(): {e}")
             self.log_signal.emit(f"Error during import: {str(e)}", False)
         finally:
             logger.debug("ImportWorkerThread.run() finishing, closing database connection")
-            try:
-                if self.db_connection:
+            if self.db_connection:
+                try:
                     self.db_connection.close()
-            except Exception as e:
-                logger.error(f"Error closing database connection: {e}")
+                except Exception as e:
+                    logger.error(f"Error closing database connection: {e}")
+                self.db_connection = None
 
         if error_count == 0 and not self.interrupt_flag:
             self.log_signal.emit("Info: Import completed successfully.", True)

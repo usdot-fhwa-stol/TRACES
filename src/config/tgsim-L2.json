@@ -6,6 +6,7 @@
     "x_map_loc": {"src_col": 2},
     "y_map_loc": {"src_col": 3},
     "lane_id": {"func": "lane_tgsim_L1L2", "parms": [4]},
+    "orig_lane_id": {"src_col": 4, "type": "int"},
     "veh_speed": {"src_col": 5},
     "veh_accel": {"src_col": 6},
     "veh_length": {"src_col": 7},

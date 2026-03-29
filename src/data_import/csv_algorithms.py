@@ -105,21 +105,12 @@ class CsvAlgorithms:
         Returns:
             int: Calculated lane ID or None if invalid.
         """
-        src_col = col_def.get("src_col", -1)
         parms = col_def.get("parms", [])
-        
-        if src_col < 0 or src_col >= len(row) or not row[src_col] or len(parms) < 1:
+        if len(parms) < 1 or parms[0] < 0 or parms[0] >= len(row) or not row[parms[0]]:
             return None
-        
-        if parms[0] < 0 or parms[0] >= len(row):
-            return None
-        
         try:
             lane_kf = int(float(row[parms[0]]))
-            if lane_kf < 0:
-                return -lane_kf;
-            else:
-                return lane_kf
+            return -lane_kf if lane_kf < 0 else lane_kf
         except (ValueError, TypeError):
             return None
 
@@ -133,21 +124,12 @@ class CsvAlgorithms:
         Returns:
             int: Calculated lane ID or None if invalid.
         """
-        src_col = col_def.get("src_col", -1)
         parms = col_def.get("parms", [])
-        
-        if src_col < 0 or src_col >= len(row) or not row[src_col] or len(parms) < 1:
+        if len(parms) < 1 or parms[0] < 0 or parms[0] >= len(row) or not row[parms[0]]:
             return None
-        
-        if parms[0] < 0 or parms[0] >= len(row):
-            return None
-        
         try:
             lane_kf = int(float(row[parms[0]]))
-            if lane_kf > 9:
-                return lane_kf - 9;
-            else:
-                return lane_kf
+            return lane_kf - 9 if lane_kf > 9 else lane_kf
         except (ValueError, TypeError):
             return None
 
