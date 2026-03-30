@@ -42,6 +42,8 @@ class TimeSpacePlotWidget(QWidget):
         _veh_ids (list): List of available vehicle IDs for entire event.
         series_color (list): Static list of HTML hex colors for series.
         text_color (list): Static list of text colors for tooltip content.
+        _min_time_span (float): Minimum allowed time slider span for zoom limiting.
+        _min_dist_span (float): Minimum allowed distance slider span for zoom limiting.
     """
 
     _DIMMED_COLOR  = '#a9a9a9'
@@ -64,6 +66,7 @@ class TimeSpacePlotWidget(QWidget):
     ]
 
     _SERIES_SEG_THRESHOLD = 0.3   # seconds; max intra-segment time gap
+    _BASE_MIN_SPAN = 10.0          # absolute floor for the smaller axis
 
     def __init__(self, parent=None):
         """Initialize the TimeSpacePlotWidget.
@@ -95,7 +98,9 @@ class TimeSpacePlotWidget(QWidget):
         self._gh_mode_enabled = False
         self._gh_overlay_items = [] # transient hover items
         self._gh_locked_items = {}  # dict: (veh_id, veh_time) -> list[pg items]
-
+        self._min_time_span = self._BASE_MIN_SPAN
+        self._min_dist_span = self._BASE_MIN_SPAN
+    
         logger.debug("TimeSpacePlotWidget initialized")
         
         self._setup_ui()
@@ -1056,8 +1061,6 @@ class TimeSpacePlotWidget(QWidget):
                                 break
     
             return gap_f, gap_b, hway_f, hway_b
-
-    _BASE_MIN_SPAN = 10.0          # absolute floor for the smaller axis
 
     def _compute_min_spans(self):
         """Compute aspect-ratio-aware minimum spans from the current slider limits.
