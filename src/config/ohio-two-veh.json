@@ -3,7 +3,7 @@
   "class": "data_import.csv_process.CsvProcess", 
   "col_defs": 
   {
-    "event_id": {"func": "group", "parms": [49, 50, 53]},
+    "event_id": {"func": "group", "parms": [49, 50, 53, 54, 55]},
     "veh_id": {"src_col": 0, "type": "int"},
     "veh_time": {"src_col": 1},
     "lane_id": {"src_col": 43, "type": "int"},

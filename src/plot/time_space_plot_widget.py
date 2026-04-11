@@ -4,9 +4,9 @@ import time
 import numpy as np
 import sqlite3
 from PyQt6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QPushButton, 
-                           QLabel, QComboBox, QDialog)
+    QLabel, QComboBox, QDialog)
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QKeyEvent
+from PyQt6.QtGui import QKeyEvent, QAction, QActionGroup
 import pyqtgraph as pg
 from superqt import QLabeledRangeSlider
 from .time_space_plot_settings_dialog import TimeSpacePlotSettingsDialog
@@ -24,6 +24,7 @@ class TimeSpacePlotWidget(QWidget):
     interactive controls on the right for filtering and manipulating the data view.
     
     Attributes:
+        _mode_menu (QMenu): Application menu to update with plot interaction modes.
         _db_connection (sqlite3.Connection): Database connection for querying.
         _scatter_plot (pg.PlotWidget): PyQtGraph scatter plot widget.
         _event_button (QPushButton): Button to open settings dialog.
@@ -68,13 +69,14 @@ class TimeSpacePlotWidget(QWidget):
     _SERIES_SEG_THRESHOLD = 0.3   # seconds; max intra-segment time gap
     _BASE_MIN_SPAN = 10.0          # absolute floor for the smaller axis
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, mode_menu=None):
         """Initialize the TimeSpacePlotWidget.
         
         Args:
             parent: Parent widget (typically MainWindow).
         """
         super().__init__(parent)
+        self._mode_menu = mode_menu
         self._db_connection = None
         self._scatter_plot = None
         self._event_button = None
@@ -83,7 +85,6 @@ class TimeSpacePlotWidget(QWidget):
         self._time_slider = None
         self._vertical_gradient = None
         self._speed_toggle = None
-        self._gap_headway_toggle = None
         self._current_event_id = None
         self._time_range = (0.0, 0.0)
         self._dist_range = (0.0, 0.0)
@@ -118,18 +119,12 @@ class TimeSpacePlotWidget(QWidget):
         self._vertical_gradient = VerticalGradientValue(gradient_config)
         left_layout.addWidget(self._vertical_gradient, stretch=1)
 
-        # Toggle switches
+        # Show speed gradient toggle switch
         self._speed_toggle = ToggleSwitch()
         self._speed_toggle.toggled.connect(self._on_speed_gradient_toggled)
         speed_toggle_label = QLabel("Show Speed") # speed toggle label
         left_layout.addWidget(speed_toggle_label, alignment=Qt.AlignmentFlag.AlignHCenter)
         left_layout.addWidget(self._speed_toggle, alignment=Qt.AlignmentFlag.AlignHCenter)
-
-        self._gap_headway_toggle = ToggleSwitch()
-        self._gap_headway_toggle.toggled.connect(self._on_gap_headway_toggled)
-        gap_headway_toggle_label = QLabel("Show Gap\nHeadway") # gap/headway toggle label
-        left_layout.addWidget(gap_headway_toggle_label, alignment=Qt.AlignmentFlag.AlignHCenter)
-        left_layout.addWidget(self._gap_headway_toggle, alignment=Qt.AlignmentFlag.AlignHCenter)
 
         main_layout.addLayout(left_layout)
 
@@ -282,6 +277,8 @@ class TimeSpacePlotWidget(QWidget):
             yRange=[dist_min, dist_max],
             padding=0
         )
+        
+        self._setup_mode_menu()
         
     def _initialize_series_from_ids(self):
         """Initialize the _series dictionary using the provided vehicle IDs."""
@@ -815,8 +812,59 @@ class TimeSpacePlotWidget(QWidget):
         for item in items:
             self._scatter_plot.removeItem(item)
 
-    def _on_gap_headway_toggled(self, checked: bool):
-        """Enable or disable gap/headway overlay mode.
+    def _setup_mode_menu(self):
+        """Populate and enable the Mode menu with exclusive interaction mode actions.
+
+        Called from _apply_settings the first time data is loaded so the menu
+        is only active while a plot is displayed.  The menu is cleared and
+        rebuilt each time to ensure a clean state when a new dataset is opened.
+
+        The two mutually exclusive modes are:
+            - Select Trajectory (default): normal lasso / click selection.
+            - Gap Headway: hover / click gap and headway overlay.
+
+        A QActionGroup enforces that exactly one action is checked at all times.
+        The widget state (_gh_mode_enabled) is synchronised immediately so the
+        menu reflects the current mode even before the user changes it.
+        """
+        if self._mode_menu is None:
+            return
+
+        self._mode_menu.clear()
+
+        action_group = QActionGroup(self._mode_menu)
+        action_group.setExclusive(True)
+
+        select_action = QAction("Select Trajectory", self._mode_menu)
+        select_action.setCheckable(True)
+        select_action.setChecked(True)
+        select_action.triggered.connect(
+            lambda checked: self._on_mode_changed("select") if checked else None
+        )
+        action_group.addAction(select_action)
+        self._mode_menu.addAction(select_action)
+
+        gh_action = QAction("Gap Headway", self._mode_menu)
+        gh_action.setCheckable(True)
+        gh_action.setChecked(False)
+        gh_action.triggered.connect(
+            lambda checked: self._on_mode_changed("gap_headway") if checked else None
+        )
+        action_group.addAction(gh_action)
+        self._mode_menu.addAction(gh_action)
+
+        # Ensure widget state matches the default checked action.
+        self._gh_mode_enabled = False
+
+        self._mode_menu.setEnabled(True)
+        logger.debug("Mode menu populated and enabled")
+
+    def _on_mode_changed(self, mode: str):
+        """Handle interaction mode changes driven by the Mode menu.
+
+        Replaces _on_gap_headway_toggled. Keeps _gh_mode_enabled as the
+        single source of truth consumed by CustomViewBox and the mouse
+        handlers, so no other code needs to change.
 
         When enabled:
           - Normal trajectory selection is suppressed.
@@ -826,13 +874,19 @@ class TimeSpacePlotWidget(QWidget):
         When disabled:
           - All overlay graphics are removed.
           - Normal selection behaviour is restored.
+
+        Args:
+            mode (str): Either "select" or "gap_headway".
         """
-        self._gh_mode_enabled = checked
-        if not checked:
+        if mode == "gap_headway":
+            self._gh_mode_enabled = True
+            logger.debug("Mode changed to: Gap Headway")
+        else:
+            self._gh_mode_enabled = False
             self._clear_gh_overlay()
-            self._clear_gh_all_locked()        # clears entire dict
+            self._clear_gh_all_locked()
             self._tooltip.hide()
-        logger.debug(f"Gap/headway mode toggled: {checked}")
+            logger.debug("Mode changed to: Select Trajectory")
 
     def _draw_gh_overlay(self, veh_id: int, veh_time: float, veh_dist: float,
                              gap_b, gap_f, hway_b, hway_f, *,

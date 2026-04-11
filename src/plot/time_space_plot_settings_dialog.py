@@ -2,7 +2,7 @@ import sqlite3
 import logging
 import json
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton, 
-                           QLabel, QComboBox, QWidget, QSizePolicy)
+    QLabel, QComboBox, QWidget, QSizePolicy, QMessageBox)
 from PyQt6.QtCore import pyqtSignal, Qt, QTimer
 from superqt import QLabeledRangeSlider
 
@@ -56,6 +56,7 @@ class TimeSpacePlotSettingsDialog(QDialog):
         self._apply_button = None
         self._current_event_id = None
         self._record_limit = 500
+        self._current_record_count = 0
         self._current_event_summary = {}
         
         logger.debug("TimeSpacePlotSettingsDialog initialized")
@@ -162,7 +163,6 @@ class TimeSpacePlotSettingsDialog(QDialog):
         # Apply button
         self._apply_button = QPushButton("Apply")
         self._apply_button.clicked.connect(self._on_apply)
-        self._apply_button.setEnabled(False)
         bottom_layout.addWidget(self._apply_button)
         
         bottom_layout.addStretch()  # Right spacer
@@ -211,7 +211,7 @@ class TimeSpacePlotSettingsDialog(QDialog):
                 
         except sqlite3.Error as e:
             logger.error(f"Error populating events: {e}")
-            
+
     def _on_event_changed(self, index: int):
         """Handle event combobox selection change.
         
@@ -351,16 +351,17 @@ class TimeSpacePlotSettingsDialog(QDialog):
             
         except sqlite3.Error as e:
             logger.error(f"Error updating time slider from distance selection: {e}")
-            
+
     def _update_record_count(self):
-        """Update the record count label and enable/disable Apply button."""
+        """Update the record count label. The Apply button is always enabled;
+        the limit is advisory only."""
         if not self._db_connection or self._current_event_id is None:
             return
-            
+
         try:
             time_min, time_max = self._time_slider.value()
             dist_min, dist_max = self._dist_slider.value()
-            
+
             cursor = self._db_connection.cursor()
             cursor.execute("""
                 SELECT COUNT(DISTINCT veh_id) 
@@ -369,31 +370,62 @@ class TimeSpacePlotSettingsDialog(QDialog):
                 AND veh_time BETWEEN ? AND ? 
                 AND veh_dist_trav BETWEEN ? AND ?
             """, (self._current_event_id, time_min, time_max, dist_min, dist_max))
-            
-            record_count = cursor.fetchone()[0]
-            self._record_count_label.setText(f"{record_count} of {self._record_limit} vehicle limit")
-            
-            # Color the label based on record limit
-            if record_count > self._record_limit:
-                self._record_count_label.setStyleSheet("color: #F00; background-color: #000; font-weight: bold; padding: 2px; border-radius: 2px; border: 1px solid #999;")
+
+            self._current_record_count = cursor.fetchone()[0]   # <-- store it
+            self._record_count_label.setText(
+                f"{self._current_record_count} of {self._record_limit} vehicle limit"
+            )
+
+            if self._current_record_count > self._record_limit:
+                self._record_count_label.setStyleSheet(
+                    "color: #F00; background-color: #000; font-weight: bold; "
+                    "padding: 2px; border-radius: 2px; border: 1px solid #999;"
+                )
             else:
-                self._record_count_label.setStyleSheet("color: #0F0; background-color: #000; font-weight: bold; padding: 2px; border-radius: 2px; border: 1px solid #999;")
-            
-            # Enable/disable Apply button based on record limit
-            self._apply_button.setEnabled(record_count <= self._record_limit)
-            
+                self._record_count_label.setStyleSheet(
+                    "color: #0F0; background-color: #000; font-weight: bold; "
+                    "padding: 2px; border-radius: 2px; border: 1px solid #999;"
+                )
+
         except sqlite3.Error as e:
             logger.error(f"Error updating record count: {e}")
-            
+
     def _on_apply(self):
         """Handle Apply button click by emitting settings and closing dialog."""
-        if self._current_event_id is not None:
-            time_min, time_max = self._time_slider.value()
-            dist_min, dist_max = self._dist_slider.value()
-            
-            logger.debug(f"Applying settings: event_id={self._current_event_id}, "
-                f"time=[{time_min}, {time_max}], dist=[{dist_min}, {dist_max}]")
-            # Emit signal with lane_ids and veh_ids included
-            self.settings_applied.emit(self._current_event_id, 
-                time_min, time_max, dist_min, dist_max, self._current_event_summary)
-            self.accept()
+        if self._current_event_id is None:
+            return
+
+        if self._current_record_count > self._record_limit:
+            msg = QMessageBox(self)
+            msg.setWindowTitle("Vehicle Limit Exceeded")
+            msg.setIcon(QMessageBox.Icon.Warning)
+            msg.setText(
+                f"<b>{self._current_record_count}</b> vehicles are selected, "
+                f"which exceeds the recommended limit of {self._record_limit}."
+            )
+            msg.setInformativeText(
+                "This may result in slower plot performance. "
+                "Do you want to continue?"
+            )
+            msg.setStandardButtons(
+                QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel
+            )
+            msg.setDefaultButton(QMessageBox.StandardButton.Cancel)
+
+            if msg.exec() != QMessageBox.StandardButton.Ok:
+                return   # User chose to go back and adjust the filters
+
+        time_min, time_max = self._time_slider.value()
+        dist_min, dist_max = self._dist_slider.value()
+
+        logger.debug(
+            f"Applying settings: event_id={self._current_event_id}, "
+            f"time=[{time_min}, {time_max}], dist=[{dist_min}, {dist_max}]"
+        )
+        self.settings_applied.emit(
+            self._current_event_id,
+            time_min, time_max,
+            dist_min, dist_max,
+            self._current_event_summary,
+        )
+        self.accept()

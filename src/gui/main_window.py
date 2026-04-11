@@ -15,6 +15,7 @@ class MainWindow(QMainWindow):
         _recent_files (list): List of up to 7 recent file paths.
         _recent_menu (QMenu): Submenu for recent files.
         _export_menu (QMenu): Submenu for export options.
+        _mode_menu (QMenu): Top-level menu used by plots to set interaction mode.
         _db_connection (sqlite3.Connection): Current database connection.
         _plot_widget (TimeSpacePlotWidget): Plot widget for displaying trajectory data.
         _selected_export_columns (list): List of selected column names for export.
@@ -26,6 +27,7 @@ class MainWindow(QMainWindow):
         self._recent_files = []
         self._recent_menu = None
         self._export_menu = None
+        self._mode_menu = None
         self._db_connection = None
         self._plot_widget = None
         self._import_dialog = None
@@ -100,6 +102,10 @@ class MainWindow(QMainWindow):
         log_action = QAction("&Log", self)
         log_action.triggered.connect(self._show_log_viewer)
         view_menu.addAction(log_action)
+
+        self._mode_menu = QMenu("&Mode", self)
+        self._mode_menu.setEnabled(False)
+        menu_bar.addMenu(self._mode_menu)
 
     def _setup_home_page(self):
         self._home_widget = HomeWidget()
@@ -397,6 +403,10 @@ class MainWindow(QMainWindow):
         
         # Disable export menu
         self._export_menu.setEnabled(False)
+        
+        # Reset plot mode menu
+        self._mode_menu.setEnabled(False)
+        self._mode_menu.clear()
 
     def _create_plot_widget(self, event_id: int, time_min: float, time_max: float, 
                            dist_min: float, dist_max: float, event_summary: dict):
@@ -412,7 +422,7 @@ class MainWindow(QMainWindow):
         """
         from plot.time_space_plot_widget import TimeSpacePlotWidget
         if not self._plot_widget:
-            self._plot_widget = TimeSpacePlotWidget()
+            self._plot_widget = TimeSpacePlotWidget(mode_menu=self._mode_menu)
         
         # Set database connection and apply settings with all parameters
         self._plot_widget.set_database(self._db_connection)
