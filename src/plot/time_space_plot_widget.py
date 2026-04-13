@@ -92,6 +92,7 @@ class TimeSpacePlotWidget(QWidget):
         self._tooltip = None
         self._last_queried_point = None
         self._selected_series = set()
+        self._gh_saved_keys = set()  # set of (veh_id, veh_time) tuples
         self._speed_gradient_enabled = False
         self._last_mouse_move_time = 0.0
         self._lane_ids = []
@@ -421,6 +422,8 @@ class TimeSpacePlotWidget(QWidget):
         try:
             self._scatter_plot.clear()
             self._clear_selection_box()
+            self._gh_locked_items.clear()
+            self._gh_overlay_items.clear()
 
             for series in self._series.values():
                 series['plot_item'] = None
@@ -468,6 +471,9 @@ class TimeSpacePlotWidget(QWidget):
                     prev_veh_id, current_times, current_distances, current_speeds,
                     time_min, time_max, dist_min, dist_max
                 )
+
+            if self._gh_mode_enabled and self._gh_saved_keys:
+                self._restore_gh_locked()
 
             logger.debug(
                 f"Updated plot data for event {self._current_event_id}, "
@@ -706,13 +712,14 @@ class TimeSpacePlotWidget(QWidget):
     def keyPressEvent(self, event: QKeyEvent):
         """Handle key press events, clearing selection on Escape key."""
         if event.key() == Qt.Key.Key_Escape:
-            if self._gh_mode_enabled and self._gh_locked_items:
-                # In GH mode: clear all locked points
+            if self._gh_mode_enabled:
+                # GH mode: clear locked points and saved keys
                 self._clear_gh_all_locked()
+                self._gh_saved_keys.clear()
                 self._last_queried_point = None
                 logger.debug("Cleared all GH locked points on Escape")
             else:
-                # Normal mode: clear trajectory selection
+                # Select mode: clear trajectory selection
                 self._selected_series.clear()
                 self._update_plot_colors()
                 self._clear_selection_box()
@@ -808,6 +815,7 @@ class TimeSpacePlotWidget(QWidget):
     
     def _clear_gh_locked_point(self, pt_key: tuple):
         """Remove persistent lines for one locked point (veh_id, veh_time)."""
+        self._gh_saved_keys.discard(pt_key)
         items = self._gh_locked_items.pop(pt_key, [])
         for item in items:
             self._scatter_plot.removeItem(item)
@@ -830,6 +838,7 @@ class TimeSpacePlotWidget(QWidget):
         if self._mode_menu is None:
             return
 
+        self._gh_saved_keys.clear()
         self._mode_menu.clear()
 
         action_group = QActionGroup(self._mode_menu)
@@ -859,6 +868,31 @@ class TimeSpacePlotWidget(QWidget):
         self._mode_menu.setEnabled(True)
         logger.debug("Mode menu populated and enabled")
 
+    def _restore_gh_locked(self):
+        """Redraw locked GH overlays from saved keys."""
+        for veh_id, veh_time in self._gh_saved_keys:
+            series = self._series.get(veh_id)
+            if series is None:
+                continue
+            # Find the matching point's distance
+            mask = series["veh_time"] == veh_time
+            dists = series["veh_dist_trav"][mask]
+            if len(dists) == 0:
+                continue
+            veh_dist = float(dists[0])
+    
+            gap_f, gap_b, hway_f, hway_b = self._find_gap_hway(
+                veh_id, veh_time, veh_dist
+            )
+            locked_items = []
+            self._draw_gh_overlay(
+                veh_id, veh_time, veh_dist,
+                gap_b, gap_f, hway_b, hway_f,
+                target_list=locked_items
+            )
+            self._gh_locked_items[(veh_id, veh_time)] = locked_items
+        logger.debug(f"Restored {len(self._gh_saved_keys)} locked GH points")
+
     def _on_mode_changed(self, mode: str):
         """Handle interaction mode changes driven by the Mode menu.
 
@@ -880,10 +914,14 @@ class TimeSpacePlotWidget(QWidget):
         """
         if mode == "gap_headway":
             self._gh_mode_enabled = True
+            # Restore previously saved locked points
+            self._restore_gh_locked()
             logger.debug("Mode changed to: Gap Headway")
         else:
             self._gh_mode_enabled = False
             self._clear_gh_overlay()
+            # Save which points are locked, then remove graphics only
+            self._gh_saved_keys = set(self._gh_locked_items.keys())
             self._clear_gh_all_locked()
             self._tooltip.hide()
             logger.debug("Mode changed to: Select Trajectory")

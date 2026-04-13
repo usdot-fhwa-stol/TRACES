@@ -167,6 +167,7 @@ class CustomViewBox(pg.ViewBox):
                                 logger.debug(f"GH unlocked point {pt_key}")
                             else:
                                 # Lock this point — add to list
+                                self.parent_widget._gh_saved_keys.add(pt_key)
                                 locked_items_for_pt = []
                                 gap_f, gap_b, hway_f, hway_b = self.parent_widget._find_gap_hway(
                                     clicked_veh, veh_time, veh_dist
