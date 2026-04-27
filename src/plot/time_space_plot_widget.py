@@ -865,7 +865,7 @@ class TimeSpacePlotWidget(QWidget):
         # Ensure widget state matches the default checked action.
         self._gh_mode_enabled = False
 
-        self._mode_menu.setEnabled(True)
+        self._mode_menu.menuAction().setVisible(True)
         logger.debug("Mode menu populated and enabled")
 
     def _restore_gh_locked(self):

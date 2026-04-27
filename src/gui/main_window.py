@@ -104,8 +104,8 @@ class MainWindow(QMainWindow):
         view_menu.addAction(log_action)
 
         self._mode_menu = QMenu("&Mode", self)
-        self._mode_menu.setEnabled(False)
         menu_bar.addMenu(self._mode_menu)
+        self._mode_menu.menuAction().setVisible(False)
 
     def _setup_home_page(self):
         self._home_widget = HomeWidget()
@@ -405,7 +405,7 @@ class MainWindow(QMainWindow):
         self._export_menu.setEnabled(False)
         
         # Reset plot mode menu
-        self._mode_menu.setEnabled(False)
+        self._mode_menu.menuAction().setVisible(False)
         self._mode_menu.clear()
 
     def _create_plot_widget(self, event_id: int, time_min: float, time_max: float, 
