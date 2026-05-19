@@ -40,11 +40,11 @@ class BoxPlotItem(pg.GraphicsObject):
     _WHISKER_COLOR  = QtGui.QColor(0,   0,   0)        # black
     _MEDIAN_COLOR   = QtGui.QColor(255, 255, 180)       # light yellow
     _OUTLINE_COLOR  = QtGui.QColor(0,   0,   0)        # black box outline
-    _OUTLIER_COLOR  = QtGui.QColor(0,   0,   0)        # black outlier dots
-    _OUTLIER_RADIUS = 3                                  # dot radius in data units
-                                                         # (reused as pixel radius
-                                                         #  via ScatterPlotItem in
-                                                         #  box_plot_dialog.py)
+    # Outliers are intentionally NOT drawn here. Because QPicture operates in
+    # data-space coordinates, any fixed radius becomes enormous when the y-axis
+    # spans large value ranges (e.g. jerk in m/s³). Outliers must be rendered
+    # by the caller using a ScatterPlotItem, which works in pixel space.
+    # box_plot_dialog.py already does this correctly.
 
     def __init__(self, x, q1, median, q3, whisker_low, whisker_high,
                  outliers=None, box_width=0.5, whisker_width=0.3,
@@ -77,16 +77,37 @@ class BoxPlotItem(pg.GraphicsObject):
         half_box     = self.box_width     / 2.0
         half_whisker = self.whisker_width / 2.0
 
+        # Degenerate case: all five values identical — draw a single black
+        # horizontal line at that level and nothing else.
+        if (self.q1 == self.q3 == self.median
+                == self.whisker_low == self.whisker_high):
+            p.setPen(pg.mkPen(self._WHISKER_COLOR, width=2))
+            p.setBrush(QtCore.Qt.BrushStyle.NoBrush)
+            p.drawLine(
+                QtCore.QPointF(self.x - half_box, self.median),
+                QtCore.QPointF(self.x + half_box, self.median),
+            )
+            p.end()
+            return
+
         # ── 1. IQR box (filled, outlined) ────────────────────────────────
+        # Normalise so height is always non-negative; Qt fills a rect with a
+        # negative height using an undefined/solid brush on some platforms.
+        box_top    = max(self.q1, self.q3)
+        box_bottom = min(self.q1, self.q3)
         p.setPen(self.pen)
         p.setBrush(self.brush)
         box_rect = QtCore.QRectF(
             self.x - half_box,
-            self.q1,
+            box_bottom,
             self.box_width,
-            self.q3 - self.q1,   # may be 0 → degenerate horizontal line
+            box_top - box_bottom,   # always >= 0
         )
         p.drawRect(box_rect)
+
+        # Clear the brush immediately so no subsequent line-draw accidentally
+        # triggers a fill.
+        p.setBrush(QtCore.Qt.BrushStyle.NoBrush)
 
         # ── 2. Median line (light yellow, full box width) ─────────────────
         median_pen = pg.mkPen(self._MEDIAN_COLOR, width=2)
@@ -99,7 +120,6 @@ class BoxPlotItem(pg.GraphicsObject):
         # ── 3. Whisker stems (black, centred vertical lines) ──────────────
         whisker_pen = pg.mkPen(self._WHISKER_COLOR, width=1)
         p.setPen(whisker_pen)
-        p.setBrush(QtCore.Qt.BrushStyle.NoBrush)
 
         # Upper stem: top of box → upper whisker cap
         p.drawLine(
