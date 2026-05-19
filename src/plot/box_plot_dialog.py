@@ -103,6 +103,11 @@ class BoxPlotDialog(QDialog):
 
         # Pad the X-range so the box is centered and not hugged by the edges.
         plot.setXRange(0.0, 2.0, padding=0)
+        
+        # Disable auto-range button
+        plot.getPlotItem().hideButtons()
+        plot.getViewBox().setMenuEnabled(False)
+        
         return plot
 
     # ── Save: HTML with embedded SVG and pan/zoom JS ──────────────────────
