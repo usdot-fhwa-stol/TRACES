@@ -103,6 +103,14 @@ class MainWindow(QMainWindow):
         log_action.triggered.connect(self._show_log_viewer)
         view_menu.addAction(log_action)
 
+        self._analysis_menu = QMenu("&Analysis", self)
+        menu_bar.addMenu(self._analysis_menu)
+        self._analysis_menu.menuAction().setVisible(False)  # hidden until DB is open
+
+        jerk_action = QAction("&Jerk Analysis…", self)
+        jerk_action.triggered.connect(self._run_jerk_analysis)
+        self._analysis_menu.addAction(jerk_action)
+
         self._mode_menu = QMenu("&Mode", self)
         menu_bar.addMenu(self._mode_menu)
         self._mode_menu.menuAction().setVisible(False)
@@ -306,6 +314,7 @@ class MainWindow(QMainWindow):
             if result == QDialog.DialogCode.Accepted:
                 # Plot widget will be created in _create_plot_widget callback
                 self._export_menu.setEnabled(True)
+                self._analysis_menu.menuAction().setVisible(True)
             else:
                 # User cancelled settings dialog, close database and reset window
                 self._close_database_and_reset()
@@ -335,6 +344,7 @@ class MainWindow(QMainWindow):
             if result == QDialog.DialogCode.Accepted:
                 # Plot widget will be created in _create_plot_widget callback
                 self._export_menu.setEnabled(True)
+                self._analysis_menu.menuAction().setVisible(True)
             else:
                 # User cancelled settings dialog, close database and reset window
                 self._close_database_and_reset()
@@ -377,6 +387,7 @@ class MainWindow(QMainWindow):
             if result == QDialog.DialogCode.Accepted:
                 # Plot widget will be created in _create_plot_widget callback
                 self._export_menu.setEnabled(True)
+                self._analysis_menu.menuAction().setVisible(True)
             else:
                 # User cancelled settings dialog, close database and reset window
                 self._close_database_and_reset()
@@ -403,6 +414,7 @@ class MainWindow(QMainWindow):
         
         # Disable export menu
         self._export_menu.setEnabled(False)
+        self._analysis_menu.menuAction().setVisible(False)
         
         # Reset plot mode menu
         self._mode_menu.menuAction().setVisible(False)
@@ -516,3 +528,40 @@ class MainWindow(QMainWindow):
 
         self._save_settings()
         super().closeEvent(event)
+
+    def _run_jerk_analysis(self):
+        if not self._db_connection or not self._plot_widget:
+            QMessageBox.warning(self, "Warning", "Open a database and load an event first.")
+            return
+        event_id = self._plot_widget._current_event_id
+        if event_id is None:
+            QMessageBox.warning(self, "Warning", "No event is currently loaded.")
+            return
+    
+        from .jerk_comp_dialog import JerkCompDialog
+        dlg = JerkCompDialog(self, self._db_connection)
+        dlg.params_accepted.connect(
+            lambda params: self._show_jerk_box_plots(event_id, params)
+        )
+        dlg.exec()
+    
+    def _show_jerk_box_plots(self, event_id, params):
+        from comp.jerk_comp import JerkComp
+        from plot.box_plot_dialog import BoxPlotDialog
+    
+        comp = JerkComp()
+        results = comp.comp_event(self._db_connection, event_id, options=params)
+    
+        import numpy as np
+        def pull(name):
+            return [getattr(r, name) for r in results if not np.isnan(getattr(r, name))]
+    
+        dropped = sum(1 for r in results if r.jerk_source == "none")
+        metrics = {
+            "min_jerk":                  pull("min_jerk"),
+            "max_jerk":                  pull("max_jerk"),
+            "jerk_violation_pct":        pull("jerk_violation_pct"),
+            "sign_inversion_excess_pct": pull("sign_inversion_excess_pct"),
+        }
+        dlg = BoxPlotDialog(self, f"Jerk Analysis — Event {event_id}", metrics, dropped)
+        dlg.exec()

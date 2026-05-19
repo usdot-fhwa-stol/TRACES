@@ -54,9 +54,13 @@ class CustomViewBox(pg.ViewBox):
         # Context menu registry - list of dictionaries with keys: filter, label, callback
         # Filter string contains combinations of: A (all series), S (selected series), O (one series)
         self._context_menu_registry = [
-            {'filter': 'SO', 'label': 'Time-Speed Diagram', 'callback': self._show_time_speed_dialog},
-            {'filter': 'SO', 'label': 'Time-Accel Diagram', 'callback': self._show_time_accel_dialog},
-            {'filter': 'ASO', 'label': 'Statistics', 'callback': self._generate_statistics}
+            {'filter': 'SO',  'label': 'Time-Speed Diagram', 'callback': self._show_time_speed_dialog},
+            {'filter': 'SO',  'label': 'Time-Accel Diagram', 'callback': self._show_time_accel_dialog},
+            {'filter': 'ASO', 'label': 'Statistics',         'callback': self._generate_statistics},
+            {'filter': 'ASO', 'label': 'Noise Analysis',     'submenu': [
+                {'label': 'Jerk Analysis…', 'callback': self._run_jerk_analysis_rightclick},
+                # future modules go here
+            ]},
         ]
 
     def mousePressEvent(self, ev):
@@ -405,9 +409,20 @@ class CustomViewBox(pg.ViewBox):
         
         # Add menu items based on registry and current context
         for item in self._context_menu_registry:
-            if menu_type in item['filter']:
+            if menu_type not in item['filter']:
+                continue
+            if 'submenu' in item:
+                sub = QMenu(item['label'], context_menu)
+                for sub_item in item['submenu']:
+                    sub_action = QAction(sub_item['label'], sub)
+                    sub_action.triggered.connect(
+                        lambda checked, cb=sub_item['callback']: cb()
+                    )
+                    sub.addAction(sub_action)
+                context_menu.addMenu(sub)
+            else:
                 action = QAction(item['label'], context_menu)
-                action.triggered.connect(lambda checked, callback=item['callback']: callback())
+                action.triggered.connect(lambda checked, cb=item['callback']: cb())
                 context_menu.addAction(action)
         
         # Show context menu at cursor position
@@ -660,3 +675,31 @@ class CustomViewBox(pg.ViewBox):
             return "Selected"
         else:
             return "All"
+
+    def _run_jerk_analysis_rightclick(self):
+        if not self.parent_widget._db_connection or self.parent_widget._current_event_id is None:
+            return
+        veh_ids = self._get_target_vehicle_ids()
+        if not veh_ids:
+            return
+    
+        from gui.jerk_comp_dialog import JerkCompDialog
+        dlg = JerkCompDialog(self.parent_widget, self.parent_widget._db_connection)
+        dlg.params_accepted.connect(
+            lambda params: self._show_jerk_table_rightclick(veh_ids, params)
+        )
+        dlg.exec()
+
+    def _show_jerk_table_rightclick(self, veh_ids, params):
+        from comp.jerk_comp import JerkComp
+        from gui.jerk_results_table_dialog import JerkResultsTableDialog
+    
+        comp = JerkComp()
+        results = comp.comp_series(
+            self.parent_widget._db_connection,
+            self.parent_widget._current_event_id,
+            veh_ids,
+            options=params,
+        )
+        dlg = JerkResultsTableDialog(self.parent_widget, results)
+        dlg.exec()
