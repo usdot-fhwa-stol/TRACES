@@ -682,24 +682,21 @@ class CustomViewBox(pg.ViewBox):
         veh_ids = self._get_target_vehicle_ids()
         if not veh_ids:
             return
-    
+
+        event_id = self.parent_widget._current_event_id
         from gui.jerk_comp_dialog import JerkCompDialog
-        dlg = JerkCompDialog(self.parent_widget, self.parent_widget._db_connection)
+        dlg = JerkCompDialog(
+            self.parent_widget,
+            self.parent_widget._db_connection,
+            event_ids=[event_id],
+            veh_ids=veh_ids,
+        )
         dlg.params_accepted.connect(
-            lambda params: self._show_jerk_table_rightclick(veh_ids, params)
+            lambda params, results: self._show_jerk_table_rightclick(results)
         )
         dlg.exec()
 
-    def _show_jerk_table_rightclick(self, veh_ids, params):
-        from comp.jerk_comp import JerkComp
+    def _show_jerk_table_rightclick(self, results):
         from gui.jerk_results_table_dialog import JerkResultsTableDialog
-    
-        comp = JerkComp()
-        results = comp.comp_series(
-            self.parent_widget._db_connection,
-            self.parent_widget._current_event_id,
-            veh_ids,
-            options=params,
-        )
         dlg = JerkResultsTableDialog(self.parent_widget, results)
         dlg.exec()

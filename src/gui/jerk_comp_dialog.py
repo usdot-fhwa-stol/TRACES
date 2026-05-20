@@ -1,50 +1,129 @@
 import csv
 import logging
+import math
 import sqlite3
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import pyqtSignal, QTimer
+from PyQt6.QtCore import pyqtSignal, QThread, QObject
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
-    QDoubleSpinBox, QComboBox, QPushButton,
+    QDoubleSpinBox, QComboBox, QPushButton, QProgressBar,
     QFileDialog, QMessageBox,
 )
 
 logger = logging.getLogger(__name__)
 
 
-class JerkCompDialog(QDialog):
-    """Collects jerk-analysis parameters from the user.
+# ---------------------------------------------------------------------------
+# Worker
+# ---------------------------------------------------------------------------
 
-    Normal mode (event_ids is None / single event from top-level menu or
-    right-click): shows an **OK** button that emits :attr:`params_accepted`.
-
-    Export mode (event_ids is a non-empty list): replaces OK with a
-    **Save…** button. Clicking Save runs JerkComp over every supplied
-    event, opens a file-save dialog, and writes the combined results to
-    CSV. :attr:`params_accepted` is *not* emitted in this path.
+class _JerkWorker(QObject):
+    """Runs JerkComp on a background thread.
 
     Signals:
-        params_accepted(dict): emitted (normal mode only) with keys
-            jerk_threshold, missing_gap_seconds, jerk_method
+        progress(int):          emitted after each event finishes (1-based count).
+        finished(list):         emitted with the combined JerkResult list on success.
+        error(str):             emitted with a message string on failure.
+    """
+    progress = pyqtSignal(int)
+    finished = pyqtSignal(list)
+    error    = pyqtSignal(str)
+
+    def __init__(self, db_path: str, event_ids: list[int],
+                 veh_ids: Optional[list[int]], params: dict,
+                 dest_path: Optional[str]):
+        super().__init__()
+        self._db_path   = db_path
+        self._event_ids = event_ids
+        self._veh_ids   = veh_ids   # None → all vehicles (comp_event path)
+        self._params    = params
+        self._dest_path = dest_path  # None → normal mode, str → export mode
+
+    def run(self):
+        from comp.jerk_comp import JerkComp
+        try:
+            # Each thread needs its own connection.
+            conn = sqlite3.connect(self._db_path)
+            comp = JerkComp()
+            all_results = []
+
+            for i, event_id in enumerate(self._event_ids):
+                if self._veh_ids is not None:
+                    # right-click path: specific vehicles, single event
+                    results = comp.comp_series(
+                        conn, event_id, self._veh_ids, options=self._params)
+                else:
+                    results = comp.comp_event(
+                        conn, event_id, options=self._params)
+                all_results.extend(results)
+                self.progress.emit(i + 1)
+
+            if self._dest_path is not None:
+                _write_csv(all_results, self._dest_path)
+
+            conn.close()
+            self.finished.emit(all_results)
+
+        except Exception as exc:
+            logger.exception("JerkWorker failed")
+            self.error.emit(str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Dialog
+# ---------------------------------------------------------------------------
+
+class JerkCompDialog(QDialog):
+    """Collects jerk-analysis parameters from the user, then runs the analysis
+    on a background QThread with a progress bar.
+
+    Invocation paths
+    ----------------
+    Normal — top-level menu (event_ids=[single id], veh_ids=None):
+        OK button emits ``params_accepted`` after the thread finishes.
+
+    Normal — right-click (event_ids=[single id], veh_ids=list):
+        Same as above; ``params_accepted`` carries the results via the same
+        signal.
+
+    Export — Export Analysis menu (event_ids=multiple ids, veh_ids=None,
+             export mode enabled by passing dest_path via _on_save):
+        Save… button opens a file dialog, then the thread writes the CSV
+        directly. ``params_accepted`` is NOT emitted.
+
+    Signals
+    -------
+    params_accepted(dict, list):
+        Emitted in normal mode with the parameter dict and the JerkResult list.
+        Callers that previously connected only to ``params_accepted(dict)``
+        must update their slot signature.
     """
 
-    params_accepted = pyqtSignal(dict)
+    params_accepted = pyqtSignal(dict, list)
 
     def __init__(
         self,
         parent,
         db_connection: sqlite3.Connection,
-        event_ids: Optional[list[int]] = None,
+        event_ids:   Optional[list[int]] = None,
+        veh_ids:     Optional[list[int]] = None,
+        export_mode: bool = False,
     ):
         super().__init__(parent)
-        self._db_connection = db_connection
-        # export mode when a list of event ids is supplied
-        self._export_event_ids: Optional[list[int]] = event_ids if event_ids else None
-        self._is_export_mode = bool(self._export_event_ids)
+        self._db_connection    = db_connection
+        self._db_path          = db_connection.execute("PRAGMA database_list").fetchone()[2]
+        self._export_event_ids = list(event_ids) if event_ids else None
+        self._veh_ids          = list(veh_ids) if veh_ids else None
+        self._is_export_mode   = export_mode
 
-        self.setWindowTitle("Jerk Analysis — Export" if self._is_export_mode else "Jerk Analysis")
+        self._thread: Optional[QThread] = None
+        self._worker: Optional[_JerkWorker] = None
+
+        self.setWindowTitle(
+            "Jerk Analysis — Export" if self._is_export_mode else "Jerk Analysis"
+        )
         self.setModal(True)
         self._setup_ui()
         self._configure_method_options()
@@ -77,6 +156,12 @@ class JerkCompDialog(QDialog):
 
         layout.addLayout(form)
 
+        # Progress bar — always visible, starts at zero.
+        self._progress_bar = QProgressBar()
+        self._progress_bar.setMinimum(0)
+        self._progress_bar.setValue(0)
+        layout.addWidget(self._progress_bar)
+
         # Buttons
         btn_row = QHBoxLayout()
         btn_row.addStretch()
@@ -86,7 +171,7 @@ class JerkCompDialog(QDialog):
             self._primary_btn.clicked.connect(self._on_save)
         else:
             self._primary_btn = QPushButton("OK")
-            self._primary_btn.clicked.connect(self._on_accept)
+            self._primary_btn.clicked.connect(self._on_ok)
 
         self._cancel_btn = QPushButton("Cancel")
         self._cancel_btn.clicked.connect(self.reject)
@@ -101,19 +186,17 @@ class JerkCompDialog(QDialog):
         cols = {row[1] for row in cursor.fetchall()}
 
         entries = [
-            ("Use jerk column from dataset",             "dataset",    "veh_jerk"  in cols),
-            ("Calculate jerk from acceleration",          "from_accel", "veh_accel" in cols),
-            ("Calculate acceleration and jerk from speed","from_speed", "veh_speed" in cols),
+            ("Use jerk column from dataset",              "dataset",    "veh_jerk"  in cols),
+            ("Calculate jerk from acceleration",           "from_accel", "veh_accel" in cols),
+            ("Calculate acceleration and jerk from speed", "from_speed", "veh_speed" in cols),
         ]
         for label, key, enabled in entries:
             self._method_combo.addItem(label, key)
             idx = self._method_combo.count() - 1
             if not enabled:
                 model = self._method_combo.model()
-                item = model.item(idx)
-                item.setEnabled(False)
+                model.item(idx).setEnabled(False)
 
-        # Default to first enabled item.
         for i in range(self._method_combo.count()):
             if self._method_combo.model().item(i).isEnabled():
                 self._method_combo.setCurrentIndex(i)
@@ -133,22 +216,55 @@ class JerkCompDialog(QDialog):
             "jerk_method":         self._method_combo.currentData(),
         }
 
+    def _set_controls_enabled(self, enabled: bool):
+        self._primary_btn.setEnabled(enabled)
+        self._cancel_btn.setEnabled(enabled)
+        self._threshold_spin.setEnabled(enabled)
+        self._gap_spin.setEnabled(enabled)
+        self._method_combo.setEnabled(enabled)
+
+    def _start_worker(self, event_ids: list[int], veh_ids: Optional[list[int]],
+                      params: dict, dest_path: Optional[str]):
+        n = len(event_ids)
+        self._progress_bar.setMaximum(n)
+        self._progress_bar.setValue(0)
+        self._set_controls_enabled(False)
+
+        self._worker = _JerkWorker(self._db_path, event_ids, veh_ids, params, dest_path)
+        self._thread = QThread(self)
+        self._worker.moveToThread(self._thread)
+
+        self._thread.started.connect(self._worker.run)
+        self._worker.progress.connect(self._progress_bar.setValue)
+        self._worker.finished.connect(self._on_worker_finished)
+        self._worker.error.connect(self._on_worker_error)
+        # Clean up thread when worker is done.
+        self._worker.finished.connect(self._thread.quit)
+        self._worker.error.connect(self._thread.quit)
+        self._thread.finished.connect(self._worker.deleteLater)
+        self._thread.finished.connect(self._thread.deleteLater)
+
+        self._thread.start()
+
     # ------------------------------------------------------------------
-    # Slots — normal mode
+    # Primary button slots
     # ------------------------------------------------------------------
 
-    def _on_accept(self):
-        self.params_accepted.emit(self._current_params())
-        self.accept()
-
-    # ------------------------------------------------------------------
-    # Slots — export mode
-    # ------------------------------------------------------------------
+    def _on_ok(self):
+        """Normal mode: top-level menu or right-click."""
+        # event_ids and veh_ids were supplied at construction.
+        if not self._export_event_ids:
+            logger.error("JerkCompDialog._on_ok called with no event_ids")
+            return
+        self._start_worker(
+            self._export_event_ids,
+            self._veh_ids,
+            self._current_params(),
+            dest_path=None,
+        )
 
     def _on_save(self):
-        """Run JerkComp over all selected events and write results to CSV."""
-        params = self._current_params()
-
+        """Export mode: ask for a destination file then start the worker."""
         dest, _ = QFileDialog.getSaveFileName(
             self,
             "Save Jerk Analysis Export",
@@ -156,66 +272,81 @@ class JerkCompDialog(QDialog):
             "CSV Files (*.csv);;All Files (*)",
         )
         if not dest:
-            return  # user cancelled file dialog
-
-        try:
-            self._run_export(params, dest)
-        except Exception as e:
-            logger.exception("Jerk analysis export failed")
-            QMessageBox.critical(self, "Export Error", f"Export failed:\n{e}")
             return
-
-        QMessageBox.information(
-            self,
-            "Export Complete",
-            f"Jerk analysis exported successfully to:\n{dest}",
+        self._dest_path = dest
+        self._start_worker(
+            self._export_event_ids,
+            None,
+            self._current_params(),
+            dest_path=dest,
         )
-        self.accept()
 
-    def _run_export(self, params: dict, dest: str):
-        """Execute JerkComp for every event id and write a CSV.
+    # ------------------------------------------------------------------
+    # Worker result slots
+    # ------------------------------------------------------------------
 
-        Each row corresponds to one (event_id, veh_id) trajectory.
-        """
-        from comp.jerk_comp import JerkComp
+    def _on_worker_finished(self, results: list):
+        self._progress_bar.setValue(self._progress_bar.maximum())
 
-        comp = JerkComp()
-        fieldnames = [
-            "event_id",
-            "veh_id",
-            "jerk_violation_pct",
-            "max_jerk",
-            "min_jerk",
-            "sign_inversion_excess_pct",
-        ]
+        if self._is_export_mode:
+            QMessageBox.information(
+                self,
+                "Export Complete",
+                f"Jerk analysis exported successfully to:\n{self._dest_path}",
+            )
+            self.accept()
+        else:
+            # Normal mode: emit signal so caller can open box-plot or table dialog.
+            self.params_accepted.emit(self._current_params(), results)
+            self.accept()
 
-        with open(dest, "w", newline="", encoding="utf-8") as fh:
-            writer = csv.DictWriter(fh, fieldnames=fieldnames)
-            writer.writeheader()
+    def _on_worker_error(self, message: str):
+        self._set_controls_enabled(True)
+        self._progress_bar.setValue(0)
+        QMessageBox.critical(self, "Jerk Analysis Error", f"Analysis failed:\n{message}")
 
-            for event_id in self._export_event_ids:
-                logger.debug(f"Exporting jerk analysis for event {event_id}")
-                results = comp.comp_event(
-                    self._db_connection, event_id, options=params
-                )
-                for r in results:
-                    writer.writerow({
-                        "event_id":                   r.event_id,
-                        "veh_id":                     r.veh_id,
-                        "jerk_violation_pct":          "" if _isnan(r.jerk_violation_pct)         else f"{r.jerk_violation_pct:.4f}",
-                        "max_jerk":                    "" if _isnan(r.max_jerk)                   else f"{r.max_jerk:.4f}",
-                        "min_jerk":                    "" if _isnan(r.min_jerk)                   else f"{r.min_jerk:.4f}",
-                        "sign_inversion_excess_pct":   "" if _isnan(r.sign_inversion_excess_pct)  else f"{r.sign_inversion_excess_pct:.4f}",
-                    })
+    # ------------------------------------------------------------------
+    # Prevent closing while the worker is running
+    # ------------------------------------------------------------------
+
+    def reject(self):
+        if self._thread and self._thread.isRunning():
+            return  # silently ignore; buttons are disabled anyway
+        super().reject()
+
+    def closeEvent(self, event):
+        if self._thread and self._thread.isRunning():
+            event.ignore()
+        else:
+            super().closeEvent(event)
 
 
 # ---------------------------------------------------------------------------
-# Module-level helper
+# CSV writer (used by the worker, called on the worker thread)
 # ---------------------------------------------------------------------------
 
-def _isnan(v) -> bool:
-    import math
+def _write_csv(results, dest: str):
+    fieldnames = [
+        "event_id", "veh_id",
+        "jerk_violation_pct", "max_jerk", "min_jerk",
+        "sign_inversion_excess_pct",
+    ]
+    with open(dest, "w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=fieldnames)
+        writer.writeheader()
+        for r in results:
+            writer.writerow({
+                "event_id":                  r.event_id,
+                "veh_id":                    r.veh_id,
+                "jerk_violation_pct":         _fmt(r.jerk_violation_pct),
+                "max_jerk":                   _fmt(r.max_jerk),
+                "min_jerk":                   _fmt(r.min_jerk),
+                "sign_inversion_excess_pct":  _fmt(r.sign_inversion_excess_pct),
+            })
+
+
+def _fmt(v) -> str:
     try:
-        return math.isnan(v)
+        return "" if math.isnan(v) else f"{v:.4f}"
     except (TypeError, ValueError):
-        return True
+        return ""

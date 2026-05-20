@@ -502,7 +502,7 @@ class MainWindow(QMainWindow):
 
         # Step 2: show JerkCompDialog in export mode (Save… button).
         from .jerk_comp_dialog import JerkCompDialog
-        jerk_dlg = JerkCompDialog(self, self._db_connection, event_ids=event_ids)
+        jerk_dlg = JerkCompDialog(self, self._db_connection, event_ids=event_ids, export_mode=True)
         jerk_dlg.exec()
 
     def _show_about(self):
@@ -558,33 +558,29 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
     def _run_jerk_analysis(self):
-        if not self._db_connection or not self._plot_widget:
-            QMessageBox.warning(self, "Warning", "Open a database and load an event first.")
+        if not self._db_connection:
+            QMessageBox.warning(self, "Warning", "No database is currently open.")
             return
         event_id = self._plot_widget._current_event_id
         if event_id is None:
             QMessageBox.warning(self, "Warning", "No event is currently loaded.")
             return
-    
+
         from .jerk_comp_dialog import JerkCompDialog
-        dlg = JerkCompDialog(self, self._db_connection)
+        dlg = JerkCompDialog(self, self._db_connection, event_ids=[event_id])
         dlg.params_accepted.connect(
-            lambda params: self._show_jerk_box_plots(event_id, params)
+            lambda params, results: self._show_jerk_box_plots(event_id, params, results)
         )
         dlg.exec()
-    
-    def _show_jerk_box_plots(self, event_id, params):
-        from comp.jerk_comp import JerkComp
-        from plot.box_plot_dialog import BoxPlotDialog
-    
-        comp = JerkComp()
-        results = comp.comp_event(self._db_connection, event_id, options=params)
-    
+
+    def _show_jerk_box_plots(self, event_id, params, results):
         import numpy as np
+        from plot.box_plot_dialog import BoxPlotDialog
+
         def pull(name):
             return [getattr(r, name) for r in results if not np.isnan(getattr(r, name))]
-    
-        dropped = sum(1 for r in results if r.jerk_source == "none")
+
+        dropped = sum(1 for r in results if r.jerk_source == "unavailable")
         metrics = {
             "min_jerk":                  pull("min_jerk"),
             "max_jerk":                  pull("max_jerk"),
