@@ -83,6 +83,13 @@ class MainWindow(QMainWindow):
         export_select_action.triggered.connect(self._export_selected)
         self._export_menu.addAction(export_select_action)
 
+        export_analysis_menu = QMenu("Export &Analysis", self)
+        self._export_menu.addMenu(export_analysis_menu)
+
+        export_jerk_action = QAction("&Jerk Analysis…", self)
+        export_jerk_action.triggered.connect(self._export_jerk_analysis)
+        export_analysis_menu.addAction(export_jerk_action)
+
         file_menu.addSeparator()
 
         # About action
@@ -476,6 +483,27 @@ class MainWindow(QMainWindow):
         # (i.e., only from Export Selected mode, not Export All mode)
         if selected_columns:
             self._selected_export_columns = selected_columns.copy()
+
+    def _export_jerk_analysis(self):
+        """Handle the Export Analysis → Jerk Analysis menu action."""
+        if not self._db_connection:
+            QMessageBox.warning(self, "Warning", "No database is currently open.")
+            return
+
+        # Step 1: ask the user which events to include.
+        from .event_selection_dialog import EventSelectionDialog
+        sel_dlg = EventSelectionDialog(self, self._db_connection)
+        if sel_dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        event_ids = sel_dlg.selected_event_ids
+        if not event_ids:
+            return
+
+        # Step 2: show JerkCompDialog in export mode (Save… button).
+        from .jerk_comp_dialog import JerkCompDialog
+        jerk_dlg = JerkCompDialog(self, self._db_connection, event_ids=event_ids)
+        jerk_dlg.exec()
 
     def _show_about(self):
         """Handle the About menu action by showing the AboutDialog."""
