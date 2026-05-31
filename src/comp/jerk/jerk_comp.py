@@ -3,7 +3,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Iterable, Optional, List, Dict, Any
 import numpy as np
-from .base_comp import BaseComp
+from ..base_comp import BaseComp
 
 logger = logging.getLogger(__name__)
 

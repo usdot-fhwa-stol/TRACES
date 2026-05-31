@@ -501,7 +501,7 @@ class MainWindow(QMainWindow):
             return
 
         # Step 2: show JerkCompDialog in export mode (Save… button).
-        from .jerk_comp_dialog import JerkCompDialog
+        from comp.jerk import JerkCompDialog
         jerk_dlg = JerkCompDialog(self, self._db_connection, event_ids=event_ids, export_mode=True)
         jerk_dlg.exec()
 
@@ -566,7 +566,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Warning", "No event is currently loaded.")
             return
 
-        from .jerk_comp_dialog import JerkCompDialog
+        from comp.jerk import JerkCompDialog
         dlg = JerkCompDialog(self, self._db_connection, event_ids=[event_id])
         dlg.params_accepted.connect(
             lambda params, results: self._show_jerk_box_plots(event_id, params, results)
@@ -575,7 +575,7 @@ class MainWindow(QMainWindow):
 
     def _show_jerk_box_plots(self, event_id, params, results):
         import numpy as np
-        from plot.box_plot_dialog import BoxPlotDialog
+        from comp.jerk import JerkBoxPlotDialog
 
         def pull(name):
             return [(r.veh_id, getattr(r, name))
@@ -589,5 +589,5 @@ class MainWindow(QMainWindow):
             "jerk_violation_pct":        pull("jerk_violation_pct"),
             "sign_inversion_excess_pct": pull("sign_inversion_excess_pct"),
         }
-        dlg = BoxPlotDialog(self, f"Jerk Analysis — Event {event_id}", metrics, dropped)
+        dlg = JerkBoxPlotDialog(self, f"Jerk Analysis — Event {event_id}", metrics, dropped)
         dlg.exec()

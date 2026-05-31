@@ -6,12 +6,12 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGridLayout,
     QPushButton, QLabel, QFileDialog, QMessageBox, QToolTip
 )
-from .box_plot_item import BoxPlotItem
+from plot.box_plot_item import BoxPlotItem
 
 logger = logging.getLogger(__name__)
 
 
-class BoxPlotDialog(QDialog):
+class JerkBoxPlotDialog(QDialog):
     """Displays a 2x2 grid of box plots summarizing per-trajectory metrics.
 
     Args:

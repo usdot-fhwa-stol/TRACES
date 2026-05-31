@@ -684,7 +684,7 @@ class CustomViewBox(pg.ViewBox):
             return
 
         event_id = self.parent_widget._current_event_id
-        from gui.jerk_comp_dialog import JerkCompDialog
+        from comp.jerk import JerkCompDialog
         dlg = JerkCompDialog(
             self.parent_widget,
             self.parent_widget._db_connection,
@@ -697,6 +697,6 @@ class CustomViewBox(pg.ViewBox):
         dlg.exec()
 
     def _show_jerk_table_rightclick(self, results):
-        from gui.jerk_results_table_dialog import JerkResultsTableDialog
+        from comp.jerk import JerkResultsTableDialog
         dlg = JerkResultsTableDialog(self.parent_widget, results)
         dlg.exec()

@@ -42,7 +42,7 @@ class _JerkWorker(QObject):
         self._dest_path = dest_path  # None → normal mode, str → export mode
 
     def run(self):
-        from comp.jerk_comp import JerkComp
+        from .jerk_comp import JerkComp
         try:
             # Each thread needs its own connection.
             conn = sqlite3.connect(self._db_path)

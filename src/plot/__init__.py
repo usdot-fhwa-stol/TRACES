@@ -1,1 +1,1 @@
-"""GUI package for Trajectory Tools."""
+"""Plot package for Trajectory Tools."""
