@@ -578,7 +578,9 @@ class MainWindow(QMainWindow):
         from plot.box_plot_dialog import BoxPlotDialog
 
         def pull(name):
-            return [getattr(r, name) for r in results if not np.isnan(getattr(r, name))]
+            return [(r.veh_id, getattr(r, name))
+                    for r in results
+                    if not np.isnan(getattr(r, name))]
 
         dropped = sum(1 for r in results if r.jerk_source == "unavailable")
         metrics = {

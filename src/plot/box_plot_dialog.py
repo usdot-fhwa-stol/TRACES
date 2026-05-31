@@ -4,7 +4,7 @@ import numpy as np
 import pyqtgraph as pg
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGridLayout,
-    QPushButton, QLabel, QFileDialog, QMessageBox
+    QPushButton, QLabel, QFileDialog, QMessageBox, QToolTip
 )
 from .box_plot_item import BoxPlotItem
 
@@ -17,7 +17,7 @@ class BoxPlotDialog(QDialog):
     Args:
         parent: parent widget
         title (str): dialog title
-        metrics (dict[str, list[float]]): mapping of metric key to value list.
+        metrics dict[str, list[tuple[int, float]]]: mapping of metric key to value list.
             Expected keys: 'min_jerk', 'max_jerk', 'jerk_violation_pct',
             'sign_inversion_excess_pct'.
         dropped (int): number of trajectories excluded due to missing data.
@@ -73,8 +73,11 @@ class BoxPlotDialog(QDialog):
         plot.getPlotItem().hideAxis('bottom')
 
         # Filter NaNs (trajectories where the metric couldn't be derived).
-        arr = np.asarray([v for v in values if v is not None and not np.isnan(v)],
-                         dtype=np.float64)
+        pairs = [(vid, v) for vid, v in values
+                 if v is not None and not np.isnan(v)]
+        veh_ids_arr = [vid for vid, v in pairs]
+        arr = np.asarray([v for vid, v in pairs], dtype=np.float64)
+
         if arr.size == 0:
             txt = pg.TextItem("No data", color=(80, 80, 80), anchor=(0.5, 0.5))
             plot.addItem(txt)
@@ -94,10 +97,24 @@ class BoxPlotDialog(QDialog):
                            outliers=outliers)
         plot.addItem(item)
 
-        if outliers:
+        # Identify which indices in arr are outliers, keeping their veh_ids
+        outlier_mask = (arr < whisker_low) | (arr > whisker_high)
+        outlier_y    = arr[outlier_mask].tolist()
+        outlier_vids = [veh_ids_arr[i] for i, m in enumerate(outlier_mask) if m]
+        
+        if outlier_y:
             scatter = pg.ScatterPlotItem(
-                x=[1] * len(outliers), y=outliers,
-                pen=pg.mkPen('k'), brush=pg.mkBrush(0, 0, 0, 0), size=6
+                x=[1] * len(outlier_y),
+                y=outlier_y,
+                pen=pg.mkPen('k'),
+                brush=pg.mkBrush(0, 0, 0, 0),
+                size=6,
+                hoverable=True,
+                tip=None,
+                data=outlier_vids,   # parallel list — index i → veh_id
+            )
+            scatter.sigHovered.connect(
+                lambda item, pts, ev, pw=plot: self._on_outlier_hovered(pts, ev, pw)
             )
             plot.addItem(scatter)
 
@@ -110,8 +127,19 @@ class BoxPlotDialog(QDialog):
         
         return plot
 
-    # ── Save: HTML with embedded SVG and pan/zoom JS ──────────────────────
+    def _on_outlier_hovered(self, points, ev, plot_widget):
+        """Show a QToolTip with the vehicle ID(s) under the cursor."""
+        if len(points) > 0:
+            labels = "\n".join(f"veh_id: {p.data()}  y: {p.pos().y():.4g}" for p in points)
+            scene_pos = ev.scenePos()
+            screen_pos = plot_widget.mapToGlobal(
+                plot_widget.mapFromScene(scene_pos)
+            )
+            QToolTip.showText(screen_pos, labels)
+        else:
+            QToolTip.hideText()
 
+    # ── Save: HTML with embedded SVG and pan/zoom JS ──────────────────────
     def _on_save(self):
         path, _ = QFileDialog.getSaveFileName(
             self, "Save Box Plots", "jerk_box_plots.html",
