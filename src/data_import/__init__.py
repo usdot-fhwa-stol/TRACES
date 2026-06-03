@@ -1,1 +1,1 @@
-"""Data import package for Trajectory Tools."""
+# data_import/__init__.py

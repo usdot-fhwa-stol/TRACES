@@ -1,1 +1,1 @@
-"""GUI package for Trajectory Tools."""
+# gui/__init__.py

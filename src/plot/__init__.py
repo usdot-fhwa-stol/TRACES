@@ -1,1 +1,1 @@
-"""Plot package for Trajectory Tools."""
+# plot/__init__.py
