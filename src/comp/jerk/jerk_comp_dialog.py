@@ -5,53 +5,12 @@ import logging
 import math
 
 from PyQt6.QtWidgets import QDoubleSpinBox, QComboBox, QFormLayout
-
-from comp.base_comp import BaseAnalysisWorker
 from comp.base_analysis_dialog import BaseAnalysisDialog
 
 logger = logging.getLogger(__name__)
 
 
-# ── Worker ────────────────────────────────────────────────────────────────
-
-class _JerkWorker(BaseAnalysisWorker):
-
-    def _run_for_event(self, conn, event_id: int, veh_ids, params: dict) -> list:
-        from .jerk_comp import JerkComp
-        comp = JerkComp()
-        if veh_ids is not None:
-            return comp.comp_series(conn, event_id, veh_ids, options=params)
-        return comp.comp_event(conn, event_id, options=params)
-
-    def _write_csv(self, results: list, dest: str):
-        fieldnames = [
-            "event_id", "veh_id",
-            "jerk_violation_pct", "max_jerk", "min_jerk",
-            "sign_inversion_excess_pct",
-        ]
-        with open(dest, "w", newline="", encoding="utf-8") as fh:
-            writer = csv.DictWriter(fh, fieldnames=fieldnames)
-            writer.writeheader()
-            for r in results:
-                writer.writerow({
-                    "event_id":                 r.event_id,
-                    "veh_id":                   r.veh_id,
-                    "jerk_violation_pct":        _fmt(r.jerk_violation_pct),
-                    "max_jerk":                  _fmt(r.max_jerk),
-                    "min_jerk":                  _fmt(r.min_jerk),
-                    "sign_inversion_excess_pct": _fmt(r.sign_inversion_excess_pct),
-                })
-
-
-def _fmt(v) -> str:
-    try:
-        return "" if math.isnan(v) else f"{v:.4f}"
-    except (TypeError, ValueError):
-        return ""
-
-
 # ── Dialog ────────────────────────────────────────────────────────────────
-
 class JerkCompDialog(BaseAnalysisDialog):
     """Jerk-analysis parameter dialog.
 
@@ -59,8 +18,16 @@ class JerkCompDialog(BaseAnalysisDialog):
     Only jerk-specific concerns live here.
     """
 
-    # ── Hook overrides ────────────────────────────────────────────────────
+    # ── Jerk-specific init ────────────────────────────────────────────────
+    def __init__(self, parent, db_connection,
+                 event_ids=None, veh_ids=None, export_mode=False):
+        super().__init__(parent, db_connection,
+                         event_ids=event_ids,
+                         veh_ids=veh_ids,
+                         export_mode=export_mode)
+        self._configure_method_options()
 
+    # ── Hook overrides ────────────────────────────────────────────────────
     def _csv_export_label(self) -> str:
         return "Jerk Analysis"
 
@@ -96,23 +63,25 @@ class JerkCompDialog(BaseAnalysisDialog):
         }
 
     def _create_worker(self, db_path, event_ids, veh_ids, params, dest_path):
-        return _JerkWorker(db_path, event_ids, veh_ids, params, dest_path)
+        from comp.base_comp import BaseAnalysisWorker
+        return BaseAnalysisWorker(
+            db_path, event_ids, veh_ids, params, dest_path,
+            run_for_event=self._run_for_event,
+            write_csv=self._write_csv,          # module-level function, unchanged
+        )
+    
+    def _run_for_event(self, conn, event_id, veh_ids, params):
+        from .jerk_comp import JerkComp
+        comp = JerkComp()
+        if veh_ids is not None:
+            return comp.comp_series(conn, event_id, veh_ids, options=params)
+        return comp.comp_event(conn, event_id, options=params)
 
     def _set_controls_enabled(self, enabled: bool):
         super()._set_controls_enabled(enabled)          # handles buttons
         self._threshold_spin.setEnabled(enabled)
         self._gap_spin.setEnabled(enabled)
         self._method_combo.setEnabled(enabled)
-
-    # ── Jerk-specific init ────────────────────────────────────────────────
-
-    def __init__(self, parent, db_connection,
-                 event_ids=None, veh_ids=None, export_mode=False):
-        super().__init__(parent, db_connection,
-                         event_ids=event_ids,
-                         veh_ids=veh_ids,
-                         export_mode=export_mode)
-        self._configure_method_options()
 
     def _configure_method_options(self):
         # Query the correct table name used throughout the application.
@@ -140,50 +109,29 @@ class JerkCompDialog(BaseAnalysisDialog):
         self._method_combo.setEnabled(False)
         self._primary_btn.setEnabled(False)
 
-    def _configure_method_options_old(self):
-        """Populate the method combo and gray out unavailable options."""
-        from PyQt6.QtGui import QStandardItem
-        from PyQt6.QtCore import Qt
-
-        options = [
-            ("jerk_from_dataset",   "Use jerk column from dataset"),
-            ("jerk_from_accel",     "Calculate jerk from acceleration"),
-            ("jerk_from_speed",     "Calculate acceleration and jerk from speed"),
+    @staticmethod
+    def _write_csv(results: list, dest: str):
+        fieldnames = [
+            "event_id", "veh_id",
+            "jerk_violation_pct", "max_jerk", "min_jerk",
+            "sign_inversion_excess_pct",
         ]
-
-        # Probe available columns.
+        with open(dest, "w", newline="", encoding="utf-8") as fh:
+            writer = csv.DictWriter(fh, fieldnames=fieldnames)
+            writer.writeheader()
+            for r in results:
+                writer.writerow({
+                    "event_id":                 r.event_id,
+                    "veh_id":                   r.veh_id,
+                    "jerk_violation_pct":        JerkCompDialog._fmt(r.jerk_violation_pct),
+                    "max_jerk":                  JerkCompDialog._fmt(r.max_jerk),
+                    "min_jerk":                  JerkCompDialog._fmt(r.min_jerk),
+                    "sign_inversion_excess_pct": JerkCompDialog._fmt(r.sign_inversion_excess_pct),
+                })
+    
+    @staticmethod    
+    def _fmt(v) -> str:
         try:
-            cur = self._db_connection.execute(
-                "SELECT name FROM pragma_table_info('trajectories')")
-            cols = {row[0] for row in cur.fetchall()}
-        except Exception:
-            cols = set()
-
-        has_jerk  = "veh_jerk"  in cols
-        has_accel = "veh_accel" in cols
-        has_speed = "veh_speed" in cols
-
-        available = {
-            "jerk_from_dataset": has_jerk,
-            "jerk_from_accel":   has_accel,
-            "jerk_from_speed":   has_speed,
-        }
-
-        self._method_combo.clear()
-        for data, label in options:
-            item = QStandardItem(label)
-            if not available[data]:
-                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEnabled)
-            self._method_combo.model().appendRow(item)
-            # store the data key
-            idx = self._method_combo.count() - 1
-            self._method_combo.setItemData(idx, data)
-
-        # Select the first enabled option.
-        for i in range(self._method_combo.count()):
-            if self._method_combo.model().item(i).isEnabled():
-                self._method_combo.setCurrentIndex(i)
-                break
-        else:
-            self._method_combo.setEnabled(False)
-            self._primary_btn.setEnabled(False)
+            return "" if math.isnan(v) else f"{v:.4f}"
+        except (TypeError, ValueError):
+            return ""

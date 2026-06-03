@@ -72,7 +72,6 @@ class BaseComp(ABC):
         )
         return [row[0] for row in cursor.fetchall()]
 
-import abc
 from PyQt6.QtCore import pyqtSignal, QObject
 
 class BaseAnalysisWorker(QObject):
@@ -89,21 +88,17 @@ class BaseAnalysisWorker(QObject):
     error    = pyqtSignal(str)
 
     def __init__(self, db_path: str, event_ids: list,
-                 veh_ids, params: dict, dest_path):
+                 veh_ids, params: dict, dest_path,
+                 run_for_event,   # callable(conn, event_id, veh_ids, params) -> list
+                 write_csv):      # callable(results, dest) or None
         super().__init__()
-        self._db_path   = db_path
-        self._event_ids = event_ids
-        self._veh_ids   = veh_ids       # None → all vehicles
-        self._params    = params
-        self._dest_path = dest_path     # None → normal, str → export
-
-    @abc.abstractmethod
-    def _run_for_event(self, conn, event_id: int, veh_ids, params: dict) -> list:
-        """Run the module computation for a single event.  Must be overridden."""
-
-    @abc.abstractmethod
-    def _write_csv(self, results: list, dest: str):
-        """Write *results* to *dest* as CSV.  Must be overridden."""
+        self._db_path        = db_path
+        self._event_ids      = event_ids
+        self._veh_ids        = veh_ids
+        self._params         = params
+        self._dest_path      = dest_path
+        self._run_for_event  = run_for_event
+        self._write_csv      = write_csv
 
     def run(self):
         import sqlite3, logging
@@ -116,10 +111,10 @@ class BaseAnalysisWorker(QObject):
                     conn, event_id, self._veh_ids, self._params)
                 all_results.extend(results)
                 self.progress.emit(i + 1)
-            if self._dest_path is not None:
+            if self._dest_path is not None and self._write_csv is not None:
                 self._write_csv(all_results, self._dest_path)
             conn.close()
             self.finished.emit(all_results)
         except Exception as exc:
-            logger.exception("%s failed", type(self).__name__)
+            logger.exception("BaseAnalysisWorker failed")
             self.error.emit(str(exc))
