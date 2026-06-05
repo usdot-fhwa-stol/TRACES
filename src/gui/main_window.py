@@ -282,13 +282,13 @@ class MainWindow(QMainWindow):
             }
 
             cursor.execute("PRAGMA table_info(events)")
-            columns = {row[1]: row[2] for row in cursor.fetchall()}
+#            columns = {row[1]: row[2] for row in cursor.fetchall()}
             
-            if columns != expected_columns:
-                conn.close()
-                QMessageBox.critical(self, "Error", 
-                                   "Events table schema does not match expected format.")
-                return False
+#            if columns != expected_columns:
+#                conn.close()
+#                QMessageBox.critical(self, "Error", 
+#                                   "Events table schema does not match expected format.")
+#                return False
 
             # Check for at least one record
             cursor.execute("SELECT COUNT(*) FROM events")

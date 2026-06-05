@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QLabel, QFileDialog, QMessageBox, QToolTip
 )
 from plot.box_plot_item import BoxPlotItem
+from comp.plot_export import export_plot_to_svg, build_svg_html
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +102,7 @@ class JerkBoxPlotDialog(QDialog):
         outlier_mask = (arr < whisker_low) | (arr > whisker_high)
         outlier_y    = arr[outlier_mask].tolist()
         outlier_vids = [veh_ids_arr[i] for i, m in enumerate(outlier_mask) if m]
-        
+
         if outlier_y:
             scatter = pg.ScatterPlotItem(
                 x=[1] * len(outlier_y),
@@ -120,11 +121,11 @@ class JerkBoxPlotDialog(QDialog):
 
         # Pad the X-range so the box is centered and not hugged by the edges.
         plot.setXRange(0.0, 2.0, padding=0)
-        
+
         # Disable auto-range button
         plot.getPlotItem().hideButtons()
         plot.getViewBox().setMenuEnabled(False)
-        
+
         return plot
 
     def _on_outlier_hovered(self, points, ev, plot_widget):
@@ -140,6 +141,7 @@ class JerkBoxPlotDialog(QDialog):
             QToolTip.hideText()
 
     # ── Save: HTML with embedded SVG and pan/zoom JS ──────────────────────
+
     def _on_save(self):
         path, _ = QFileDialog.getSaveFileName(
             self, "Save Box Plots", "jerk_box_plots.html",
@@ -147,107 +149,18 @@ class JerkBoxPlotDialog(QDialog):
         )
         if not path:
             return
-
         try:
-            svg_blocks = []
-            for key, (_row, _col), label in self._LAYOUT:
-                plot = self._plots[key]
-                svg_text = self._export_plot_to_svg(plot)
-                svg_blocks.append((label, svg_text))
-
-            html = self._build_html(svg_blocks)
+            svg_blocks = [
+                (label, export_plot_to_svg(self._plots[key]))
+                for key, _pos, label in self._LAYOUT
+            ]
+            html = build_svg_html(
+                "Jerk Analysis Box Plots",
+                svg_blocks,
+                grid_columns=2,
+                cell_height_px=320,
+            )
             Path(path).write_text(html, encoding="utf-8")
         except Exception as e:
             logger.exception("Failed to save HTML output")
             QMessageBox.critical(self, "Save Failed", f"Could not save file:\n{e}")
-
-    @staticmethod
-    def _export_plot_to_svg(plot_widget: pg.PlotWidget) -> str:
-        """Use pyqtgraph's built-in SVG exporter to grab the plot SVG as text."""
-        from pyqtgraph.exporters import SVGExporter
-        exporter = SVGExporter(plot_widget.getPlotItem())
-        # SVGExporter.export(toBytes=True) returns an XML string in pyqtgraph.
-        svg = exporter.export(toBytes=True)
-        if isinstance(svg, (bytes, bytearray)):
-            svg = svg.decode("utf-8")
-        return svg
-
-    @staticmethod
-    def _build_html(svg_blocks):
-        # Minimal HTML with a 2x2 grid of SVG containers and a tiny pan/zoom script.
-        cells = []
-        for i, (label, svg) in enumerate(svg_blocks):
-            cells.append(f"""
-              <div class="cell">
-                <div class="label">{label}</div>
-                <div class="svgwrap" id="wrap{i}">{svg}</div>
-              </div>
-            """)
-
-        script = r"""
-        // Minimal SVG pan/zoom: wheel to zoom, drag to pan. Per-cell, independent.
-        document.querySelectorAll('.svgwrap').forEach(function(wrap) {
-          const svg = wrap.querySelector('svg');
-          if (!svg) return;
-          // Ensure a viewBox exists so transforms behave predictably.
-          if (!svg.getAttribute('viewBox')) {
-            const w = svg.getAttribute('width')  || svg.clientWidth  || 600;
-            const h = svg.getAttribute('height') || svg.clientHeight || 400;
-            svg.setAttribute('viewBox', '0 0 ' + parseFloat(w) + ' ' + parseFloat(h));
-          }
-          svg.setAttribute('width', '100%');
-          svg.setAttribute('height', '100%');
-          let vb = svg.viewBox.baseVal;
-          let drag = null;
-
-          svg.addEventListener('wheel', function(e) {
-            e.preventDefault();
-            const scale = e.deltaY < 0 ? 0.9 : 1.1;
-            const pt = svg.createSVGPoint();
-            pt.x = e.clientX; pt.y = e.clientY;
-            const cursor = pt.matrixTransform(svg.getScreenCTM().inverse());
-            vb.x = cursor.x - (cursor.x - vb.x) * scale;
-            vb.y = cursor.y - (cursor.y - vb.y) * scale;
-            vb.width  *= scale;
-            vb.height *= scale;
-          }, { passive: false });
-
-          svg.addEventListener('mousedown', function(e) {
-            drag = { x: e.clientX, y: e.clientY, vbx: vb.x, vby: vb.y };
-          });
-          window.addEventListener('mousemove', function(e) {
-            if (!drag) return;
-            const ctm = svg.getScreenCTM();
-            const dx = (e.clientX - drag.x) / ctm.a;
-            const dy = (e.clientY - drag.y) / ctm.d;
-            vb.x = drag.vbx - dx;
-            vb.y = drag.vby - dy;
-          });
-          window.addEventListener('mouseup', function() { drag = null; });
-        });
-        """
-
-        return f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <title>Jerk Analysis Box Plots</title>
-  <style>
-    body {{ font-family: sans-serif; margin: 16px; }}
-    .grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }}
-    .cell {{ border: 1px solid #ddd; padding: 8px; }}
-    .label {{ font-weight: bold; margin-bottom: 4px; }}
-    .svgwrap {{ width: 100%; height: 320px; overflow: hidden; cursor: grab; }}
-    .svgwrap:active {{ cursor: grabbing; }}
-    svg {{ display: block; }}
-  </style>
-</head>
-<body>
-  <h2>Jerk Analysis Box Plots</h2>
-  <div class="grid">
-    {''.join(cells)}
-  </div>
-  <script>{script}</script>
-</body>
-</html>
-"""

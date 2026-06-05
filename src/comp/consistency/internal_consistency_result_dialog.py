@@ -1,14 +1,24 @@
 """Right-click result dialog for Module 4 — Internal Consistency.
 
-Layout (horizontal thirds in a QSplitter):
+Layout (two horizontal sections in a QSplitter):
   Left   — three vertically stacked pyqtgraph subplots (speed, accel, jerk)
-  Center — scrollable raw data table (Figure 12 layout)
-  Right  — scrollable statistics summary table
+  Right  — vertical QSplitter:
+               Top    — single-row statistics summary table (current trajectory)
+               Bottom — scrollable raw data table (Figure 12 layout)
 
-Footer spanning all three sections:
+Footer spanning both sections:
   [← Prev]  [Trajectory dropdown]  [Next →]  [Save Plots]  [Close]
 
-Changing trajectory via dropdown or arrows reloads all three sections.
+Changing trajectory via dropdown or arrows reloads all sections and
+resets each plot's view range.
+
+Plot colours are fixed:
+  Speed        — blue  (#1f77b4)
+  Acceleration — red   (#d62728)
+  Jerk         — green (#2ca02c)
+
+HTML export uses comp.plot_export.build_svg_html / export_plot_to_svg,
+which are shared with JerkBoxPlotDialog.
 """
 
 import logging
@@ -21,44 +31,41 @@ from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QSplitter,
     QPushButton, QComboBox, QTableWidget, QTableWidgetItem,
-    QHeaderView, QFileDialog, QMessageBox, QWidget
+    QHeaderView, QFileDialog, QMessageBox, QWidget, QToolTip,
 )
 
 from .internal_consistency_comp import InternalConsistencyResult
 from .internal_consistency_stats_dialog import (
     _compute_stats, _StatRow, _COLUMNS as _STAT_COLUMNS, _isnan, NAN,
 )
+from comp.plot_export import export_plot_to_svg, build_svg_html
 
 logger = logging.getLogger(__name__)
 
+# ── Column definitions ─────────────────────────────────────────────────────
+
 # Raw data table columns: (header, attribute, format)
 _RAW_COLUMNS = [
-    ("Event ID",       "event_id",      "{:d}"),
-    ("Veh ID",         "veh_id",        "{:d}"),
-    ("Time (s)",       "veh_time",      "{:.4f}"),
-    ("Dist (m)",       "veh_dist_trav", "{:.4f}"),
-    ("Speed",          "veh_speed",     "{:.4f}"),
-    ("Speed Cal",      "veh_speed_cal", "{:.4f}"),
-    ("Speed Err",      "speed_error",   "{:.4f}"),
-    ("Accel",          "veh_accel",     "{:.4f}"),
-    ("Accel Cal",      "veh_accel_cal", "{:.4f}"),
-    ("Accel Err",      "accel_error",   "{:.4f}"),
-    ("Jerk",           "veh_jerk",      "{:.4f}"),
-    ("Jerk Cal",       "veh_jerk_cal",  "{:.4f}"),
-    ("Jerk Err",       "jerk_error",    "{:.4f}"),
+    ("Event ID",   "event_id",      "{:d}"),
+    ("Veh ID",     "veh_id",        "{:d}"),
+    ("Time (s)",   "veh_time",      "{:.4f}"),
+    ("Dist (m)",   "veh_dist_trav", "{:.4f}"),
+    ("Speed",      "veh_speed",     "{:.4f}"),
+    ("Speed Cal",  "veh_speed_cal", "{:.4f}"),
+    ("Speed Err",  "speed_error",   "{:.4f}"),
+    ("Accel",      "veh_accel",     "{:.4f}"),
+    ("Accel Cal",  "veh_accel_cal", "{:.4f}"),
+    ("Accel Err",  "accel_error",   "{:.4f}"),
+    ("Jerk",       "veh_jerk",      "{:.4f}"),
+    ("Jerk Cal",   "veh_jerk_cal",  "{:.4f}"),
+    ("Jerk Err",   "jerk_error",    "{:.4f}"),
 ]
 
-# Plot configuration: (title, orig_attr, cal_attr, y_label)
+# Plot configuration: (title, orig_attr, cal_attr, y_label, hex_color)
 _PLOTS = [
-    ("Speed",        "veh_speed", "veh_speed_cal", "Speed (m/s)"),
-    ("Acceleration", "veh_accel", "veh_accel_cal", "Accel (m/s²)"),
-    ("Jerk",         "veh_jerk",  "veh_jerk_cal",  "Jerk (m/s³)"),
-]
-
-# One colour per trajectory index (cycles if > 8 trajectories selected).
-_PALETTE = [
-    "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728",
-    "#9467bd", "#8c564b", "#e377c2", "#7f7f7f",
+    ("Speed",        "veh_speed", "veh_speed_cal", "Speed (m/s)",   "#1f77b4"),
+    ("Acceleration", "veh_accel", "veh_accel_cal", "Accel (m/s²)",  "#d62728"),
+    ("Jerk",         "veh_jerk",  "veh_jerk_cal",  "Jerk (m/s³)",   "#2ca02c"),
 ]
 
 
@@ -87,14 +94,11 @@ class InternalConsistencyResultDialog(QDialog):
             for s in _compute_stats(results)
         }
 
-        # Assign a consistent colour to each trajectory.
-        self._traj_color: Dict[Tuple[int, int], str] = {
-            key: _PALETTE[i % len(_PALETTE)]
-            for i, key in enumerate(self._traj_keys)
-        }
-
         self._current_idx: int = 0
         self._plot_widgets: List[pg.PlotWidget] = []
+        # Parallel lists populated in _build_plot_panel; one entry per plot.
+        self._plot_curves:  List[List[pg.PlotDataItem]] = []  # [plot_idx][curve_idx]
+        self._vlines:       List[pg.InfiniteLine] = []        # vertical crosshair per plot
 
         self._setup_ui()
         self._load_trajectory(0)
@@ -105,21 +109,14 @@ class InternalConsistencyResultDialog(QDialog):
     def _setup_ui(self):
         root = QVBoxLayout(self)
 
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        root.addWidget(splitter, stretch=1)
+        # Outer horizontal splitter: plots (left) | tables (right)
+        outer = QSplitter(Qt.Orientation.Horizontal)
+        root.addWidget(outer, stretch=1)
 
-        # Left: plot section
-        splitter.addWidget(self._build_plot_panel())
+        outer.addWidget(self._build_plot_panel())
+        outer.addWidget(self._build_right_panel())
+        outer.setSizes([520, 880])
 
-        # Centre: raw data table
-        splitter.addWidget(self._build_raw_table())
-
-        # Right: stats table
-        splitter.addWidget(self._build_stats_table())
-
-        splitter.setSizes([460, 560, 380])
-
-        # Footer
         root.addLayout(self._build_footer())
 
     def _build_plot_panel(self) -> QWidget:
@@ -128,7 +125,9 @@ class InternalConsistencyResultDialog(QDialog):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(2)
         self._plot_widgets = []
-        for title, _orig, _cal, ylabel in _PLOTS:
+        self._plot_curves  = []
+        self._vlines       = []
+        for title, _orig, _cal, ylabel, _color in _PLOTS:
             pw = pg.PlotWidget()
             pw.setBackground("w")
             pw.setTitle(title)
@@ -136,23 +135,35 @@ class InternalConsistencyResultDialog(QDialog):
             pw.setLabel("bottom", "Time (s)")
             pw.showGrid(x=True, y=True, alpha=0.3)
             pw.addLegend(offset=(5, 5))
+
+            # Vertical crosshair — hidden until the mouse enters a plot.
+            vline = pg.InfiniteLine(angle=90, movable=False,
+                                    pen=pg.mkPen("#888888", width=1,
+                                                 style=Qt.PenStyle.DashLine))
+            vline.setVisible(False)
+            pw.addItem(vline)
+            self._vlines.append(vline)
+
+            # Wire mouse-move on every plot scene to the shared handler.
+            pw.scene().sigMouseMoved.connect(
+                lambda pos, _pw=pw: self._on_mouse_moved(pos, _pw)
+            )
+
             self._plot_widgets.append(pw)
+            self._plot_curves.append([])   # filled in _refresh_plots
             layout.addWidget(pw)
         return container
 
-    def _build_raw_table(self) -> QTableWidget:
-        self._raw_table = QTableWidget()
-        self._raw_table.setColumnCount(len(_RAW_COLUMNS))
-        self._raw_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self._raw_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self._raw_table.setAlternatingRowColors(True)
-        self._raw_table.horizontalHeader().setSectionResizeMode(
-            QHeaderView.ResizeMode.ResizeToContents)
-        self._raw_table.setHorizontalScrollMode(QTableWidget.ScrollMode.ScrollPerPixel)
-        self._raw_table.setVerticalScrollMode(QTableWidget.ScrollMode.ScrollPerPixel)
-        for ci, (hdr, _, _fmt) in enumerate(_RAW_COLUMNS):
-            self._raw_table.setHorizontalHeaderItem(ci, QTableWidgetItem(hdr))
-        return self._raw_table
+    def _build_right_panel(self) -> QWidget:
+        """Vertical splitter: single-row stats table (top) + raw data table (bottom)."""
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        splitter.addWidget(self._build_stats_table())
+        splitter.addWidget(self._build_raw_table())
+        # Give the stats table a compact fixed share; raw table gets the rest.
+        splitter.setSizes([80, 600])
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        return splitter
 
     def _build_stats_table(self) -> QTableWidget:
         self._stats_table = QTableWidget()
@@ -170,17 +181,30 @@ class InternalConsistencyResultDialog(QDialog):
             self._stats_table.setHorizontalHeaderItem(ci, item)
         return self._stats_table
 
+    def _build_raw_table(self) -> QTableWidget:
+        self._raw_table = QTableWidget()
+        self._raw_table.setColumnCount(len(_RAW_COLUMNS))
+        self._raw_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._raw_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self._raw_table.setAlternatingRowColors(True)
+        self._raw_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.ResizeToContents)
+        self._raw_table.setHorizontalScrollMode(QTableWidget.ScrollMode.ScrollPerPixel)
+        self._raw_table.setVerticalScrollMode(QTableWidget.ScrollMode.ScrollPerPixel)
+        for ci, (hdr, _, _fmt) in enumerate(_RAW_COLUMNS):
+            self._raw_table.setHorizontalHeaderItem(ci, QTableWidgetItem(hdr))
+        return self._raw_table
+
     def _build_footer(self) -> QHBoxLayout:
         row = QHBoxLayout()
-        row.addStretch()
 
         self._prev_btn = QPushButton("← Prev")
         self._prev_btn.clicked.connect(self._on_prev)
         row.addWidget(self._prev_btn)
 
         self._traj_combo = QComboBox()
-        for event_id, veh_id in self._traj_keys:
-            self._traj_combo.addItem(f"Event {event_id} — Veh {veh_id}")
+        for eid, vid in self._traj_keys:
+            self._traj_combo.addItem(f"Event {eid} — Veh {vid}")
         self._traj_combo.currentIndexChanged.connect(self._on_combo_changed)
         row.addWidget(self._traj_combo)
 
@@ -188,9 +212,7 @@ class InternalConsistencyResultDialog(QDialog):
         self._next_btn.clicked.connect(self._on_next)
         row.addWidget(self._next_btn)
 
-        row.addSpacing(20)
-
-        save_btn = QPushButton("Save Plots…")
+        save_btn = QPushButton("Save Plots")
         save_btn.clicked.connect(self._on_save_plots)
         row.addWidget(save_btn)
 
@@ -199,23 +221,20 @@ class InternalConsistencyResultDialog(QDialog):
         row.addWidget(close_btn)
 
         row.addStretch()
+
         return row
 
     # ── Trajectory loading ────────────────────────────────────────────────
 
     def _load_trajectory(self, idx: int):
-        if not self._traj_keys:
-            return
         self._current_idx = idx
-        key = self._traj_keys[idx]
+        key  = self._traj_keys[idx]
         rows = self._traj_data[key]
-        color = self._traj_color[key]
 
-        self._refresh_plots(rows, color)
+        self._refresh_plots(rows)
         self._refresh_raw_table(rows)
         self._refresh_stats_table(key)
 
-        # Keep combo in sync without triggering _on_combo_changed recursion.
         self._traj_combo.blockSignals(True)
         self._traj_combo.setCurrentIndex(idx)
         self._traj_combo.blockSignals(False)
@@ -224,28 +243,42 @@ class InternalConsistencyResultDialog(QDialog):
         self._prev_btn.setEnabled(idx > 0)
         self._next_btn.setEnabled(idx < n - 1)
 
-    def _refresh_plots(self, rows: List[InternalConsistencyResult], color: str):
+    def _refresh_plots(self, rows: List[InternalConsistencyResult]):
         t = np.asarray([r.veh_time for r in rows], dtype=np.float64)
-        for pi, (pw, (_title, orig_attr, cal_attr, _ylabel)) in enumerate(
+
+        for pi, (pw, (_title, orig_attr, cal_attr, _ylabel, color)) in enumerate(
                 zip(self._plot_widgets, _PLOTS)):
             pw.clear()
             pw.addLegend(offset=(5, 5))
+            # Re-add the crosshair (clear() removes all items including it).
+            vline = self._vlines[pi]
+            vline.setVisible(False)
+            pw.addItem(vline)
+
+            curves: List[pg.PlotDataItem] = []
 
             orig = np.asarray([getattr(r, orig_attr) for r in rows], dtype=np.float64)
             cal  = np.asarray([getattr(r, cal_attr)  for r in rows], dtype=np.float64)
 
             # Original — solid line
             if not np.all(np.isnan(orig)):
-                pen_solid = pg.mkPen(color=color, width=1.5)
-                pw.plot(t, orig, pen=pen_solid,
-                        name=orig_attr.replace("_", " "))
+                c = pw.plot(t, orig,
+                            pen=pg.mkPen(color=color, width=1.5),
+                            name=orig_attr.replace("_", " "))
+                curves.append(c)
 
             # Reconstructed — dashed, same colour
             if not np.all(np.isnan(cal)):
-                pen_dash = pg.mkPen(color=color, width=1.5,
-                                    style=Qt.PenStyle.DashLine)
-                pw.plot(t, cal, pen=pen_dash,
-                        name=cal_attr.replace("_", " "))
+                c = pw.plot(t, cal,
+                            pen=pg.mkPen(color=color, width=1.5,
+                                         style=Qt.PenStyle.DashLine),
+                            name=cal_attr.replace("_", " "))
+                curves.append(c)
+
+            self._plot_curves[pi] = curves
+
+            # Reset view so the new data fills the viewport.
+            pw.enableAutoRange()
 
     def _refresh_raw_table(self, rows: List[InternalConsistencyResult]):
         self._raw_table.setRowCount(len(rows))
@@ -278,6 +311,76 @@ class InternalConsistencyResultDialog(QDialog):
                 Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self._stats_table.setItem(0, ci, item)
 
+    # ── Tooltip / crosshair ───────────────────────────────────────────────
+
+    # Snap tolerance in data units (seconds along the x/time axis).
+    _TOOLTIP_T_TOL: float = 0.1
+
+    def _on_mouse_moved(self, pos, source_pw: pg.PlotWidget):
+        """Show a QToolTip and move the crosshair when the mouse is near a curve.
+
+        ``pos`` is in scene coordinates of ``source_pw``'s scene.  We move the
+        vertical crosshair on *all* plots to the same x value so they stay in
+        sync, but only search for the nearest point in ``source_pw``.
+        """
+        pi = self._plot_widgets.index(source_pw)
+        vb = source_pw.getViewBox()
+
+        if not source_pw.sceneBoundingRect().contains(pos):
+            # Mouse has left this plot — hide its crosshair and tooltip.
+            self._vlines[pi].setVisible(False)
+            QToolTip.hideText()
+            return
+
+        data_pt = vb.mapSceneToView(pos)
+        mx = data_pt.x()
+
+        # Move only this plot's crosshair.
+        self._vlines[pi].setValue(mx)
+        self._vlines[pi].setVisible(True)
+
+        # Search the curves in the source plot for the closest y value.
+        curves = self._plot_curves[pi]
+        best_dist = float("inf")
+        best_label: str = ""
+        best_y: float = float("nan")
+
+        for curve in curves:
+            xdata, ydata = curve.getData()
+            if xdata is None or len(xdata) == 0:
+                continue
+            # Restrict search to a narrow time window for performance.
+            mask = np.abs(xdata - mx) <= self._TOOLTIP_T_TOL
+            if not mask.any():
+                continue
+            xs = xdata[mask]
+            ys = ydata[mask]
+            # Find index closest to mx in the x direction.
+            idx = int(np.argmin(np.abs(xs - mx)))
+            # Convert y-distance to view pixels for a display-size-independent threshold.
+            y_view  = ys[idx]
+            my_view = data_pt.y()
+            # Transform both to pixel space to compute pixel distance.
+            pt_scene  = vb.mapViewToScene(pg.Point(xs[idx], y_view))
+            cur_scene = vb.mapViewToScene(pg.Point(mx,       my_view))
+            pixel_dist = (pt_scene - cur_scene).manhattanLength()
+            if pixel_dist < best_dist:
+                best_dist  = pixel_dist
+                best_label = curve.name() or ""
+                best_y     = float(y_view)
+                best_x     = float(xs[idx])
+
+        _PIXEL_THRESHOLD = 12
+        if best_dist <= _PIXEL_THRESHOLD and not np.isnan(best_y):
+            _title, _o, _c, ylabel, _col = _PLOTS[pi]
+            tip = f"t = {best_x:.4f} s\n{best_label}: {best_y:.4f}"
+            screen_pos = source_pw.mapToGlobal(
+                source_pw.mapFromScene(pos).toPointF().toPoint()
+            )
+            QToolTip.showText(screen_pos, tip)
+        else:
+            QToolTip.hideText()
+
     # ── Footer slots ──────────────────────────────────────────────────────
 
     def _on_prev(self):
@@ -304,40 +407,20 @@ class InternalConsistencyResultDialog(QDialog):
         if not path:
             return
         try:
-            svg_blocks = []
-            for pw, (title, _o, _c, _y) in zip(self._plot_widgets, _PLOTS):
-                svg_blocks.append((title, self._export_svg(pw)))
-            Path(path).write_text(self._build_html(svg_blocks), encoding="utf-8")
+            svg_blocks = [
+                (title, export_plot_to_svg(pw))
+                for pw, (title, _o, _c, _y, _col) in zip(self._plot_widgets, _PLOTS)
+            ]
+            html = build_svg_html(
+                "Internal Consistency — Plots",
+                svg_blocks,
+                grid_columns=1,
+                cell_height_px=300,
+            )
+            Path(path).write_text(html, encoding="utf-8")
         except Exception as exc:
             logger.exception("Failed to save plots")
             QMessageBox.critical(self, "Save Failed", f"Could not save file:\n{exc}")
-
-    @staticmethod
-    def _export_svg(pw: pg.PlotWidget) -> str:
-        from pyqtgraph.exporters import SVGExporter
-        exp = SVGExporter(pw.getPlotItem())
-        svg = exp.export(toBytes=True)
-        return svg.decode("utf-8") if isinstance(svg, (bytes, bytearray)) else svg
-
-    @staticmethod
-    def _build_html(svg_blocks: list) -> str:
-        cells = "".join(
-            f'<div class="cell"><div class="label">{lbl}</div>'
-            f'<div class="svgwrap">{svg}</div></div>'
-            for lbl, svg in svg_blocks
-        )
-        return f"""<!DOCTYPE html>
-<html lang="en"><head><meta charset="utf-8"/>
-<style>
-  body{{font-family:sans-serif;margin:16px}}
-  .cell{{border:1px solid #ddd;padding:8px;margin-bottom:8px}}
-  .label{{font-weight:bold;margin-bottom:4px}}
-  .svgwrap{{width:100%;height:260px;overflow:hidden}}
-  svg{{display:block;width:100%;height:100%}}
-</style></head><body>
-<h2>Internal Consistency — Plots</h2>
-{cells}
-</body></html>"""
 
     # ── Centering ─────────────────────────────────────────────────────────
 
