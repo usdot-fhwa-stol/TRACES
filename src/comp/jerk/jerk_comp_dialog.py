@@ -31,6 +31,34 @@ class JerkCompDialog(BaseAnalysisDialog):
     def _csv_export_label(self) -> str:
         return "Jerk Analysis"
 
+    def _show_results(self, results: list) -> None:
+        if self._veh_ids is not None:
+            # Right-click path — table dialog
+            from .jerk_results_table_dialog import JerkResultsTableDialog
+            dlg = JerkResultsTableDialog(self.parent(), results)
+            dlg.exec()
+        else:
+            # Top-level menu path — box plot dialog
+            import numpy as np
+            from .jerk_box_plot_dialog import JerkBoxPlotDialog
+    
+            def pull(name):
+                return [(r.veh_id, getattr(r, name))
+                        for r in results
+                        if not np.isnan(getattr(r, name))]
+    
+            dropped = sum(1 for r in results if r.jerk_source == "unavailable")
+            metrics = {
+                "min_jerk":                  pull("min_jerk"),
+                "max_jerk":                  pull("max_jerk"),
+                "jerk_violation_pct":        pull("jerk_violation_pct"),
+                "sign_inversion_excess_pct": pull("sign_inversion_excess_pct"),
+            }
+            event_id = self._export_event_ids[0] if self._export_event_ids else "?"
+            dlg = JerkBoxPlotDialog(
+                self.parent(), f"Jerk Analysis — Event {event_id}", metrics, dropped)
+            dlg.exec()
+
     def _build_parameter_form(self) -> QFormLayout:
         form = QFormLayout()
 

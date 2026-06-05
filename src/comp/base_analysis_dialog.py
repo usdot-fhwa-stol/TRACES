@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import pyqtSignal, QThread
+from PyQt6.QtCore import QThread
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QPushButton, QProgressBar, QFileDialog, QMessageBox,
@@ -34,6 +34,9 @@ class BaseAnalysisDialog(QDialog):
         Human-readable module name used in the Save dialog title and the
         completion message box.
 
+    _show_results(self, results: list) -> None
+        Invokes module-specific dialog to render analysis results
+
     Class-level flags
     -----------------
     RIGHT_CLICK_ENABLED : bool = True
@@ -47,14 +50,7 @@ class BaseAnalysisDialog(QDialog):
     Export
         Save… is shown; on finish, writes CSV and shows a completion dialog.
         params_accepted is NOT emitted.
-
-    Signals
-    -------
-    params_accepted(dict, list)
-        Emitted in normal mode with (params_dict, results_list).
     """
-
-    params_accepted = pyqtSignal(dict, list)
 
     RIGHT_CLICK_ENABLED: bool = True   # Module 5 sets this to False
 
@@ -101,6 +97,9 @@ class BaseAnalysisDialog(QDialog):
 
     def _csv_export_label(self) -> str:
         return "Analysis"
+
+    def _show_results(self, results: list) -> None:
+        pass
 
     # ── UI ────────────────────────────────────────────────────────────────
 
@@ -196,12 +195,11 @@ class BaseAnalysisDialog(QDialog):
         if self._is_export_mode:
             QMessageBox.information(
                 self, "Export Complete",
-                f"{self._csv_export_label()} exported successfully to:"
-                f"\n{self._dest_path}",
+                f"{self._csv_export_label()} exported successfully to:\n{self._dest_path}",
             )
             self.accept()
         else:
-            self.params_accepted.emit(self._current_params(), results)
+            self._show_results(results)
             self.accept()
 
     def _on_worker_error(self, message: str):

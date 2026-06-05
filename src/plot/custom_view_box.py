@@ -59,6 +59,7 @@ class CustomViewBox(pg.ViewBox):
             {'filter': 'ASO', 'label': 'Statistics',         'callback': self._generate_statistics},
             {'filter': 'ASO', 'label': 'Noise Analysis',     'submenu': [
                 {'label': 'Jerk Analysis…', 'callback': self._run_jerk_analysis_rightclick},
+                {'label': 'Internal Consistency…', 'callback': self._run_ic_rightclick},
                 # future modules go here
             ]},
         ]
@@ -691,12 +692,31 @@ class CustomViewBox(pg.ViewBox):
             event_ids=[event_id],
             veh_ids=veh_ids,
         )
-        dlg.params_accepted.connect(
-            lambda params, results: self._show_jerk_table_rightclick(results)
-        )
         dlg.exec()
 
-    def _show_jerk_table_rightclick(self, results):
-        from comp.jerk import JerkResultsTableDialog
-        dlg = JerkResultsTableDialog(self.parent_widget, results)
+    def _run_ic_rightclick(self):
+        if (not self.parent_widget._db_connection
+                or self.parent_widget._current_event_id is None):
+            return
+    
+        # Gate on veh_dist_trav presence.
+        from comp.base_comp import BaseComp
+        cols = BaseComp._events_columns(self.parent_widget._db_connection)
+        if "veh_dist_trav" not in cols:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(
+                self.parent_widget, "Internal Consistency",
+                "The veh_dist_trav column is required but absent from this dataset.")
+            return
+    
+        veh_ids  = self._get_target_vehicle_ids()
+        event_id = self.parent_widget._current_event_id
+    
+        from comp.consistency import InternalConsistencyDialog
+        dlg = InternalConsistencyDialog(
+            self.parent_widget,
+            self.parent_widget._db_connection,
+            event_ids=[event_id],
+            veh_ids=veh_ids,
+        )
         dlg.exec()

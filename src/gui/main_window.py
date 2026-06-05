@@ -90,6 +90,10 @@ class MainWindow(QMainWindow):
         export_jerk_action.triggered.connect(self._export_jerk_analysis)
         export_analysis_menu.addAction(export_jerk_action)
 
+        export_ic_action = QAction("&Internal Consistency…", self)
+        export_ic_action.triggered.connect(self._export_internal_consistency)
+        export_analysis_menu.addAction(export_ic_action)
+
         file_menu.addSeparator()
 
         # About action
@@ -117,6 +121,10 @@ class MainWindow(QMainWindow):
         jerk_action = QAction("&Jerk Analysis…", self)
         jerk_action.triggered.connect(self._run_jerk_analysis)
         self._analysis_menu.addAction(jerk_action)
+
+        ic_action = QAction("&Internal Consistency…", self)
+        ic_action.triggered.connect(self._run_internal_consistency)
+        self._analysis_menu.addAction(ic_action)
 
         self._mode_menu = QMenu("&Mode", self)
         menu_bar.addMenu(self._mode_menu)
@@ -505,6 +513,27 @@ class MainWindow(QMainWindow):
         jerk_dlg = JerkCompDialog(self, self._db_connection, event_ids=event_ids, export_mode=True)
         jerk_dlg.exec()
 
+    def _export_internal_consistency(self):
+        if not self._db_connection:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "Warning", "No database is currently open.")
+            return
+    
+        from PyQt6.QtWidgets import QDialog
+        from gui.event_selection_dialog import EventSelectionDialog
+        sel_dlg = EventSelectionDialog(self, self._db_connection)
+        if sel_dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        event_ids = sel_dlg.selected_event_ids
+        if not event_ids:
+            return
+    
+        from comp.consistency import InternalConsistencyDialog
+        dlg = InternalConsistencyDialog(
+            self, self._db_connection,
+            event_ids=event_ids, export_mode=True)
+        dlg.exec()
+
     def _show_about(self):
         """Handle the About menu action by showing the AboutDialog."""
         from .about_dialog import AboutDialog
@@ -558,36 +587,13 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
     def _run_jerk_analysis(self):
-        if not self._db_connection:
-            QMessageBox.warning(self, "Warning", "No database is currently open.")
-            return
-        event_id = self._plot_widget._current_event_id
-        if event_id is None:
-            QMessageBox.warning(self, "Warning", "No event is currently loaded.")
-            return
-
         from comp.jerk import JerkCompDialog
+        event_id = self._plot_widget._current_event_id
         dlg = JerkCompDialog(self, self._db_connection, event_ids=[event_id])
-        dlg.params_accepted.connect(
-            lambda params, results: self._show_jerk_box_plots(event_id, params, results)
-        )
         dlg.exec()
 
-    def _show_jerk_box_plots(self, event_id, params, results):
-        import numpy as np
-        from comp.jerk import JerkBoxPlotDialog
-
-        def pull(name):
-            return [(r.veh_id, getattr(r, name))
-                    for r in results
-                    if not np.isnan(getattr(r, name))]
-
-        dropped = sum(1 for r in results if r.jerk_source == "unavailable")
-        metrics = {
-            "min_jerk":                  pull("min_jerk"),
-            "max_jerk":                  pull("max_jerk"),
-            "jerk_violation_pct":        pull("jerk_violation_pct"),
-            "sign_inversion_excess_pct": pull("sign_inversion_excess_pct"),
-        }
-        dlg = JerkBoxPlotDialog(self, f"Jerk Analysis — Event {event_id}", metrics, dropped)
+    def _run_internal_consistency(self):
+        from comp.consistency import InternalConsistencyDialog
+        event_id = self._plot_widget._current_event_id
+        dlg = InternalConsistencyDialog(self, self._db_connection, event_ids=[event_id])
         dlg.exec()
