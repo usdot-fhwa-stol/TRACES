@@ -50,20 +50,27 @@ class CustomViewBox(pg.ViewBox):
         self._is_selecting = False
         self._selection_box = None
         self._current_context_vehicle = None
-        
-        # Context menu registry - list of dictionaries with keys: filter, label, callback
-        # Filter string contains combinations of: A (all series), S (selected series), O (one series)
+
+        # Context menu registry — list of dicts with keys:
+        #   filter   : string of context codes ('A', 'S', 'O') that show this item
+        #   label    : display text
+        #   callback : callable to invoke, or None to render as a disabled placeholder
+        #   submenu  : list of sub-item dicts (same keys minus filter), optional
+        #
+        # A callback of None in a sub-item produces a disabled action in the submenu.
         self._context_menu_registry = [
             {'filter': 'SO',  'label': 'Time-Speed Diagram', 'callback': self._show_time_speed_dialog},
             {'filter': 'SO',  'label': 'Time-Accel Diagram', 'callback': self._show_time_accel_dialog},
             {'filter': 'ASO', 'label': 'Statistics',         'callback': self._generate_statistics},
             {'filter': 'ASO', 'label': 'Noise Analysis',     'submenu': [
-                {'label': 'Jerk Analysis…', 'callback': self._run_jerk_analysis_rightclick},
-                {'label': 'Internal Consistency…', 'callback': self._run_ic_rightclick},
-                # future modules go here
+                {'label': 'Jerk Analysis…',          'callback': self._run_jerk_analysis_rightclick},
+                {'label': 'Internal Consistency…',   'callback': self._run_ic_rightclick},
+                {'label': 'Missing Data…',            'callback': None},
+                {'label': 'Platoon Consistency…',     'callback': None},
+                # Spectral Analysis is top-level menu only per spec (Module 5).
             ]},
         ]
-
+        
     def mousePressEvent(self, ev):
         """Handle mouse press events for selection box creation."""
         if ev.button() == Qt.MouseButton.LeftButton:
@@ -407,8 +414,8 @@ class CustomViewBox(pg.ViewBox):
         title_action.setEnabled(False)
         context_menu.addAction(title_action)
         context_menu.addSeparator()
-        
-        # Add menu items based on registry and current context
+
+        # Add menu items based on registry and current context.
         for item in self._context_menu_registry:
             if menu_type not in item['filter']:
                 continue
@@ -416,14 +423,22 @@ class CustomViewBox(pg.ViewBox):
                 sub = QMenu(item['label'], context_menu)
                 for sub_item in item['submenu']:
                     sub_action = QAction(sub_item['label'], sub)
-                    sub_action.triggered.connect(
-                        lambda checked, cb=sub_item['callback']: cb()
-                    )
+                    if sub_item.get('callback') is None:
+                        sub_action.setEnabled(False)
+                    else:
+                        sub_action.triggered.connect(
+                            lambda checked, cb=sub_item['callback']: cb()
+                        )
                     sub.addAction(sub_action)
                 context_menu.addMenu(sub)
             else:
                 action = QAction(item['label'], context_menu)
-                action.triggered.connect(lambda checked, cb=item['callback']: cb())
+                if item.get('callback') is None:
+                    action.setEnabled(False)
+                else:
+                    action.triggered.connect(
+                        lambda checked, cb=item['callback']: cb()
+                    )
                 context_menu.addAction(action)
         
         # Show context menu at cursor position

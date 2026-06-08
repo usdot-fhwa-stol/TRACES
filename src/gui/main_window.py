@@ -93,6 +93,16 @@ class MainWindow(QMainWindow):
         export_ic_action = QAction("&Internal Consistency…", self)
         export_ic_action.triggered.connect(self._export_internal_consistency)
         export_analysis_menu.addAction(export_ic_action)
+        
+        # placeholders for future noise analysis modules
+        placeholder = QAction("&Missing Data…", self)
+        placeholder.setEnabled(False)
+        export_analysis_menu.addAction(placeholder)
+
+        placeholder = QAction("&Platoon Consistency…", self)
+        placeholder.setEnabled(False)
+        export_analysis_menu.addAction(placeholder)
+        # spectral analysis only available from top-level menu
 
         file_menu.addSeparator()
 
@@ -125,6 +135,19 @@ class MainWindow(QMainWindow):
         ic_action = QAction("&Internal Consistency…", self)
         ic_action.triggered.connect(self._run_internal_consistency)
         self._analysis_menu.addAction(ic_action)
+
+        # placeholders for future noise analysis modules
+        placeholder = QAction("&Missing Data…", self)
+        placeholder.setEnabled(False)
+        self._analysis_menu.addAction(placeholder)
+
+        placeholder = QAction("&Platoon Consistency…", self)
+        placeholder.setEnabled(False)
+        self._analysis_menu.addAction(placeholder)
+
+        placeholder = QAction("S&pectral Analysis…", self)
+        placeholder.setEnabled(False)
+        self._analysis_menu.addAction(placeholder)
 
         self._mode_menu = QMenu("&Mode", self)
         menu_bar.addMenu(self._mode_menu)
