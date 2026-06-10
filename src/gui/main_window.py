@@ -94,11 +94,11 @@ class MainWindow(QMainWindow):
         export_ic_action.triggered.connect(self._export_internal_consistency)
         export_analysis_menu.addAction(export_ic_action)
         
-        # placeholders for future noise analysis modules
-        placeholder = QAction("&Missing Data…", self)
-        placeholder.setEnabled(False)
-        export_analysis_menu.addAction(placeholder)
+        export_missing_data_action = QAction("&Missing Data Analysis…", self)
+        export_missing_data_action.triggered.connect(self._export_missing_data_analysis)
+        export_analysis_menu.addAction(export_missing_data_action)
 
+        # placeholders for future noise analysis modules
         placeholder = QAction("&Platoon Consistency…", self)
         placeholder.setEnabled(False)
         export_analysis_menu.addAction(placeholder)
@@ -136,11 +136,11 @@ class MainWindow(QMainWindow):
         ic_action.triggered.connect(self._run_internal_consistency)
         self._analysis_menu.addAction(ic_action)
 
+        missing_data_action = QAction("&Missing Data Analysis…", self)
+        missing_data_action.triggered.connect(self._run_missing_data_analysis)
+        self._analysis_menu.addAction(missing_data_action)
+        
         # placeholders for future noise analysis modules
-        placeholder = QAction("&Missing Data…", self)
-        placeholder.setEnabled(False)
-        self._analysis_menu.addAction(placeholder)
-
         placeholder = QAction("&Platoon Consistency…", self)
         placeholder.setEnabled(False)
         self._analysis_menu.addAction(placeholder)
@@ -557,6 +557,27 @@ class MainWindow(QMainWindow):
             event_ids=event_ids, export_mode=True)
         dlg.exec()
 
+    def _export_missing_data_analysis(self):
+        """Handle the Export Analysis → Missing Data Analysis menu action."""
+        if not self._db_connection:
+            QMessageBox.warning(self, "Warning", "No database is currently open.")
+            return
+
+        # Step 1: ask the user which events to include.
+        from .event_selection_dialog import EventSelectionDialog
+        sel_dlg = EventSelectionDialog(self, self._db_connection)
+        if sel_dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        event_ids = sel_dlg.selected_event_ids
+        if not event_ids:
+            return
+
+        # Step 2: show MissingDataCompDialog in export mode (Save… button).
+        from comp.missing_data import MissingDataCompDialog
+        md_dlg = MissingDataCompDialog(self, self._db_connection, event_ids=event_ids, export_mode=True)
+        md_dlg.exec()
+
     def _show_about(self):
         """Handle the About menu action by showing the AboutDialog."""
         from .about_dialog import AboutDialog
@@ -619,4 +640,10 @@ class MainWindow(QMainWindow):
         from comp.consistency import InternalConsistencyDialog
         event_id = self._plot_widget._current_event_id
         dlg = InternalConsistencyDialog(self, self._db_connection, event_ids=[event_id])
+        dlg.exec()
+
+    def _run_missing_data_analysis(self):
+        event_id = self._plot_widget._current_event_id
+        from comp.missing_data import MissingDataCompDialog
+        dlg = MissingDataCompDialog(self, self._db_connection, event_ids=[event_id])
         dlg.exec()
