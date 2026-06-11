@@ -90,14 +90,14 @@ class MainWindow(QMainWindow):
         export_jerk_action.triggered.connect(self._export_jerk_analysis)
         export_analysis_menu.addAction(export_jerk_action)
 
-        export_ic_action = QAction("&Internal Consistency…", self)
-        export_ic_action.triggered.connect(self._export_internal_consistency)
-        export_analysis_menu.addAction(export_ic_action)
-        
         export_missing_data_action = QAction("&Missing Data Analysis…", self)
         export_missing_data_action.triggered.connect(self._export_missing_data_analysis)
         export_analysis_menu.addAction(export_missing_data_action)
 
+        export_ic_action = QAction("&Internal Consistency…", self)
+        export_ic_action.triggered.connect(self._export_internal_consistency)
+        export_analysis_menu.addAction(export_ic_action)
+        
         # placeholders for future noise analysis modules
         placeholder = QAction("&Platoon Consistency…", self)
         placeholder.setEnabled(False)
@@ -124,6 +124,7 @@ class MainWindow(QMainWindow):
         log_action.triggered.connect(self._show_log_viewer)
         view_menu.addAction(log_action)
 
+        # Analysis menu
         self._analysis_menu = QMenu("&Analysis", self)
         menu_bar.addMenu(self._analysis_menu)
         self._analysis_menu.menuAction().setVisible(False)  # hidden until DB is open
@@ -132,14 +133,14 @@ class MainWindow(QMainWindow):
         jerk_action.triggered.connect(self._run_jerk_analysis)
         self._analysis_menu.addAction(jerk_action)
 
+        missing_data_action = QAction("&Missing Data Analysis…", self)
+        missing_data_action.triggered.connect(self._run_missing_data_analysis)
+        self._analysis_menu.addAction(missing_data_action)
+
         ic_action = QAction("&Internal Consistency…", self)
         ic_action.triggered.connect(self._run_internal_consistency)
         self._analysis_menu.addAction(ic_action)
 
-        missing_data_action = QAction("&Missing Data Analysis…", self)
-        missing_data_action.triggered.connect(self._run_missing_data_analysis)
-        self._analysis_menu.addAction(missing_data_action)
-        
         # placeholders for future noise analysis modules
         placeholder = QAction("&Platoon Consistency…", self)
         placeholder.setEnabled(False)

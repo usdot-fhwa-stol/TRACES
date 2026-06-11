@@ -64,9 +64,9 @@ class CustomViewBox(pg.ViewBox):
             {'filter': 'ASO', 'label': 'Statistics',         'callback': self._generate_statistics},
             {'filter': 'ASO', 'label': 'Noise Analysis',     'submenu': [
                 {'label': 'Jerk Analysis…',          'callback': self._run_jerk_analysis_rightclick},
+                {'label': 'Missing Data Analysis…',  'callback': self._run_missing_data_analysis_rightclick},
                 {'label': 'Internal Consistency…',   'callback': self._run_ic_rightclick},
-                {'label': 'Missing Data…',            'callback': self._run_missing_data_analysis_rightclick},
-                {'label': 'Platoon Consistency…',     'callback': None},
+                {'label': 'Platoon Consistency…',    'callback': None},
                 # Spectral Analysis is top-level menu only per spec (Module 5).
             ]},
         ]
