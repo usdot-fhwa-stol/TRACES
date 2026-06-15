@@ -253,7 +253,7 @@ class ExportDialog(QDialog):
             button_layout.addStretch()
 
         # Create Export button
-        self._export_button = QPushButton("Export...")
+        self._export_button = QPushButton("Export")
         self._export_button.clicked.connect(self._on_export)
         button_layout.addWidget(self._export_button)
         

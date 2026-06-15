@@ -58,7 +58,7 @@ class JerkBoxPlotDialog(QDialog):
 
         btn_row = QHBoxLayout()
         btn_row.addStretch()
-        self._save_btn = QPushButton("Save…")
+        self._save_btn = QPushButton("Save")
         self._save_btn.clicked.connect(self._on_save)
         btn_row.addWidget(self._save_btn)
         self._close_btn = QPushButton("Close")

@@ -26,7 +26,7 @@ class InternalConsistencyDialog(BaseAnalysisDialog):
         InternalConsistencyResultDialog (combined modal dialog).
 
     Export (event_ids=multiple ids, export_mode=True):
-        Save… streams Figure-12 layout CSV.  No DB write occurs.
+        Save streams Figure-12 layout CSV.  No DB write occurs.
     """
 
     # ── Construction ──────────────────────────────────────────────────────

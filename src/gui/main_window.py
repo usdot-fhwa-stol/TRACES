@@ -53,7 +53,7 @@ class MainWindow(QMainWindow):
         menu_bar.addMenu(file_menu)
 
         # File menu items
-        open_action = QAction("&Open...", self)
+        open_action = QAction("&Open", self)
         open_action.triggered.connect(self._open_file)
         file_menu.addAction(open_action)
 
@@ -65,41 +65,41 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
 
         # Import action
-        import_action = QAction("&Import...", self)
+        import_action = QAction("&Import", self)
         import_action.triggered.connect(self._import_file)
         file_menu.addAction(import_action)
 
         # Export submenu
-        self._export_menu = QMenu("&Export...", self)
+        self._export_menu = QMenu("&Export", self)
         self._export_menu.setEnabled(False)
         file_menu.addMenu(self._export_menu)
 
         # Export submenu items
-        export_all_action = QAction("Export &All...", self)
+        export_all_action = QAction("Export &All", self)
         export_all_action.triggered.connect(self._export_all)
         self._export_menu.addAction(export_all_action)
 
-        export_select_action = QAction("Export &Selected...", self)  # Updated label
+        export_select_action = QAction("Export &Selected", self)  # Updated label
         export_select_action.triggered.connect(self._export_selected)
         self._export_menu.addAction(export_select_action)
 
         export_analysis_menu = QMenu("Export &Analysis", self)
         self._export_menu.addMenu(export_analysis_menu)
 
-        export_jerk_action = QAction("&Jerk Analysis…", self)
+        export_jerk_action = QAction("&Jerk Analysis", self)
         export_jerk_action.triggered.connect(self._export_jerk_analysis)
         export_analysis_menu.addAction(export_jerk_action)
 
-        export_ic_action = QAction("&Internal Consistency…", self)
+        export_ic_action = QAction("&Internal Consistency", self)
         export_ic_action.triggered.connect(self._export_internal_consistency)
         export_analysis_menu.addAction(export_ic_action)
         
         # placeholders for future noise analysis modules
-        placeholder = QAction("&Missing Data…", self)
+        placeholder = QAction("&Missing Data", self)
         placeholder.setEnabled(False)
         export_analysis_menu.addAction(placeholder)
 
-        placeholder = QAction("&Platoon Consistency…", self)
+        placeholder = QAction("&Platoon Consistency", self)
         placeholder.setEnabled(False)
         export_analysis_menu.addAction(placeholder)
         # spectral analysis only available from top-level menu
@@ -128,24 +128,24 @@ class MainWindow(QMainWindow):
         menu_bar.addMenu(self._analysis_menu)
         self._analysis_menu.menuAction().setVisible(False)  # hidden until DB is open
 
-        jerk_action = QAction("&Jerk Analysis…", self)
+        jerk_action = QAction("&Jerk Analysis", self)
         jerk_action.triggered.connect(self._run_jerk_analysis)
         self._analysis_menu.addAction(jerk_action)
 
-        ic_action = QAction("&Internal Consistency…", self)
+        ic_action = QAction("&Internal Consistency", self)
         ic_action.triggered.connect(self._run_internal_consistency)
         self._analysis_menu.addAction(ic_action)
 
         # placeholders for future noise analysis modules
-        placeholder = QAction("&Missing Data…", self)
+        placeholder = QAction("&Missing Data", self)
         placeholder.setEnabled(False)
         self._analysis_menu.addAction(placeholder)
 
-        placeholder = QAction("&Platoon Consistency…", self)
+        placeholder = QAction("&Platoon Consistency", self)
         placeholder.setEnabled(False)
         self._analysis_menu.addAction(placeholder)
 
-        placeholder = QAction("S&pectral Analysis…", self)
+        placeholder = QAction("S&pectral Analysis", self)
         placeholder.setEnabled(False)
         self._analysis_menu.addAction(placeholder)
 
@@ -531,7 +531,7 @@ class MainWindow(QMainWindow):
         if not event_ids:
             return
 
-        # Step 2: show JerkCompDialog in export mode (Save… button).
+        # Step 2: show JerkCompDialog in export mode (Save button).
         from comp.jerk import JerkCompDialog
         jerk_dlg = JerkCompDialog(self, self._db_connection, event_ids=event_ids, export_mode=True)
         jerk_dlg.exec()

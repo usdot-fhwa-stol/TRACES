@@ -15,7 +15,7 @@ class JerkResultsTableDialog(QDialog):
     """Tabular view of JerkComp results, one row per (event_id, veh_id).
 
     Used by the right-click invocation of jerk analysis. Provides a
-    'Save…' button to write the table to CSV.
+    'Save' button to write the table to CSV.
     """
 
     _COLUMNS = [
@@ -69,7 +69,7 @@ class JerkResultsTableDialog(QDialog):
 
         btn_row = QHBoxLayout()
         btn_row.addStretch()
-        self._save_btn = QPushButton("Save…")
+        self._save_btn = QPushButton("Save")
         self._save_btn.setToolTip("Save table to CSV")
         self._save_btn.clicked.connect(self._on_save)
         btn_row.addWidget(self._save_btn)

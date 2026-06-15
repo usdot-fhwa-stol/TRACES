@@ -48,7 +48,7 @@ class BaseAnalysisDialog(QDialog):
         OK is shown; on finish, emits params_accepted(dict, list).
 
     Export
-        Save… is shown; on finish, writes CSV and shows a completion dialog.
+        Save is shown; on finish, writes CSV and shows a completion dialog.
         params_accepted is NOT emitted.
     """
 
@@ -115,7 +115,7 @@ class BaseAnalysisDialog(QDialog):
         btn_row.addStretch()
 
         if self._is_export_mode:
-            self._primary_btn = QPushButton("Save…")
+            self._primary_btn = QPushButton("Save")
             self._primary_btn.clicked.connect(self._on_save)
         else:
             self._primary_btn = QPushButton("OK")
