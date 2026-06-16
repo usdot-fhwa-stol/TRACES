@@ -13,49 +13,58 @@ logger = logging.getLogger(__name__)
 
 
 class JerkBoxPlotDialog(QDialog):
-    """Displays a 2x2 grid of box plots summarizing per-trajectory metrics.
+    """Displays a 3x2 grid of box plots summarizing per-trajectory metrics.
 
     Args:
         parent: parent widget
         title (str): dialog title
-        metrics dict[str, list[tuple[int, float]]]: mapping of metric key to value list.
-            Expected keys: 'min_jerk', 'max_jerk', 'jerk_violation_pct',
-            'sign_inversion_excess_pct'.
+        metrics (dict[str, list[tuple[int, float]]]): mapping of metric key to value list.
+            Expected keys: 'min_jerk', 'mean_jerk', 'max_jerk',
+            'jerk_violation_pct', 'sign_inversion_excess_pct'.
         dropped (int): number of trajectories excluded due to missing data.
     """
 
-    # Grid position and label for each metric.
+    # Grid position and label for each metric. None key = empty spacer cell.
     _LAYOUT = [
-        ("min_jerk",                  (0, 0), "Min Jerk (m/s³)"),
-        ("max_jerk",                  (0, 1), "Max Jerk (m/s³)"),
+        ("min_jerk",                  (0, 0), "Minimum Jerk (m/s³)"),
+        ("mean_jerk",                 (0, 1), "Mean Jerk (m/s³)"),
+        ("max_jerk",                  (0, 2), "Maximum Jerk (m/s³)"),
         ("jerk_violation_pct",        (1, 0), "Jerk Violation (%)"),
-        ("sign_inversion_excess_pct", (1, 1), "Sign Inversion Excess (%)"),
+        (None,                        (1, 1), None),               # spacer cell
+        ("sign_inversion_excess_pct", (1, 2), "Sign Inversion Excess (%)"),
     ]
 
     def __init__(self, parent, title, metrics, dropped=0):
         super().__init__(parent)
         self.setWindowTitle(title)
-        self.resize(900, 700)
-
-        self._plots = {}      # key -> pg.PlotWidget
+        self.resize(1350, 700)           # wider to accommodate 3 columns
+    
+        self._plots = {}
         self._setup_ui(metrics, dropped)
-
+    
     def _setup_ui(self, metrics, dropped):
         layout = QVBoxLayout(self)
-
+    
         if dropped > 0:
             note = QLabel(f"{dropped} trajector{'y' if dropped == 1 else 'ies'} "
                           f"excluded due to missing data.")
             note.setStyleSheet("color: #555; font-style: italic;")
             layout.addWidget(note)
-
+    
         grid = QGridLayout()
+        # Equal stretch on all three columns so the empty cell doesn't collapse.
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
+        grid.setColumnStretch(2, 1)
+    
         for key, (row, col), label in self._LAYOUT:
+            if key is None:
+                continue                 # leave the spacer cell empty
             plot = self._build_box_plot(metrics.get(key, []), label)
             self._plots[key] = plot
             grid.addWidget(plot, row, col)
         layout.addLayout(grid, stretch=1)
-
+    
         btn_row = QHBoxLayout()
         btn_row.addStretch()
         self._save_btn = QPushButton("Save")
@@ -157,7 +166,7 @@ class JerkBoxPlotDialog(QDialog):
             html = build_svg_html(
                 "Jerk Analysis Box Plots",
                 svg_blocks,
-                grid_columns=2,
+                grid_columns=3,
                 cell_height_px=320,
             )
             Path(path).write_text(html, encoding="utf-8")

@@ -1,5 +1,3 @@
-# comp/jerk/jerk_comp_dialog.py  — FULL REPLACEMENT
-
 import csv
 import logging
 import math
@@ -50,6 +48,7 @@ class JerkCompDialog(BaseAnalysisDialog):
             dropped = sum(1 for r in results if r.jerk_source == "unavailable")
             metrics = {
                 "min_jerk":                  pull("min_jerk"),
+                "mean_jerk":                 pull("mean_jerk"),
                 "max_jerk":                  pull("max_jerk"),
                 "jerk_violation_pct":        pull("jerk_violation_pct"),
                 "sign_inversion_excess_pct": pull("sign_inversion_excess_pct"),
@@ -141,19 +140,20 @@ class JerkCompDialog(BaseAnalysisDialog):
     def _write_csv(results: list, dest: str):
         fieldnames = [
             "event_id", "veh_id",
-            "jerk_violation_pct", "max_jerk", "min_jerk",
-            "sign_inversion_excess_pct",
+            "min_jerk", "mean_jerk", "max_jerk", 
+            "jerk_violation_pct", "sign_inversion_excess_pct",
         ]
         with open(dest, "w", newline="", encoding="utf-8") as fh:
             writer = csv.DictWriter(fh, fieldnames=fieldnames)
             writer.writeheader()
             for r in results:
                 writer.writerow({
-                    "event_id":                 r.event_id,
-                    "veh_id":                   r.veh_id,
-                    "jerk_violation_pct":        JerkCompDialog._fmt(r.jerk_violation_pct),
-                    "max_jerk":                  JerkCompDialog._fmt(r.max_jerk),
+                    "event_id":                  r.event_id,
+                    "veh_id":                    r.veh_id,
                     "min_jerk":                  JerkCompDialog._fmt(r.min_jerk),
+                    "mean_jerk":                 JerkCompDialog._fmt(r.mean_jerk),
+                    "max_jerk":                  JerkCompDialog._fmt(r.max_jerk),
+                    "jerk_violation_pct":        JerkCompDialog._fmt(r.jerk_violation_pct),
                     "sign_inversion_excess_pct": JerkCompDialog._fmt(r.sign_inversion_excess_pct),
                 })
     
