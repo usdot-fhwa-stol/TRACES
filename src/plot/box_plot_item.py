@@ -1,5 +1,6 @@
 import pyqtgraph as pg
 from pyqtgraph import QtCore, QtGui
+from PyQt6.QtCore import pyqtSignal
 
 
 class BoxPlotItem(pg.GraphicsObject):
@@ -46,6 +47,9 @@ class BoxPlotItem(pg.GraphicsObject):
     # by the caller using a ScatterPlotItem, which works in pixel space.
     # box_plot_dialog.py already does this correctly.
 
+    # Emitted on hover enter (stats tuple) and hover leave (None).
+    sigHovered = pyqtSignal(object)   # object = tuple[float,...] | None
+
     def __init__(self, x, q1, median, q3, whisker_low, whisker_high,
                  outliers=None, box_width=0.5, whisker_width=0.3,
                  pen=None, brush=None):
@@ -63,6 +67,7 @@ class BoxPlotItem(pg.GraphicsObject):
         self.pen   = pen   or pg.mkPen(self._OUTLINE_COLOR, width=1)
         self.brush = brush or pg.mkBrush(100, 100, 255, 150)
         self.picture = None
+        self.setAcceptHoverEvents(True)   # ← enable hover
         self._generate_picture()
 
     # ------------------------------------------------------------------
@@ -152,4 +157,42 @@ class BoxPlotItem(pg.GraphicsObject):
         p.drawPicture(0, 0, self.picture)
 
     def boundingRect(self):
-        return QtCore.QRectF(self.picture.boundingRect())
+        """Return the bounding rect computed analytically from data values.
+    
+        QPicture.boundingRect() is unreliable for zero-height or near-zero
+        geometry because Qt pads the pen stroke width in device/pixel
+        coordinates into the rect. For a plot whose y-range spans large
+        data values this causes the hover area to be vastly larger than the
+        visible item. Computing the rect from the stored values is exact.
+        """
+        half_box = self.box_width / 2.0
+        half_whisker = self.whisker_width / 2.0
+    
+        left  = self.x - max(half_box, half_whisker)
+        right = self.x + max(half_box, half_whisker)
+    
+        # In the degenerate case all five values equal self.median.
+        top    = self.whisker_high
+        bottom = self.whisker_low
+    
+        if top == bottom:
+            # Zero-height: give a small epsilon so the rect is non-null and
+            # pyqtgraph's scene graph doesn't cull it, but keep it tight.
+            epsilon = 1e-6
+            top    += epsilon
+            bottom -= epsilon
+    
+        return QtCore.QRectF(left, bottom, right - left, top - bottom)
+
+    def hoverEvent(self, ev):
+        """Emit sigHovered with the five statistical values on enter, None on leave."""
+        if ev.isExit():
+            self.sigHovered.emit(None)
+        else:
+            self.sigHovered.emit((
+                self.whisker_low,
+                self.q1,
+                self.median,
+                self.q3,
+                self.whisker_high,
+            ))

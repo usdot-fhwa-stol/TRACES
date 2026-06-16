@@ -106,6 +106,7 @@ class JerkBoxPlotDialog(QDialog):
                            whisker_low=whisker_low, whisker_high=whisker_high,
                            outliers=outliers)
         plot.addItem(item)
+        item.sigHovered.connect(lambda stats, pw=plot: self._on_box_hovered(stats, pw))
 
         # Identify which indices in arr are outliers, keeping their veh_ids
         outlier_mask = (arr < whisker_low) | (arr > whisker_high)
@@ -123,9 +124,7 @@ class JerkBoxPlotDialog(QDialog):
                 tip=None,
                 data=outlier_vids,   # parallel list — index i → veh_id
             )
-            scatter.sigHovered.connect(
-                lambda item, pts, ev, pw=plot: self._on_outlier_hovered(pts, ev, pw)
-            )
+            scatter.sigHovered.connect(lambda item, pts, ev, pw=plot: self._on_outlier_hovered(pts, ev, pw))
             plot.addItem(scatter)
 
         # Pad the X-range so the box is centered and not hugged by the edges.
@@ -148,6 +147,23 @@ class JerkBoxPlotDialog(QDialog):
             QToolTip.showText(screen_pos, labels)
         else:
             QToolTip.hideText()
+
+    def _on_box_hovered(self, stats, plot_widget):
+        """Show a QToolTip with the five-number summary on box hover, hide on leave."""
+        if stats is None:
+            QToolTip.hideText()
+            return
+        whisker_low, q1, median, q3, whisker_high = stats
+        text = (
+            f"Upper: {whisker_high:.4g}\n"
+            f"Q3:            {q3:.4g}\n"
+            f"Median:        {median:.4g}\n"
+            f"Q1:            {q1:.4g}\n"
+            f"Lower: {whisker_low:.4g}"
+        )
+        # Convert the centre of the plot widget to a global screen position.
+        screen_pos = plot_widget.mapToGlobal(plot_widget.rect().center())
+        QToolTip.showText(screen_pos, text)
 
     # ── Save: HTML with embedded SVG and pan/zoom JS ──────────────────────
 
