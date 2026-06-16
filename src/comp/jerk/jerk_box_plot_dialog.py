@@ -162,11 +162,12 @@ class JerkBoxPlotDialog(QDialog):
             svg_blocks = [
                 (label, export_plot_to_svg(self._plots[key]))
                 for key, _pos, label in self._LAYOUT
+                if key is not None and key in self._plots
             ]
             html = build_svg_html(
                 "Jerk Analysis Box Plots",
                 svg_blocks,
-                grid_columns=3,
+                grid_columns=2,
                 cell_height_px=320,
             )
             Path(path).write_text(html, encoding="utf-8")
