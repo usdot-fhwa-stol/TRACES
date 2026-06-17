@@ -119,6 +119,7 @@ class JerkCompDialog(BaseAnalysisDialog):
             ("Use jerk column from dataset",               "dataset",    "veh_jerk"  in cols),
             ("Calculate jerk from acceleration",            "from_accel", "veh_accel" in cols),
             ("Calculate acceleration and jerk from speed",  "from_speed", "veh_speed" in cols),
+            ("Filtered data from spline fitting",           "spline_fit", False),
         ]
         self._method_combo.clear()
         for label, key, enabled in entries:

@@ -1,6 +1,16 @@
+"""Statistics summary table for Module 4 — Internal Consistency (top-level menu path).
+
+One row per (event_id, veh_id) pair, 10 metric columns with abbreviated
+headers and full names as header tooltips.  Includes a Save button that
+exports the table to CSV, consistent with the other noise-analysis result
+dialogs (e.g. JerkResultsTableDialog, InternalConsistencyResultDialog).
+"""
+
+import csv
 import logging
 import math
 from collections import defaultdict
+from pathlib import Path
 from typing import List
 
 import numpy as np
@@ -8,6 +18,7 @@ from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout,
     QPushButton, QTableWidget, QTableWidgetItem, QHeaderView,
+    QFileDialog, QMessageBox,
 )
 
 from .internal_consistency_comp import InternalConsistencyResult
@@ -20,9 +31,9 @@ NAN = float("nan")
 _COLUMNS = [
     ("Event ID",       "Event ID",                        "event_id",      "{:d}"),
     ("Veh ID",         "Vehicle ID",                      "veh_id",        "{:d}"),
-    ("Min Spd Err",    "Minimum Speed Error (m/s)",        "_spd_min",      "{:.4f}"),
-    ("Max Spd Err",    "Maximum Speed Error (m/s)",        "_spd_max",      "{:.4f}"),
-    ("Mean Spd Err",   "Mean Speed Error (m/s)",           "_spd_mean",     "{:.4f}"),
+    ("Min Speed Err",    "Minimum Speed Error (m/s)",        "_spd_min",      "{:.4f}"),
+    ("Max Speed Err",    "Maximum Speed Error (m/s)",        "_spd_max",      "{:.4f}"),
+    ("Mean Speed Err",   "Mean Speed Error (m/s)",           "_spd_mean",     "{:.4f}"),
     ("Min Accel Err",  "Minimum Acceleration Error (m/s²)","_accel_min",    "{:.4f}"),
     ("Max Accel Err",  "Maximum Acceleration Error (m/s²)","_accel_max",    "{:.4f}"),
     ("Mean Accel Err", "Mean Acceleration Error (m/s²)",   "_accel_mean",   "{:.4f}"),
@@ -73,6 +84,10 @@ class InternalConsistencyStatsDialog(QDialog):
 
         btn_row = QHBoxLayout()
         btn_row.addStretch()
+        self._save_btn = QPushButton("Save")
+        self._save_btn.setToolTip("Save table to CSV")
+        self._save_btn.clicked.connect(self._on_save)
+        btn_row.addWidget(self._save_btn)
         close_btn = QPushButton("Close")
         close_btn.clicked.connect(self.accept)
         btn_row.addWidget(close_btn)
@@ -92,6 +107,46 @@ class InternalConsistencyStatsDialog(QDialog):
                     Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
                 )
                 self._table.setItem(ri, ci, item)
+
+    # ── Save ─────────────────────────────────────────────────────────────
+
+    def _on_save(self):
+        from utils import default_save_stem
+
+        event_ids = sorted({r.event_id for r in self._stats})
+        veh_ids   = sorted({r.veh_id   for r in self._stats})
+        eids = "_".join(str(e) for e in event_ids) if event_ids else "eall"
+        vids = (
+            f"v{veh_ids[0]}-v{veh_ids[-1]}" if len(veh_ids) > 1
+            else f"v{veh_ids[0]}" if veh_ids else "vall"
+        )
+        default = str(
+            Path.home() / f"{default_save_stem(f'internal_consistency_stats_e{eids}', vids)}.csv"
+        )
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save Statistics Summary", default,
+            "CSV Files (*.csv);;All Files (*)"
+        )
+        if not path:
+            return
+
+        try:
+            with Path(path).open("w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow([full for _abbrev, full, _attr, _fmt in _COLUMNS])
+                rows = sorted(self._stats, key=lambda r: (r.event_id, r.veh_id))
+                for row in rows:
+                    row_out = []
+                    for _abbrev, _full, attr, _fmt in _COLUMNS:
+                        val = getattr(row, attr, NAN)
+                        if attr in ("event_id", "veh_id"):
+                            row_out.append(val)
+                        else:
+                            row_out.append("" if _isnan(val) else val)
+                    writer.writerow(row_out)
+        except OSError as e:
+            logger.exception("Failed to save internal consistency stats CSV")
+            QMessageBox.critical(self, "Save Failed", f"Could not save file:\n{e}")
 
     def _center(self):
         parent = self.parent()
