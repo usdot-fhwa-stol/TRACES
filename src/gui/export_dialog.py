@@ -384,18 +384,19 @@ class ExportDialog(QDialog):
                 return
         
         # Show file dialog to select output file
+        from utils import default_save_stem
         if self.is_export_all_mode:
-            default_filename = "events_all.csv"
+            stem     = default_save_stem("events_all")
             dialog_title = "Export All Events"
         else:
             event_id = self._get_selected_event_id()
-            default_filename = f"events_event_{event_id}.csv"
+            stem     = default_save_stem(f"events_e{event_id}")
             dialog_title = "Export Selected Columns"
-        
+    
+        default_filename = str(Path.home() / f"{stem}.csv")
+    
         file_path, _ = QFileDialog.getSaveFileName(
-            self,
-            dialog_title,
-            default_filename,
+            self, dialog_title, default_filename,
             "CSV Files (*.csv);;All Files (*)"
         )
         

@@ -400,8 +400,10 @@ class InternalConsistencyResultDialog(QDialog):
     # ── Save plots ────────────────────────────────────────────────────────
 
     def _on_save_plots(self):
-        key = self._traj_keys[self._current_idx]
-        default = f"internal_consistency_e{key[0]}_v{key[1]}.html"
+        from utils import default_save_stem
+        key     = self._traj_keys[self._current_idx]
+        stem    = default_save_stem(f"internal_consistency_e{key[0]}_v{key[1]}")
+        default = str(Path.home() / f"{stem}.html")
         path, _ = QFileDialog.getSaveFileName(
             self, "Save Plots", default,
             "HTML Files (*.html);;All Files (*)",

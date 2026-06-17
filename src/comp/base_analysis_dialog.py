@@ -174,11 +174,18 @@ class BaseAnalysisDialog(QDialog):
             self._export_event_ids, self._veh_ids,
             self._current_params(), dest_path=None)
 
+    def _default_export_stem(self) -> str:
+        """Return a filename stem for the Save dialog. Subclasses may override."""
+        from utils import default_save_stem
+        label = self._csv_export_label().lower().replace(" ", "_")
+        return default_save_stem(label)
+    
     def _on_save(self):
+        default = str(Path.home() / f"{self._default_export_stem()}.csv")
         dest, _ = QFileDialog.getSaveFileName(
             self,
             f"Save {self._csv_export_label()} Export",
-            str(Path.home()),
+            default,
             "CSV Files (*.csv);;All Files (*)",
         )
         if not dest:

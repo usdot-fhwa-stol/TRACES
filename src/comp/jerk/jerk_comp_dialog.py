@@ -136,6 +136,13 @@ class JerkCompDialog(BaseAnalysisDialog):
         self._method_combo.setEnabled(False)
         self._primary_btn.setEnabled(False)
 
+    def _default_export_stem(self) -> str:
+        from utils import default_save_stem
+        eids = "_".join(str(e) for e in self._export_event_ids) if self._export_event_ids else "eall"
+        thr  = f"thr{self._threshold_spin.value():.1f}"
+        meth = self._method_combo.currentData() or "method"
+        return default_save_stem(f"jerk_analysis_e{eids}", f"{thr}_{meth}")
+
     @staticmethod
     def _write_csv(results: list, dest: str):
         fieldnames = [

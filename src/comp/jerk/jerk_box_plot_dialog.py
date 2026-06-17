@@ -37,6 +37,7 @@ class JerkBoxPlotDialog(QDialog):
     def __init__(self, parent, title, metrics, dropped=0):
         super().__init__(parent)
         self.setWindowTitle(title)
+        self._title = title
         self.resize(1350, 700)           # wider to accommodate 3 columns
     
         self._plots = {}
@@ -168,8 +169,12 @@ class JerkBoxPlotDialog(QDialog):
     # ── Save: HTML with embedded SVG and pan/zoom JS ──────────────────────
 
     def _on_save(self):
+        from utils import default_save_stem
+        import re
+        slug = re.sub(r"[^\w]+", "_", self._title).strip("_").lower()
+        default = str(Path.home() / f"{default_save_stem(slug)}.html")
         path, _ = QFileDialog.getSaveFileName(
-            self, "Save Box Plots", "jerk_box_plots.html",
+            self, "Save Box Plots", default,
             "HTML Files (*.html);;All Files (*)"
         )
         if not path:

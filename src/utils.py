@@ -2,6 +2,7 @@ import sys
 import os
 import shutil
 from pathlib import Path
+from datetime import datetime
 
 
 def get_resource_path(relative_path: str) -> str:
@@ -46,3 +47,14 @@ def initialize_user_config() -> None:
     for src in bundled_config_dir.glob("*.json"):
         dst = user_config_dir / src.name
         shutil.copy2(src, dst)
+
+def default_save_stem(prefix: str, suffix: str = "") -> str:
+    """Return a filename stem of the form  prefix[_suffix]_YYYYMMDD_HHMMSS.
+
+    Args:
+        prefix:  short content identifier, e.g. 'jerk_analysis_e3'
+        suffix:  optional settings tag, e.g. 'thr15.0_from_accel'
+    """
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    parts = [p for p in (prefix, suffix, ts) if p]
+    return "_".join(parts)
