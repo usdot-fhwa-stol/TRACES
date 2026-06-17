@@ -4,9 +4,10 @@ import logging
 import json
 from pathlib import Path
 from queue import Queue, Empty
-from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton, 
-                           QProgressBar, QLabel, QCheckBox, QComboBox, 
-                           QFileDialog, QMessageBox, QGridLayout, QWidget)
+from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton,
+                           QProgressBar, QLabel, QComboBox, QListWidget,
+                           QListWidgetItem, QAbstractItemView,
+                           QFileDialog, QMessageBox)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 
 # Set up logger
@@ -125,8 +126,10 @@ class ExportDialog(QDialog):
         self._producer_timer = None
         self._data_queue = None
         self._output_path = ""
-        self._column_checkboxes = {}
+        self._column_list = None
         self._event_combobox = None
+        self._select_all_btn = None
+        self._select_none_btn = None
         self._export_button = None
         self._interrupt_button = None
         self._progress_bar = None
@@ -199,41 +202,47 @@ class ExportDialog(QDialog):
 
     def _setup_export_selected_ui(self, layout: QVBoxLayout):
         """Set up UI components specific to Export Selected mode.
-        
+    
         Args:
             layout (QVBoxLayout): Main layout to add components to.
         """
         # Get column names from the database
         column_names = self._get_column_names()
-        
-        # Create column checkboxes in a grid layout (3 columns)
-        checkbox_widget = QWidget()
-        checkbox_layout = QGridLayout(checkbox_widget)
-        
-        row = 0
-        col = 0
+    
+        self._column_list = QListWidget()
+        self._column_list.setSelectionMode(QAbstractItemView.SelectionMode.MultiSelection)
         for column_name in column_names:
-            checkbox = QCheckBox(column_name)
-            # Check the box if this column was previously selected
+            item = QListWidgetItem(column_name)
+            self._column_list.addItem(item)
             if column_name in self.selected_columns:
-                checkbox.setChecked(True)
-            
-            self._column_checkboxes[column_name] = checkbox
-            checkbox_layout.addWidget(checkbox, row, col)
-            
-            col += 1
-            if col >= 4:  # Wrap to next row
-                col = 0
-                row += 1
-        
-        layout.addWidget(checkbox_widget)
-
-        self._event_name = QLabel() # centered label to show event name
+                item.setSelected(True)
+        layout.addWidget(self._column_list)
+    
+        # Select All / Select None row, directly below the list
+        select_row = QHBoxLayout()
+        select_row.addStretch()
+        self._select_all_btn = QPushButton("Select All")
+        self._select_all_btn.clicked.connect(self._on_select_all_columns)
+        select_row.addWidget(self._select_all_btn)
+        self._select_none_btn = QPushButton("Select None")
+        self._select_none_btn.clicked.connect(self._on_select_none_columns)
+        select_row.addWidget(self._select_none_btn)
+        select_row.addStretch()
+        layout.addLayout(select_row)
+    
+        self._event_name = QLabel()  # centered label to show event name
         self._event_name.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        # Calculate the height using font metrics
         self._event_name.setWordWrap(True)
         self._event_name.setMinimumHeight(int(self._event_name.fontMetrics().height() * 2.5))
         layout.addWidget(self._event_name)
+
+    def _on_select_all_columns(self):
+        """Select every column in the list."""
+        self._column_list.selectAll()
+    
+    def _on_select_none_columns(self):
+        """Clear all column selections."""
+        self._column_list.clearSelection()
 
     def _setup_button_controls(self, layout: QVBoxLayout):
         """Set up the button control area.
@@ -360,8 +369,7 @@ class ExportDialog(QDialog):
         if self.is_export_all_mode:
             return self._get_column_names()
         else:
-            return [name for name, checkbox in self._column_checkboxes.items() 
-                   if checkbox.isChecked()]
+            return [item.text() for item in self._column_list.selectedItems()]
 
     def _get_selected_event_id(self) -> int:
         """Get the selected event ID from the combobox.
