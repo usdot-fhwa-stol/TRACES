@@ -1,0 +1,9 @@
+# Python 3.12.9
+
+PyQt6>=6.9.0
+PyQt6-Qt6>=6.9.0
+PyQt6-sip>=13.10.2
+numpy>=2.2.5
+pyqtgraph>=0.13.7
+superqt>=0.7.3
+utm>=0.8.1

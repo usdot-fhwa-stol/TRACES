@@ -53,7 +53,7 @@ class MainWindow(QMainWindow):
         menu_bar.addMenu(file_menu)
 
         # File menu items
-        open_action = QAction("&Open...", self)
+        open_action = QAction("&Open", self)
         open_action.triggered.connect(self._open_file)
         file_menu.addAction(open_action)
 
@@ -65,23 +65,44 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
 
         # Import action
-        import_action = QAction("&Import...", self)
+        import_action = QAction("&Import", self)
         import_action.triggered.connect(self._import_file)
         file_menu.addAction(import_action)
 
         # Export submenu
-        self._export_menu = QMenu("&Export...", self)
+        self._export_menu = QMenu("&Export", self)
         self._export_menu.setEnabled(False)
         file_menu.addMenu(self._export_menu)
 
         # Export submenu items
-        export_all_action = QAction("Export &All...", self)
+        export_all_action = QAction("Export &All", self)
         export_all_action.triggered.connect(self._export_all)
         self._export_menu.addAction(export_all_action)
 
-        export_select_action = QAction("Export &Selected...", self)  # Updated label
+        export_select_action = QAction("Export &Selected", self)  # Updated label
         export_select_action.triggered.connect(self._export_selected)
         self._export_menu.addAction(export_select_action)
+
+        export_analysis_menu = QMenu("Export &Analysis", self)
+        self._export_menu.addMenu(export_analysis_menu)
+
+        export_jerk_action = QAction("&Jerk Analysis", self)
+        export_jerk_action.triggered.connect(self._export_jerk_analysis)
+        export_analysis_menu.addAction(export_jerk_action)
+
+        export_ic_action = QAction("&Internal Consistency", self)
+        export_ic_action.triggered.connect(self._export_internal_consistency)
+        export_analysis_menu.addAction(export_ic_action)
+        
+        # placeholders for future noise analysis modules
+        placeholder = QAction("&Missing Data", self)
+        placeholder.setEnabled(False)
+        export_analysis_menu.addAction(placeholder)
+
+        placeholder = QAction("&Platoon Consistency", self)
+        placeholder.setEnabled(False)
+        export_analysis_menu.addAction(placeholder)
+        # spectral analysis only available from top-level menu
 
         file_menu.addSeparator()
 
@@ -102,6 +123,31 @@ class MainWindow(QMainWindow):
         log_action = QAction("&Log", self)
         log_action.triggered.connect(self._show_log_viewer)
         view_menu.addAction(log_action)
+
+        self._analysis_menu = QMenu("&Analysis", self)
+        menu_bar.addMenu(self._analysis_menu)
+        self._analysis_menu.menuAction().setVisible(False)  # hidden until DB is open
+
+        jerk_action = QAction("&Jerk Analysis", self)
+        jerk_action.triggered.connect(self._run_jerk_analysis)
+        self._analysis_menu.addAction(jerk_action)
+
+        ic_action = QAction("&Internal Consistency", self)
+        ic_action.triggered.connect(self._run_internal_consistency)
+        self._analysis_menu.addAction(ic_action)
+
+        # placeholders for future noise analysis modules
+        placeholder = QAction("&Missing Data", self)
+        placeholder.setEnabled(False)
+        self._analysis_menu.addAction(placeholder)
+
+        placeholder = QAction("&Platoon Consistency", self)
+        placeholder.setEnabled(False)
+        self._analysis_menu.addAction(placeholder)
+
+        placeholder = QAction("S&pectral Analysis", self)
+        placeholder.setEnabled(False)
+        self._analysis_menu.addAction(placeholder)
 
         self._mode_menu = QMenu("&Mode", self)
         menu_bar.addMenu(self._mode_menu)
@@ -259,13 +305,13 @@ class MainWindow(QMainWindow):
             }
 
             cursor.execute("PRAGMA table_info(events)")
-            columns = {row[1]: row[2] for row in cursor.fetchall()}
+#            columns = {row[1]: row[2] for row in cursor.fetchall()}
             
-            if columns != expected_columns:
-                conn.close()
-                QMessageBox.critical(self, "Error", 
-                                   "Events table schema does not match expected format.")
-                return False
+#            if columns != expected_columns:
+#                conn.close()
+#                QMessageBox.critical(self, "Error", 
+#                                   "Events table schema does not match expected format.")
+#                return False
 
             # Check for at least one record
             cursor.execute("SELECT COUNT(*) FROM events")
@@ -306,6 +352,7 @@ class MainWindow(QMainWindow):
             if result == QDialog.DialogCode.Accepted:
                 # Plot widget will be created in _create_plot_widget callback
                 self._export_menu.setEnabled(True)
+                self._analysis_menu.menuAction().setVisible(True)
             else:
                 # User cancelled settings dialog, close database and reset window
                 self._close_database_and_reset()
@@ -335,6 +382,7 @@ class MainWindow(QMainWindow):
             if result == QDialog.DialogCode.Accepted:
                 # Plot widget will be created in _create_plot_widget callback
                 self._export_menu.setEnabled(True)
+                self._analysis_menu.menuAction().setVisible(True)
             else:
                 # User cancelled settings dialog, close database and reset window
                 self._close_database_and_reset()
@@ -377,6 +425,7 @@ class MainWindow(QMainWindow):
             if result == QDialog.DialogCode.Accepted:
                 # Plot widget will be created in _create_plot_widget callback
                 self._export_menu.setEnabled(True)
+                self._analysis_menu.menuAction().setVisible(True)
             else:
                 # User cancelled settings dialog, close database and reset window
                 self._close_database_and_reset()
@@ -403,6 +452,7 @@ class MainWindow(QMainWindow):
         
         # Disable export menu
         self._export_menu.setEnabled(False)
+        self._analysis_menu.menuAction().setVisible(False)
         
         # Reset plot mode menu
         self._mode_menu.menuAction().setVisible(False)
@@ -465,6 +515,48 @@ class MainWindow(QMainWindow):
         if selected_columns:
             self._selected_export_columns = selected_columns.copy()
 
+    def _export_jerk_analysis(self):
+        """Handle the Export Analysis → Jerk Analysis menu action."""
+        if not self._db_connection:
+            QMessageBox.warning(self, "Warning", "No database is currently open.")
+            return
+
+        # Step 1: ask the user which events to include.
+        from .event_selection_dialog import EventSelectionDialog
+        sel_dlg = EventSelectionDialog(self, self._db_connection)
+        if sel_dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        event_ids = sel_dlg.selected_event_ids
+        if not event_ids:
+            return
+
+        # Step 2: show JerkCompDialog in export mode (Save button).
+        from comp.jerk import JerkCompDialog
+        jerk_dlg = JerkCompDialog(self, self._db_connection, event_ids=event_ids, export_mode=True)
+        jerk_dlg.exec()
+
+    def _export_internal_consistency(self):
+        if not self._db_connection:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "Warning", "No database is currently open.")
+            return
+    
+        from PyQt6.QtWidgets import QDialog
+        from gui.event_selection_dialog import EventSelectionDialog
+        sel_dlg = EventSelectionDialog(self, self._db_connection)
+        if sel_dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        event_ids = sel_dlg.selected_event_ids
+        if not event_ids:
+            return
+    
+        from comp.consistency import InternalConsistencyDialog
+        dlg = InternalConsistencyDialog(
+            self, self._db_connection,
+            event_ids=event_ids, export_mode=True)
+        dlg.exec()
+
     def _show_about(self):
         """Handle the About menu action by showing the AboutDialog."""
         from .about_dialog import AboutDialog
@@ -516,3 +608,15 @@ class MainWindow(QMainWindow):
 
         self._save_settings()
         super().closeEvent(event)
+
+    def _run_jerk_analysis(self):
+        from comp.jerk import JerkCompDialog
+        event_id = self._plot_widget._current_event_id
+        dlg = JerkCompDialog(self, self._db_connection, event_ids=[event_id])
+        dlg.exec()
+
+    def _run_internal_consistency(self):
+        from comp.consistency import InternalConsistencyDialog
+        event_id = self._plot_widget._current_event_id
+        dlg = InternalConsistencyDialog(self, self._db_connection, event_ids=[event_id])
+        dlg.exec()

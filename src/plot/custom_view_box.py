@@ -17,7 +17,8 @@ import pyqtgraph as pg
 
 # Set up logger
 logger = logging.getLogger(__name__)
-
+_NOT_IMPLEMENTED_TOOLTIP = "Not yet implemented."
+_NO_SELECTION_TOOLTIP    = "Select one or more vehicles to enable."
 
 class CustomViewBox(pg.ViewBox):
     """Custom ViewBox that handles selection box drawing when Shift is held and custom context menus.
@@ -50,15 +51,28 @@ class CustomViewBox(pg.ViewBox):
         self._is_selecting = False
         self._selection_box = None
         self._current_context_vehicle = None
-        
-        # Context menu registry - list of dictionaries with keys: filter, label, callback
-        # Filter string contains combinations of: A (all series), S (selected series), O (one series)
-        self._context_menu_registry = [
-            {'filter': 'SO', 'label': 'Time-Speed Diagram', 'callback': self._show_time_speed_dialog},
-            {'filter': 'SO', 'label': 'Time-Accel Diagram', 'callback': self._show_time_accel_dialog},
-            {'filter': 'ASO', 'label': 'Statistics', 'callback': self._generate_statistics}
-        ]
 
+        # Context menu registry — list of dicts with keys:
+        #   filter   : string of context codes ('A', 'S', 'O') that show this item
+        #   label    : display text
+        #   callback : callable to invoke, or None to render as a disabled placeholder
+        #   submenu  : list of sub-item dicts (same keys minus filter), optional
+        #
+        # A callback of None in a sub-item produces a disabled action in the submenu.
+        self._context_menu_registry = [
+            {'filter': 'ASO', 'label': 'Statistics',         'callback': self._generate_statistics},
+            {'filter': 'ASO', 'label': 'Plots', 'submenu': [
+                {'filter': 'SO', 'label': 'Time-Speed Plot', 'callback': self._show_time_speed_dialog},
+                {'filter': 'SO', 'label': 'Time-Accel Plot', 'callback': self._show_time_accel_dialog},
+            ]},
+            {'filter': 'ASO', 'label': 'Noise Analysis',     'submenu': [
+                {'label': 'Jerk Analysis',          'callback': self._run_jerk_analysis_rightclick},
+                {'label': 'Internal Consistency',   'callback': self._run_ic_rightclick},
+                {'label': 'Missing Data',            'callback': None},
+                {'label': 'Platoon Consistency',     'callback': None},
+            ]},
+        ]
+        
     def mousePressEvent(self, ev):
         """Handle mouse press events for selection box creation."""
         if ev.button() == Qt.MouseButton.LeftButton:
@@ -396,18 +410,46 @@ class CustomViewBox(pg.ViewBox):
         
         # Create and populate context menu
         context_menu = QMenu(self.parent_widget)
-        
+        context_menu.setToolTipsVisible(True)
+
         # Add disabled pseudo-title
         title_action = QAction(title, context_menu)
         title_action.setEnabled(False)
         context_menu.addAction(title_action)
         context_menu.addSeparator()
-        
-        # Add menu items based on registry and current context
+
+        # Add menu items based on registry and current context.
         for item in self._context_menu_registry:
-            if menu_type in item['filter']:
+            if menu_type not in item['filter']:
+                continue
+            if 'submenu' in item:
+                sub = QMenu(item['label'], context_menu)
+                sub.setToolTipsVisible(True)
+                for sub_item in item['submenu']:
+                    sub_action = QAction(sub_item['label'], sub)
+                    sub_filter = sub_item.get('filter')
+                    context_ok = sub_filter is None or menu_type in sub_filter
+                    if sub_item.get('callback') is None:
+                        sub_action.setEnabled(False)
+                        sub_action.setToolTip(sub_item.get('disabled_tooltip', _NOT_IMPLEMENTED_TOOLTIP))
+                    elif not context_ok:
+                        sub_action.setEnabled(False)
+                        sub_action.setToolTip(sub_item.get('disabled_tooltip', _NO_SELECTION_TOOLTIP))
+                    else:
+                        sub_action.triggered.connect(
+                            lambda checked, cb=sub_item['callback']: cb()
+                        )
+                    sub.addAction(sub_action)
+
+                context_menu.addMenu(sub)
+            else:
                 action = QAction(item['label'], context_menu)
-                action.triggered.connect(lambda checked, callback=item['callback']: callback())
+                if item.get('callback') is None:
+                    action.setEnabled(False)
+                else:
+                    action.triggered.connect(
+                        lambda checked, cb=item['callback']: cb()
+                    )
                 context_menu.addAction(action)
         
         # Show context menu at cursor position
@@ -660,3 +702,47 @@ class CustomViewBox(pg.ViewBox):
             return "Selected"
         else:
             return "All"
+
+    def _run_jerk_analysis_rightclick(self):
+        if not self.parent_widget._db_connection or self.parent_widget._current_event_id is None:
+            return
+        veh_ids = self._get_target_vehicle_ids()
+        if not veh_ids:
+            return
+
+        event_id = self.parent_widget._current_event_id
+        from comp.jerk import JerkCompDialog
+        dlg = JerkCompDialog(
+            self.parent_widget,
+            self.parent_widget._db_connection,
+            event_ids=[event_id],
+            veh_ids=veh_ids,
+        )
+        dlg.exec()
+
+    def _run_ic_rightclick(self):
+        if (not self.parent_widget._db_connection
+                or self.parent_widget._current_event_id is None):
+            return
+    
+        # Gate on veh_dist_trav presence.
+        from comp.base_comp import BaseComp
+        cols = BaseComp._events_columns(self.parent_widget._db_connection)
+        if "veh_dist_trav" not in cols:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(
+                self.parent_widget, "Internal Consistency",
+                "The veh_dist_trav column is required but absent from this dataset.")
+            return
+    
+        veh_ids  = self._get_target_vehicle_ids()
+        event_id = self.parent_widget._current_event_id
+    
+        from comp.consistency import InternalConsistencyDialog
+        dlg = InternalConsistencyDialog(
+            self.parent_widget,
+            self.parent_widget._db_connection,
+            event_ids=[event_id],
+            veh_ids=veh_ids,
+        )
+        dlg.exec()
