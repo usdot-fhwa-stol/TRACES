@@ -21,9 +21,10 @@ class JerkResultsTableDialog(QDialog):
     _COLUMNS = [
         ("Event ID",                "event_id",                  "{:d}",   Qt.AlignmentFlag.AlignRight),
         ("Vehicle ID",              "veh_id",                    "{:d}",   Qt.AlignmentFlag.AlignRight),
-        ("Jerk Violation %",        "jerk_violation_pct",        "{:.2f}", Qt.AlignmentFlag.AlignRight),
-        ("Max Jerk (m/s³)",         "max_jerk",                  "{:.3f}", Qt.AlignmentFlag.AlignRight),
         ("Min Jerk (m/s³)",         "min_jerk",                  "{:.3f}", Qt.AlignmentFlag.AlignRight),
+        ("Mean Jerk (m/s³)",        "mean_jerk",                 "{:.3f}", Qt.AlignmentFlag.AlignRight),
+        ("Max Jerk (m/s³)",         "max_jerk",                  "{:.3f}", Qt.AlignmentFlag.AlignRight),
+        ("Jerk Violation %",        "jerk_violation_pct",        "{:.2f}", Qt.AlignmentFlag.AlignRight),
         ("Sign Inversion Excess %", "sign_inversion_excess_pct", "{:.2f}", Qt.AlignmentFlag.AlignRight),
     ]
 

@@ -138,22 +138,27 @@ class JerkComp(BaseComp):
 
     @staticmethod
     def _derive_accel_from_speed(t, v, missing_gap_seconds):
+        """out[i] is the average rate of change over [t[i], t[i+1]], assigned
+        to the *starting* record i.  out[-1] is always NaN — no following
+        point exists to pair the last record with."""
         out = np.full_like(v, NAN)
         if v.size < 2:
             return out
         dt = np.diff(t)
         valid = (~np.isnan(v[1:])) & (~np.isnan(v[:-1])) & (dt > 0) & (dt <= missing_gap_seconds)
-        out[1:][valid] = (v[1:][valid] - v[:-1][valid]) / dt[valid]
+        out[:-1][valid] = (v[1:][valid] - v[:-1][valid]) / dt[valid]
         return out
-
+    
     @staticmethod
     def _derive_jerk_from_accel(t, a, missing_gap_seconds):
+        """Same indexing convention as _derive_accel_from_speed, one
+        derivative level up."""
         out = np.full_like(a, NAN)
         if a.size < 2:
             return out
         dt = np.diff(t)
         valid = (~np.isnan(a[1:])) & (~np.isnan(a[:-1])) & (dt > 0) & (dt <= missing_gap_seconds)
-        out[1:][valid] = (a[1:][valid] - a[:-1][valid]) / dt[valid]
+        out[:-1][valid] = (a[1:][valid] - a[:-1][valid]) / dt[valid]
         return out
 
     @staticmethod
