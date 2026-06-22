@@ -44,21 +44,21 @@ logger = logging.getLogger(__name__)
 
 # ── Column definitions ─────────────────────────────────────────────────────
 
-# Raw data table columns: (header, attribute, format)
+# Raw data table columns: (header_abbrev, full_name, attribute, format)
 _RAW_COLUMNS = [
-    ("Event ID",   "event_id",      "{:d}"),
-    ("Veh ID",     "veh_id",        "{:d}"),
-    ("Time (s)",   "veh_time",      "{:.4f}"),
-    ("Dist (m)",   "veh_dist_trav", "{:.4f}"),
-    ("Speed",      "veh_speed",     "{:.4f}"),
-    ("Speed Cal",  "veh_speed_cal", "{:.4f}"),
-    ("Speed Err",  "speed_error",   "{:.4f}"),
-    ("Accel",      "veh_accel",     "{:.4f}"),
-    ("Accel Cal",  "veh_accel_cal", "{:.4f}"),
-    ("Accel Err",  "accel_error",   "{:.4f}"),
-    ("Jerk",       "veh_jerk",      "{:.4f}"),
-    ("Jerk Cal",   "veh_jerk_cal",  "{:.4f}"),
-    ("Jerk Err",   "jerk_error",    "{:.4f}"),
+    ("Event ID",   "Event ID",                              "event_id",      "{:d}"),
+    ("Veh ID",     "Vehicle ID",                            "veh_id",        "{:d}"),
+    ("Time",   "Time (s)",                              "veh_time",      "{:.4f}"),
+    ("Dist",   "Distance Traveled (m)",                 "veh_dist_trav", "{:.4f}"),
+    ("Speed",  "Speed (m/s)",                           "veh_speed",     "{:.4f}"),
+    ("Speed Cal",    "Calculated Speed (m/s)",             "veh_speed_cal", "{:.4f}"),
+    ("Speed Err",    "Speed Error (m/s)", "speed_error",   "{:.4f}"),
+    ("Accel", "Acceleration (m/s²)",                 "veh_accel",     "{:.4f}"),
+    ("Accel Cal",  "Calculated Acceleration (m/s²)",     "veh_accel_cal", "{:.4f}"),
+    ("Accel Err",  "Acceleration Error (m/s²)", "accel_error",   "{:.4f}"),
+    ("Jerk", "Jerk (m/s³)",                         "veh_jerk",      "{:.4f}"),
+    ("Jerk Cal",   "Calculated Jerk (m/s³)",             "veh_jerk_cal",  "{:.4f}"),
+    ("Jerk Err",   "Jerk Error (m/s³)", "jerk_error",    "{:.4f}"),
 ]
 
 # Plot configuration: (title, orig_attr, cal_attr, y_label, hex_color)
@@ -191,8 +191,10 @@ class InternalConsistencyResultDialog(QDialog):
             QHeaderView.ResizeMode.ResizeToContents)
         self._raw_table.setHorizontalScrollMode(QTableWidget.ScrollMode.ScrollPerPixel)
         self._raw_table.setVerticalScrollMode(QTableWidget.ScrollMode.ScrollPerPixel)
-        for ci, (hdr, _, _fmt) in enumerate(_RAW_COLUMNS):
-            self._raw_table.setHorizontalHeaderItem(ci, QTableWidgetItem(hdr))
+        for ci, (abbrev, full, _, _fmt) in enumerate(_RAW_COLUMNS):
+            item = QTableWidgetItem(abbrev)
+            item.setToolTip(full)
+            self._raw_table.setHorizontalHeaderItem(ci, item)
         return self._raw_table
 
     def _build_footer(self) -> QHBoxLayout:
@@ -283,7 +285,7 @@ class InternalConsistencyResultDialog(QDialog):
     def _refresh_raw_table(self, rows: List[InternalConsistencyResult]):
         self._raw_table.setRowCount(len(rows))
         for ri, r in enumerate(rows):
-            for ci, (hdr, attr, fmt) in enumerate(_RAW_COLUMNS):
+            for ci, (abbrev, full, attr, fmt) in enumerate(_RAW_COLUMNS):
                 val = getattr(r, attr)
                 if attr in ("event_id", "veh_id"):
                     text = str(val)
@@ -398,8 +400,10 @@ class InternalConsistencyResultDialog(QDialog):
     # ── Save plots ────────────────────────────────────────────────────────
 
     def _on_save_plots(self):
-        key = self._traj_keys[self._current_idx]
-        default = f"internal_consistency_e{key[0]}_v{key[1]}.html"
+        from utils import default_save_stem
+        key     = self._traj_keys[self._current_idx]
+        stem    = default_save_stem(f"internal_consistency_e{key[0]}_v{key[1]}")
+        default = str(Path.home() / f"{stem}.html")
         path, _ = QFileDialog.getSaveFileName(
             self, "Save Plots", default,
             "HTML Files (*.html);;All Files (*)",

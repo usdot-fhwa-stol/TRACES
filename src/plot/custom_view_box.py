@@ -17,7 +17,8 @@ import pyqtgraph as pg
 
 # Set up logger
 logger = logging.getLogger(__name__)
-
+_NOT_IMPLEMENTED_TOOLTIP = "Not yet implemented."
+_NO_SELECTION_TOOLTIP    = "Select one or more vehicles to enable."
 
 class CustomViewBox(pg.ViewBox):
     """Custom ViewBox that handles selection box drawing when Shift is held and custom context menus.
@@ -59,15 +60,16 @@ class CustomViewBox(pg.ViewBox):
         #
         # A callback of None in a sub-item produces a disabled action in the submenu.
         self._context_menu_registry = [
-            {'filter': 'SO',  'label': 'Time-Speed Diagram', 'callback': self._show_time_speed_dialog},
-            {'filter': 'SO',  'label': 'Time-Accel Diagram', 'callback': self._show_time_accel_dialog},
             {'filter': 'ASO', 'label': 'Statistics',         'callback': self._generate_statistics},
+            {'filter': 'ASO', 'label': 'Plots', 'submenu': [
+                {'filter': 'SO', 'label': 'Time-Speed Plot', 'callback': self._show_time_speed_dialog},
+                {'filter': 'SO', 'label': 'Time-Accel Plot', 'callback': self._show_time_accel_dialog},
+            ]},
             {'filter': 'ASO', 'label': 'Noise Analysis',     'submenu': [
-                {'label': 'Jerk Analysis…',          'callback': self._run_jerk_analysis_rightclick},
-                {'label': 'Missing Data Analysis…',  'callback': self._run_missing_data_analysis_rightclick},
-                {'label': 'Internal Consistency…',   'callback': self._run_ic_rightclick},
-                {'label': 'Platoon Consistency…',    'callback': None},
-                # Spectral Analysis is top-level menu only per spec (Module 5).
+                {'label': 'Jerk Analysis',          'callback': self._run_jerk_analysis_rightclick},
+                {'label': 'Internal Consistency',   'callback': self._run_ic_rightclick},
+                {'label': 'Missing Data',            'callback': self._run_missing_data_analysis_rightclick},
+                {'label': 'Platoon Consistency',     'callback': None},
             ]},
         ]
         
@@ -408,7 +410,8 @@ class CustomViewBox(pg.ViewBox):
         
         # Create and populate context menu
         context_menu = QMenu(self.parent_widget)
-        
+        context_menu.setToolTipsVisible(True)
+
         # Add disabled pseudo-title
         title_action = QAction(title, context_menu)
         title_action.setEnabled(False)
@@ -421,15 +424,23 @@ class CustomViewBox(pg.ViewBox):
                 continue
             if 'submenu' in item:
                 sub = QMenu(item['label'], context_menu)
+                sub.setToolTipsVisible(True)
                 for sub_item in item['submenu']:
                     sub_action = QAction(sub_item['label'], sub)
+                    sub_filter = sub_item.get('filter')
+                    context_ok = sub_filter is None or menu_type in sub_filter
                     if sub_item.get('callback') is None:
                         sub_action.setEnabled(False)
+                        sub_action.setToolTip(sub_item.get('disabled_tooltip', _NOT_IMPLEMENTED_TOOLTIP))
+                    elif not context_ok:
+                        sub_action.setEnabled(False)
+                        sub_action.setToolTip(sub_item.get('disabled_tooltip', _NO_SELECTION_TOOLTIP))
                     else:
                         sub_action.triggered.connect(
                             lambda checked, cb=sub_item['callback']: cb()
                         )
                     sub.addAction(sub_action)
+
                 context_menu.addMenu(sub)
             else:
                 action = QAction(item['label'], context_menu)

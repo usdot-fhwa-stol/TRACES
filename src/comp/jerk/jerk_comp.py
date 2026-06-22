@@ -22,6 +22,7 @@ class JerkResult:
     jerk_violation_pct: float = NAN
     max_jerk: float = NAN
     min_jerk: float = NAN
+    mean_jerk: float = NAN
     sign_inversion_excess_pct: float = NAN
     # "dataset" | "from_accel" | "from_speed" | "unavailable"
     jerk_source: str = "unavailable"
@@ -123,8 +124,8 @@ class JerkComp(BaseComp):
             if r.jerk_source == "unavailable" or r.jerk.size == 0:
                 continue
 
-            r.jerk_violation_pct        = self._jerk_violation_pct(r.jerk, jerk_threshold)
-            r.min_jerk, r.max_jerk      = self._min_max_jerk(r.jerk)
+            r.jerk_violation_pct = self._jerk_violation_pct(r.jerk, jerk_threshold)
+            r.min_jerk, r.mean_jerk, r.max_jerk = self._min_mean_max_jerk(r.jerk)
             r.sign_inversion_excess_pct = self._sign_inversion_excess_pct(r.time, r.jerk)
 
         return list(series.values())
@@ -163,11 +164,11 @@ class JerkComp(BaseComp):
         return 100.0 * np.sum(np.abs(valid) > jerk_threshold) / valid.size
 
     @staticmethod
-    def _min_max_jerk(jerk):
+    def _min_mean_max_jerk(jerk):
         valid = jerk[~np.isnan(jerk)]
         if valid.size == 0:
-            return (NAN, NAN)
-        return (float(np.min(valid)), float(np.max(valid)))
+            return (NAN, NAN, NAN)
+        return (float(np.min(valid)), float(np.mean(valid)), float(np.max(valid)))
 
     @classmethod
     def _sign_inversion_excess_pct(cls, t, jerk):

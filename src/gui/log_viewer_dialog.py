@@ -1,5 +1,4 @@
 import logging
-from pathlib import Path
 from PyQt6.QtWidgets import QDialog, QVBoxLayout, QTextEdit
 from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtGui import QFont

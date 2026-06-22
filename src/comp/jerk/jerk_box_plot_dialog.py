@@ -13,52 +13,62 @@ logger = logging.getLogger(__name__)
 
 
 class JerkBoxPlotDialog(QDialog):
-    """Displays a 2x2 grid of box plots summarizing per-trajectory metrics.
+    """Displays a 3x2 grid of box plots summarizing per-trajectory metrics.
 
     Args:
         parent: parent widget
         title (str): dialog title
-        metrics dict[str, list[tuple[int, float]]]: mapping of metric key to value list.
-            Expected keys: 'min_jerk', 'max_jerk', 'jerk_violation_pct',
-            'sign_inversion_excess_pct'.
+        metrics (dict[str, list[tuple[int, float]]]): mapping of metric key to value list.
+            Expected keys: 'min_jerk', 'mean_jerk', 'max_jerk',
+            'jerk_violation_pct', 'sign_inversion_excess_pct'.
         dropped (int): number of trajectories excluded due to missing data.
     """
 
-    # Grid position and label for each metric.
+    # Grid position and label for each metric. None key = empty spacer cell.
     _LAYOUT = [
-        ("min_jerk",                  (0, 0), "Min Jerk (m/s³)"),
-        ("max_jerk",                  (0, 1), "Max Jerk (m/s³)"),
+        ("min_jerk",                  (0, 0), "Minimum Jerk (m/s³)"),
+        ("mean_jerk",                 (0, 1), "Mean Jerk (m/s³)"),
+        ("max_jerk",                  (0, 2), "Maximum Jerk (m/s³)"),
         ("jerk_violation_pct",        (1, 0), "Jerk Violation (%)"),
-        ("sign_inversion_excess_pct", (1, 1), "Sign Inversion Excess (%)"),
+        (None,                        (1, 1), None),               # spacer cell
+        ("sign_inversion_excess_pct", (1, 2), "Sign Inversion Excess (%)"),
     ]
 
     def __init__(self, parent, title, metrics, dropped=0):
         super().__init__(parent)
         self.setWindowTitle(title)
-        self.resize(900, 700)
-
-        self._plots = {}      # key -> pg.PlotWidget
+        self._title = title
+        self.resize(1350, 700)           # wider to accommodate 3 columns
+    
+        self._plots = {}
         self._setup_ui(metrics, dropped)
-
+    
     def _setup_ui(self, metrics, dropped):
         layout = QVBoxLayout(self)
-
+    
         if dropped > 0:
             note = QLabel(f"{dropped} trajector{'y' if dropped == 1 else 'ies'} "
                           f"excluded due to missing data.")
             note.setStyleSheet("color: #555; font-style: italic;")
             layout.addWidget(note)
-
+    
         grid = QGridLayout()
+        # Equal stretch on all three columns so the empty cell doesn't collapse.
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
+        grid.setColumnStretch(2, 1)
+    
         for key, (row, col), label in self._LAYOUT:
+            if key is None:
+                continue                 # leave the spacer cell empty
             plot = self._build_box_plot(metrics.get(key, []), label)
             self._plots[key] = plot
             grid.addWidget(plot, row, col)
         layout.addLayout(grid, stretch=1)
-
+    
         btn_row = QHBoxLayout()
         btn_row.addStretch()
-        self._save_btn = QPushButton("Save…")
+        self._save_btn = QPushButton("Save")
         self._save_btn.clicked.connect(self._on_save)
         btn_row.addWidget(self._save_btn)
         self._close_btn = QPushButton("Close")
@@ -97,6 +107,7 @@ class JerkBoxPlotDialog(QDialog):
                            whisker_low=whisker_low, whisker_high=whisker_high,
                            outliers=outliers)
         plot.addItem(item)
+        item.sigHovered.connect(lambda stats, pw=plot: self._on_box_hovered(stats, pw))
 
         # Identify which indices in arr are outliers, keeping their veh_ids
         outlier_mask = (arr < whisker_low) | (arr > whisker_high)
@@ -114,9 +125,7 @@ class JerkBoxPlotDialog(QDialog):
                 tip=None,
                 data=outlier_vids,   # parallel list — index i → veh_id
             )
-            scatter.sigHovered.connect(
-                lambda item, pts, ev, pw=plot: self._on_outlier_hovered(pts, ev, pw)
-            )
+            scatter.sigHovered.connect(lambda item, pts, ev, pw=plot: self._on_outlier_hovered(pts, ev, pw))
             plot.addItem(scatter)
 
         # Pad the X-range so the box is centered and not hugged by the edges.
@@ -140,11 +149,32 @@ class JerkBoxPlotDialog(QDialog):
         else:
             QToolTip.hideText()
 
+    def _on_box_hovered(self, stats, plot_widget):
+        """Show a QToolTip with the five-number summary on box hover, hide on leave."""
+        if stats is None:
+            QToolTip.hideText()
+            return
+        whisker_low, q1, median, q3, whisker_high = stats
+        text = (
+            f"Upper: {whisker_high:.4g}\n"
+            f"Q3:            {q3:.4g}\n"
+            f"Median:        {median:.4g}\n"
+            f"Q1:            {q1:.4g}\n"
+            f"Lower: {whisker_low:.4g}"
+        )
+        # Convert the centre of the plot widget to a global screen position.
+        screen_pos = plot_widget.mapToGlobal(plot_widget.rect().center())
+        QToolTip.showText(screen_pos, text)
+
     # ── Save: HTML with embedded SVG and pan/zoom JS ──────────────────────
 
     def _on_save(self):
+        from utils import default_save_stem
+        import re
+        slug = re.sub(r"[^\w]+", "_", self._title).strip("_").lower()
+        default = str(Path.home() / f"{default_save_stem(slug)}.html")
         path, _ = QFileDialog.getSaveFileName(
-            self, "Save Box Plots", "jerk_box_plots.html",
+            self, "Save Box Plots", default,
             "HTML Files (*.html);;All Files (*)"
         )
         if not path:
@@ -153,6 +183,7 @@ class JerkBoxPlotDialog(QDialog):
             svg_blocks = [
                 (label, export_plot_to_svg(self._plots[key]))
                 for key, _pos, label in self._LAYOUT
+                if key is not None and key in self._plots
             ]
             html = build_svg_html(
                 "Jerk Analysis Box Plots",

@@ -26,7 +26,7 @@ class InternalConsistencyDialog(BaseAnalysisDialog):
         InternalConsistencyResultDialog (combined modal dialog).
 
     Export (event_ids=multiple ids, export_mode=True):
-        Save… streams Figure-12 layout CSV.  No DB write occurs.
+        Save streams Figure-12 layout CSV.  No DB write occurs.
     """
 
     # ── Construction ──────────────────────────────────────────────────────
@@ -109,6 +109,13 @@ class InternalConsistencyDialog(BaseAnalysisDialog):
         super()._set_controls_enabled(enabled)
         self._time_step_spin.setEnabled(enabled)
         self._gap_spin.setEnabled(enabled)
+
+    def _default_export_stem(self) -> str:
+        from utils import default_save_stem
+        eids   = "_".join(str(e) for e in self._export_event_ids) if self._export_event_ids else "eall"
+        tstep  = f"dt{self._time_step_spin.value():.3f}s"
+        gap    = f"gap{self._gap_spin.value()}pts"
+        return default_save_stem(f"internal_consistency_e{eids}", f"{tstep}_{gap}")
 
     # ── Worker callable ───────────────────────────────────────────────────
 

@@ -1,5 +1,3 @@
-# comp/jerk/jerk_comp_dialog.py  — FULL REPLACEMENT
-
 import csv
 import logging
 import math
@@ -50,6 +48,7 @@ class JerkCompDialog(BaseAnalysisDialog):
             dropped = sum(1 for r in results if r.jerk_source == "unavailable")
             metrics = {
                 "min_jerk":                  pull("min_jerk"),
+                "mean_jerk":                 pull("mean_jerk"),
                 "max_jerk":                  pull("max_jerk"),
                 "jerk_violation_pct":        pull("jerk_violation_pct"),
                 "sign_inversion_excess_pct": pull("sign_inversion_excess_pct"),
@@ -120,6 +119,7 @@ class JerkCompDialog(BaseAnalysisDialog):
             ("Use jerk column from dataset",               "dataset",    "veh_jerk"  in cols),
             ("Calculate jerk from acceleration",            "from_accel", "veh_accel" in cols),
             ("Calculate acceleration and jerk from speed",  "from_speed", "veh_speed" in cols),
+            ("Filtered data from spline fitting",           "spline_fit", False),
         ]
         self._method_combo.clear()
         for label, key, enabled in entries:
@@ -137,23 +137,31 @@ class JerkCompDialog(BaseAnalysisDialog):
         self._method_combo.setEnabled(False)
         self._primary_btn.setEnabled(False)
 
+    def _default_export_stem(self) -> str:
+        from utils import default_save_stem
+        eids = "_".join(str(e) for e in self._export_event_ids) if self._export_event_ids else "eall"
+        thr  = f"thr{self._threshold_spin.value():.1f}"
+        meth = self._method_combo.currentData() or "method"
+        return default_save_stem(f"jerk_analysis_e{eids}", f"{thr}_{meth}")
+
     @staticmethod
     def _write_csv(results: list, dest: str):
         fieldnames = [
             "event_id", "veh_id",
-            "jerk_violation_pct", "max_jerk", "min_jerk",
-            "sign_inversion_excess_pct",
+            "min_jerk", "mean_jerk", "max_jerk", 
+            "jerk_violation_pct", "sign_inversion_excess_pct",
         ]
         with open(dest, "w", newline="", encoding="utf-8") as fh:
             writer = csv.DictWriter(fh, fieldnames=fieldnames)
             writer.writeheader()
             for r in results:
                 writer.writerow({
-                    "event_id":                 r.event_id,
-                    "veh_id":                   r.veh_id,
-                    "jerk_violation_pct":        JerkCompDialog._fmt(r.jerk_violation_pct),
-                    "max_jerk":                  JerkCompDialog._fmt(r.max_jerk),
+                    "event_id":                  r.event_id,
+                    "veh_id":                    r.veh_id,
                     "min_jerk":                  JerkCompDialog._fmt(r.min_jerk),
+                    "mean_jerk":                 JerkCompDialog._fmt(r.mean_jerk),
+                    "max_jerk":                  JerkCompDialog._fmt(r.max_jerk),
+                    "jerk_violation_pct":        JerkCompDialog._fmt(r.jerk_violation_pct),
                     "sign_inversion_excess_pct": JerkCompDialog._fmt(r.sign_inversion_excess_pct),
                 })
     
