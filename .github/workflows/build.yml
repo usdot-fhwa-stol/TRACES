@@ -17,6 +17,9 @@ jobs:
         pip install pyinstaller>=6.0
         pip install -r requirements.txt
 
+    - name: Show installed versions
+        run: pip list
+
     - name: Build with PyInstaller
       shell: powershell
       run: |
