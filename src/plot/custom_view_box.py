@@ -67,9 +67,9 @@ class CustomViewBox(pg.ViewBox):
             ]},
             {'filter': 'ASO', 'label': 'Noise Analysis',     'submenu': [
                 {'label': 'Jerk Analysis',          'callback': self._run_jerk_analysis_rightclick},
+                {'label': 'Missing Data',           'callback': self._run_missing_data_analysis_rightclick},
                 {'label': 'Internal Consistency',   'callback': self._run_ic_rightclick},
-                {'label': 'Missing Data',            'callback': None},
-                {'label': 'Platoon Consistency',     'callback': None},
+                {'label': 'Platoon Consistency',    'callback': None},
             ]},
         ]
 
@@ -652,6 +652,26 @@ class CustomViewBox(pg.ViewBox):
         event_id = self.parent_widget._current_event_id
         from comp.jerk import JerkCompDialog
         dlg = JerkCompDialog(
+            self.parent_widget,
+            self.parent_widget._db_connection,
+            event_ids=[event_id],
+            veh_ids=veh_ids,
+        )
+        dlg.exec()
+
+    def _run_missing_data_analysis_rightclick(self):
+        if not self.parent_widget._db_connection or self.parent_widget._current_event_id is None:
+            return
+            
+        veh_ids = self._get_target_vehicle_ids()
+        if not veh_ids:
+            return
+
+        event_id = self.parent_widget._current_event_id
+        
+        from comp.missing_data import MissingDataCompDialog
+        # The dialog now manages the entire lifecycle
+        dlg = MissingDataCompDialog(
             self.parent_widget,
             self.parent_widget._db_connection,
             event_ids=[event_id],

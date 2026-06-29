@@ -145,6 +145,26 @@ class ShockwaveResultPanel(QFrame):
         self.raise_()
         logger.debug(f"Result panel shown for shockwave {result.id}")
 
+    def enter_edit_mode(self, shockwave_id: int) -> None:
+        """Show the panel with the id preserved but the fit fields blank.
+
+        Called when a committed shockwave is re-opened for editing
+        (Ctrl+Left-click on it) -- there's no fit yet for whatever the
+        active chain becomes next, so equation/speed/R² have nothing
+        meaningful to display until the chain is re-committed (Enter)
+        or the edit is reverted (Escape), at which point update_result()
+        takes over again with real values.
+        """
+        self._title_label.setText(f"Editing Shockwave {shockwave_id}")
+        self._eq_label.setText("")
+        self._speed_label.setText("")
+        self._r2_label.setText("")
+        self.adjustSize()
+        self._reposition()
+        self.show()
+        self.raise_()
+        logger.debug(f"Result panel in edit mode for shockwave {shockwave_id}")
+
     def clear(self) -> None:
         """Hide the panel.  Call deleteLater() separately for full teardown."""
         self.hide()

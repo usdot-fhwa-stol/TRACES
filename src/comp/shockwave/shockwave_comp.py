@@ -2,7 +2,7 @@ import math
 import numpy as np
 from enum import Enum
 from dataclasses import dataclass, field
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 
 
 class InflectionType(Enum):
@@ -15,7 +15,7 @@ class InflectionPoint:
     veh_id:     int
     time:       float
     distance:   float
-    type:       InflectionType
+    type:       Optional[InflectionType] = None
 
 
 @dataclass
@@ -27,6 +27,11 @@ class ShockwaveResult:
     r_squared:  float
     equation:   str            # "distance = {slope} * time + {intercept}"
     points:     List[Tuple[float, float]] = field(default_factory=list)
+    # Full InflectionPoint objects (veh_id + type) behind `points` above.
+    # Lets a committed shockwave be re-opened for editing, hit-tested by
+    # position, and colored by its locked inflection type.
+    source_points: List[InflectionPoint] = field(default_factory=list)
+    point_type:    Optional[InflectionType] = None   # None → Manual mode
     # bfs_chain populated only by Automatic mode (Phase 3):
     bfs_chain:  List[Tuple[float, float]] = field(default_factory=list)
 
