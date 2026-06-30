@@ -99,7 +99,7 @@ class MainWindow(QMainWindow):
         export_analysis_menu.addAction(export_ic_action)
         
         # placeholders for future noise analysis modules
-        placeholder = QAction("&Platoon Consistency…", self)
+        placeholder = QAction("&Platoon Consistency", self)
         placeholder.setEnabled(False)
         export_analysis_menu.addAction(placeholder)
         # spectral analysis only available from top-level menu
@@ -124,7 +124,6 @@ class MainWindow(QMainWindow):
         log_action.triggered.connect(self._show_log_viewer)
         view_menu.addAction(log_action)
 
-        # Analysis menu
         self._analysis_menu = QMenu("&Analysis", self)
         menu_bar.addMenu(self._analysis_menu)
         self._analysis_menu.menuAction().setVisible(False)  # hidden until DB is open
@@ -142,7 +141,7 @@ class MainWindow(QMainWindow):
         self._analysis_menu.addAction(ic_action)
 
         # placeholders for future noise analysis modules
-        placeholder = QAction("&Platoon Consistency…", self)
+        placeholder = QAction("&Platoon Consistency", self)
         placeholder.setEnabled(False)
         self._analysis_menu.addAction(placeholder)
 

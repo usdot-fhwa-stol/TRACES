@@ -67,43 +67,32 @@ class CustomViewBox(pg.ViewBox):
             ]},
             {'filter': 'ASO', 'label': 'Noise Analysis',     'submenu': [
                 {'label': 'Jerk Analysis',          'callback': self._run_jerk_analysis_rightclick},
-                {'label': 'Missing Data',            'callback': self._run_missing_data_analysis_rightclick},
+                {'label': 'Missing Data',           'callback': self._run_missing_data_analysis_rightclick},
                 {'label': 'Internal Consistency',   'callback': self._run_ic_rightclick},
-                {'label': 'Platoon Consistency',     'callback': None},
+                {'label': 'Platoon Consistency',    'callback': None},
             ]},
         ]
-        
-    def mousePressEvent(self, ev):
-        """Handle mouse press events for selection box creation."""
-        if ev.button() == Qt.MouseButton.LeftButton:
-            # In gap/headway mode, store press info for click detection
-            # but don't initiate selection-box machinery
-            if self.parent_widget._gh_mode_enabled:
-                self._press_pos = ev.scenePos()
-                self._press_time = time.time()
-                self._selection_start = self.mapSceneToView(ev.scenePos())
-                self._is_selecting = False
-                ev.accept()
-                return
 
-            # Store the press position and start time for click vs drag detection
-            self._press_pos = ev.scenePos()
-            self._press_time = time.time()
+    def mousePressEvent(self, ev):
+        """Handle mouse press events for mode handlers."""
+        if ev.button() == Qt.MouseButton.LeftButton:
+            self._press_pos    = ev.scenePos()
+            self._press_time   = time.time()
             self._selection_start = self.mapSceneToView(ev.scenePos())
-            self._is_selecting = False  # Don't start selecting immediately
+            self._is_selecting = False
+            self.parent_widget._active_handler.on_mouse_press(self, ev)
             ev.accept()
             return
 
         # For non-left clicks, use default behavior
         super().mousePressEvent(ev)
-    
+
     def mouseMoveEvent(self, ev):
         """Handle mouse move events for selection box resizing."""
         if hasattr(self, '_press_pos') and self._press_pos is not None:
-            # Never draw a selection box in gap/headway mode
-            if self.parent_widget._gh_mode_enabled:
-                ev.accept()
+            if self.parent_widget._active_handler.on_mouse_move(self, ev):
                 return
+
             # Calculate distance moved since press
             move_distance = (ev.scenePos() - self._press_pos).manhattanLength()
             
@@ -149,61 +138,8 @@ class CustomViewBox(pg.ViewBox):
             move_distance = (ev.scenePos() - self._press_pos).manhattanLength()
             press_duration = time.time() - self._press_time
 
-            # ── gap/headway click handling ────────────────────────────────
-            if self.parent_widget._gh_mode_enabled:
-                if move_distance < 5 and press_duration < 0.5:
-                    mouse_point = self.mapSceneToView(ev.scenePos())
-                    mx, my = mouse_point.x(), mouse_point.y()
-                    clicked_veh = self._find_clicked_vehicle(mx, my)
-            
-                    if clicked_veh is not None:
-                        series   = self.parent_widget._series.get(clicked_veh)
-                        time_tol = 0.05
-                        veh_time = veh_dist = None
-            
-                        if series is not None:
-                            mask = ((series["veh_time"] >= mx - time_tol) &
-                                    (series["veh_time"] <= mx + time_tol))
-                            x_f = series["veh_time"][mask]
-                            y_f = series["veh_dist_trav"][mask]
-                            if len(x_f) > 0:
-                                idx      = int(np.argmin(np.abs(y_f - my)))
-                                veh_time = float(x_f[idx])
-                                veh_dist = float(y_f[idx])
-            
-                        if veh_time is not None:
-                            pt_key = (clicked_veh, veh_time)
-            
-                            if pt_key in self.parent_widget._gh_locked_items:
-                                # Already locked — toggle off (remove this one point)
-                                self.parent_widget._clear_gh_locked_point(pt_key)
-                                self.parent_widget._last_queried_point = None
-                                logger.debug(f"GH unlocked point {pt_key}")
-                            else:
-                                # Lock this point — add to list
-                                self.parent_widget._gh_saved_keys.add(pt_key)
-                                locked_items_for_pt = []
-                                gap_f, gap_b, hway_f, hway_b = self.parent_widget._find_gap_hway(
-                                    clicked_veh, veh_time, veh_dist
-                                )
-                                self.parent_widget._draw_gh_overlay(
-                                    clicked_veh, veh_time, veh_dist,
-                                    gap_b, gap_f, hway_b, hway_f,
-                                    target_list=locked_items_for_pt
-                                )
-                                self.parent_widget._gh_locked_items[pt_key] = locked_items_for_pt
-                                self.parent_widget._last_queried_point = (
-                                    clicked_veh, veh_time,
-                                    self.parent_widget._current_event_id
-                                )
-                                logger.debug(f"GH locked point {pt_key}")
-            
-                self._press_pos   = None
-                self._press_time  = None
-                self._is_selecting = False
-                ev.accept()
+            if self.parent_widget._active_handler.on_mouse_release(self, ev):
                 return
-            # ── end gap/headway block ─────────────────────────────────────
             
             if self._is_selecting:
                 # Complete selection box
@@ -287,7 +223,7 @@ class CustomViewBox(pg.ViewBox):
         
         # For non-left releases, use default behavior
         super().mouseReleaseEvent(ev)
-    
+
     def mouseClickEvent(self, ev):
         """Override to handle right-click context menu.
         
@@ -295,6 +231,9 @@ class CustomViewBox(pg.ViewBox):
             ev: Mouse event containing button information
         """
         if ev.button() == Qt.MouseButton.RightButton:
+            if self.parent_widget._active_handler.on_right_click(self, ev):
+                ev.accept()
+                return
             self._show_context_menu(ev)
             ev.accept()
             return

@@ -1,4 +1,3 @@
-import math
 import logging
 import time
 import numpy as np
@@ -8,11 +7,14 @@ from PyQt6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QPushButton,
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QKeyEvent, QAction, QActionGroup
 import pyqtgraph as pg
-from superqt import QLabeledRangeSlider
+from superqt import QLabeledRangeSlider, QLabeledSlider
 from .time_space_plot_settings_dialog import TimeSpacePlotSettingsDialog
 from .custom_view_box import CustomViewBox
 from .vertical_gradient_value import GradientConfig, VerticalGradientValue
 from gui.toggle_switch import ToggleSwitch
+from .interaction_mode import InteractionMode, InteractionModeHandler
+from .gap_headway_handler import GapHeadwayModeHandler
+from .shockwave_handler import ShockwaveSemiAutoModeHandler
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -47,8 +49,18 @@ class TimeSpacePlotWidget(QWidget):
         _min_dist_span (float): Minimum allowed distance slider span for zoom limiting.
     """
 
+    _HANDLER_FACTORIES = {
+        InteractionMode.SELECT:              InteractionModeHandler,
+        InteractionMode.GAP_HEADWAY:         GapHeadwayModeHandler,
+        # Shockwave modes always receive a pre-constructed handler from
+        # _on_shockwave_action_triggered; factory entries are fallback only.
+        InteractionMode.SHOCKWAVE_SEMI_AUTO: ShockwaveSemiAutoModeHandler,
+        # InteractionMode.SHOCKWAVE_MANUAL:       ShockwaveManualModeHandler,   # Phase 2
+        # InteractionMode.SHOCKWAVE_AUTOMATIC:    ShockwaveAutomaticModeHandler, # Phase 3
+    }
+
     _DIMMED_COLOR  = '#a9a9a9'
-    
+
     series_color = [
         '#e6194B', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', 
         '#42d4f4', '#f032e6', '#bfef45', '#469990', '#9A6324', '#800000', 
@@ -92,17 +104,18 @@ class TimeSpacePlotWidget(QWidget):
         self._tooltip = None
         self._last_queried_point = None
         self._selected_series = set()
-        self._gh_saved_keys = set()  # set of (veh_id, veh_time) tuples
         self._speed_gradient_enabled = False
         self._last_mouse_move_time = 0.0
         self._lane_ids = []
         self._veh_ids = []
-        self._gh_mode_enabled = False
-        self._gh_overlay_items = [] # transient hover items
-        self._gh_locked_items = {}  # dict: (veh_id, veh_time) -> list[pg items]
+        self._interaction_mode = InteractionMode.SELECT
+        self._active_handler   = InteractionModeHandler()
         self._min_time_span = self._BASE_MIN_SPAN
         self._min_dist_span = self._BASE_MIN_SPAN
-    
+        self._mode_actions       = {}    # InteractionMode → QAction
+        self._shockwave_action   = None  # stored for cancel-restore
+        self._shockwave_slider_widget = None  # created in _setup_ui
+
         logger.debug("TimeSpacePlotWidget initialized")
         
         self._setup_ui()
@@ -165,7 +178,42 @@ class TimeSpacePlotWidget(QWidget):
         time_layout.addWidget(self._time_slider, stretch=1)
         
         mid_layout.addLayout(time_layout)
+
+        # ── Shockwave analysis sliders (hidden until Shockwave mode is active) ──
+        sw_container = QWidget()
+        sw_container.setVisible(False)
+        sw_layout = QVBoxLayout(sw_container)
+        sw_layout.setContentsMargins(0, 0, 0, 0)
+        sw_layout.setSpacing(2)
         
+        slope_row = QHBoxLayout()
+        slope_label = QLabel("Min Slope Change")
+        slope_label.setStyleSheet("font-weight: bold;")
+        slope_row.addWidget(slope_label)
+        self._slope_slider = QLabeledSlider()   # single-handle
+        self._slope_slider.setOrientation(Qt.Orientation.Horizontal)
+        self._slope_slider.setRange(0, 95)
+        self._slope_slider.setValue(80)
+        self._slope_slider.sliderReleased.connect(self._on_slope_slider_released)
+        slope_row.addWidget(self._slope_slider, stretch=1)
+        sw_layout.addLayout(slope_row)
+        
+        vicinity_row = QHBoxLayout()
+        vicinity_label = QLabel("Vicinity")
+        vicinity_label.setStyleSheet("font-weight: bold;")
+        vicinity_row.addWidget(vicinity_label)
+        self._vicinity_slider = QLabeledSlider()
+        self._vicinity_slider.setOrientation(Qt.Orientation.Horizontal)
+        self._vicinity_slider.setRange(1, 50)      # ×0.01 to get 0.01–0.50
+        self._vicinity_slider.setValue(5)          # default 0.05
+        self._vicinity_slider.setEnabled(False)   # enabled only for Automatic (Phase 3)
+        self._vicinity_slider.sliderReleased.connect(self._on_vicinity_slider_released)
+        vicinity_row.addWidget(self._vicinity_slider, stretch=1)
+        sw_layout.addLayout(vicinity_row)
+        
+        self._shockwave_slider_widget = sw_container
+        mid_layout.addWidget(sw_container)
+
         main_layout.addLayout(mid_layout, stretch=1)
         
         # Right side: control set (rearranged)
@@ -420,10 +468,10 @@ class TimeSpacePlotWidget(QWidget):
             return
 
         try:
+            self._active_handler.on_before_data_reload(self)
             self._scatter_plot.clear()
             self._clear_selection_box()
-            self._gh_locked_items.clear()
-            self._gh_overlay_items.clear()
+            self._active_handler.on_plot_cleared(self)
 
             for series in self._series.values():
                 series['plot_item'] = None
@@ -472,8 +520,7 @@ class TimeSpacePlotWidget(QWidget):
                     time_min, time_max, dist_min, dist_max
                 )
 
-            if self._gh_mode_enabled and self._gh_saved_keys:
-                self._restore_gh_locked()
+            self._active_handler.on_data_reloaded(self)
 
             logger.debug(
                 f"Updated plot data for event {self._current_event_id}, "
@@ -553,7 +600,7 @@ class TimeSpacePlotWidget(QWidget):
                       f"dist=[{dist_lo}, {dist_hi}]")
 
     def _handle_mouse_moved(self, pos):
-        """Handle mouse movement: gap/headway overlay or normal tooltip.
+        """Handle mouse movement calling mode-specific handler.
 
         Args:
             pos (QPointF): Mouse position in scene coordinates.
@@ -575,7 +622,7 @@ class TimeSpacePlotWidget(QWidget):
         pixel_tolerance_show = 3
         pixel_tolerance_hide = 6
 
-        # ── find closest point (shared by both modes) ─────────────────────
+        # ── find closest point (shared by all modes) ─────────────────────
         min_dist     = float('inf')
         closest_data = None
 
@@ -595,36 +642,8 @@ class TimeSpacePlotWidget(QWidget):
                                         series["text_color"],
                                         x_f[idx], y_f[idx])
 
-        # ── gap/headway mode ──────────────────────────────────────────────
-        if self._gh_mode_enabled:
-
-            if closest_data and min_dist < pixel_tolerance_show:
-                veh_id, _, _, veh_time, veh_dist = closest_data
-                current_point = (veh_id, veh_time, self._current_event_id)
-                pt_key = (veh_id, veh_time)
-                is_locked = pt_key in self._gh_locked_items
-
-                if is_locked:
-                    # Hovering a locked point: clear transient overlay, leave reticle hidden
-                    self._last_queried_point = current_point
-                else:
-                    if self._last_queried_point != current_point:
-                        gap_f, gap_b, hway_f, hway_b = self._find_gap_hway(
-                            veh_id, veh_time, veh_dist
-                        )
-                        self._clear_gh_overlay()
-                        self._draw_gh_overlay(
-                            veh_id, veh_time, veh_dist,
-                            gap_b, gap_f, hway_b, hway_f,
-                            target_list=self._gh_overlay_items
-                        )
-                        self._last_queried_point = current_point
-            else:
-                # Mouse not near any point: clear transient overlay, reticle stays hidden
-                self._clear_gh_overlay()
-                self._last_queried_point = None
-
-            self._tooltip.hide()
+        # ── mode handler ──────────────────────────────────────────────
+        if self._active_handler.on_hover(self, pos, closest_data, min_dist):
             return
 
         # ── normal tooltip mode ──────────────────────────────
@@ -711,19 +730,16 @@ class TimeSpacePlotWidget(QWidget):
 
     def keyPressEvent(self, event: QKeyEvent):
         """Handle key press events, clearing selection on Escape key."""
+        routed_keys = (Qt.Key.Key_Escape, Qt.Key.Key_Return, Qt.Key.Key_Enter)
+        if event.key() in routed_keys:
+            if self._active_handler.on_key_press(self, event):
+                event.accept()
+                return
         if event.key() == Qt.Key.Key_Escape:
-            if self._gh_mode_enabled:
-                # GH mode: clear locked points and saved keys
-                self._clear_gh_all_locked()
-                self._gh_saved_keys.clear()
-                self._last_queried_point = None
-                logger.debug("Cleared all GH locked points on Escape")
-            else:
-                # Select mode: clear trajectory selection
-                self._selected_series.clear()
-                self._update_plot_colors()
-                self._clear_selection_box()
-                logger.debug("Cleared selected series on Escape key")
+            self._selected_series.clear()
+            self._update_plot_colors()
+            self._clear_selection_box()
+            logger.debug("Cleared selected series on Escape key")
             event.accept()
         else:
             super().keyPressEvent(event)
@@ -800,26 +816,6 @@ class TimeSpacePlotWidget(QWidget):
         p, b = self.series_paint[series['color']]
         return [p] * n, [b] * n
 
-    def _clear_gh_overlay(self):
-        """Remove transient hover gap/headway lines and labels from the plot."""
-        for item in self._gh_overlay_items:
-            self._scatter_plot.removeItem(item)
-        self._gh_overlay_items.clear()
-
-    def _clear_gh_all_locked(self):
-        """Remove all persistent locked-point gap/headway lines."""
-        for items in self._gh_locked_items.values():
-            for item in items:
-                self._scatter_plot.removeItem(item)
-        self._gh_locked_items.clear()
-    
-    def _clear_gh_locked_point(self, pt_key: tuple):
-        """Remove persistent lines for one locked point (veh_id, veh_time)."""
-        self._gh_saved_keys.discard(pt_key)
-        items = self._gh_locked_items.pop(pt_key, [])
-        for item in items:
-            self._scatter_plot.removeItem(item)
-
     def _setup_mode_menu(self):
         """Populate and enable the Mode menu with exclusive interaction mode actions.
 
@@ -838,7 +834,6 @@ class TimeSpacePlotWidget(QWidget):
         if self._mode_menu is None:
             return
 
-        self._gh_saved_keys.clear()
         self._mode_menu.clear()
 
         action_group = QActionGroup(self._mode_menu)
@@ -848,7 +843,7 @@ class TimeSpacePlotWidget(QWidget):
         select_action.setCheckable(True)
         select_action.setChecked(True)
         select_action.triggered.connect(
-            lambda checked: self._on_mode_changed("select") if checked else None
+            lambda checked: self._on_mode_changed(InteractionMode.SELECT) if checked else None
         )
         action_group.addAction(select_action)
         self._mode_menu.addAction(select_action)
@@ -857,302 +852,48 @@ class TimeSpacePlotWidget(QWidget):
         gh_action.setCheckable(True)
         gh_action.setChecked(False)
         gh_action.triggered.connect(
-            lambda checked: self._on_mode_changed("gap_headway") if checked else None
+            lambda checked: self._on_mode_changed(InteractionMode.GAP_HEADWAY) if checked else None
         )
         action_group.addAction(gh_action)
         self._mode_menu.addAction(gh_action)
 
-        # Ensure widget state matches the default checked action.
-        self._gh_mode_enabled = False
+        shockwave_action = QAction("Shockwave", self._mode_menu)
+        shockwave_action.setCheckable(True)
+        shockwave_action.setChecked(False)
+        shockwave_action.triggered.connect(
+            lambda checked: self._on_shockwave_action_triggered() if checked else None
+        )
+        action_group.addAction(shockwave_action)
+        self._mode_menu.addAction(shockwave_action)
+        self._shockwave_action = shockwave_action
+
+        # Track QActions by mode for cancel-restore.
+        self._mode_actions = {
+            InteractionMode.SELECT:              select_action,
+            InteractionMode.GAP_HEADWAY:         gh_action,
+            InteractionMode.SHOCKWAVE_MANUAL:    shockwave_action,
+            InteractionMode.SHOCKWAVE_SEMI_AUTO: shockwave_action,
+            InteractionMode.SHOCKWAVE_AUTOMATIC: shockwave_action,
+        }
+        self._interaction_mode = InteractionMode.SELECT
+        self._active_handler   = InteractionModeHandler()
 
         self._mode_menu.menuAction().setVisible(True)
         logger.debug("Mode menu populated and enabled")
 
-    def _restore_gh_locked(self):
-        """Redraw locked GH overlays from saved keys."""
-        for veh_id, veh_time in self._gh_saved_keys:
-            series = self._series.get(veh_id)
-            if series is None:
-                continue
-            # Find the matching point's distance
-            mask = series["veh_time"] == veh_time
-            dists = series["veh_dist_trav"][mask]
-            if len(dists) == 0:
-                continue
-            veh_dist = float(dists[0])
-    
-            gap_f, gap_b, hway_f, hway_b = self._find_gap_hway(
-                veh_id, veh_time, veh_dist
-            )
-            locked_items = []
-            self._draw_gh_overlay(
-                veh_id, veh_time, veh_dist,
-                gap_b, gap_f, hway_b, hway_f,
-                target_list=locked_items
-            )
-            self._gh_locked_items[(veh_id, veh_time)] = locked_items
-        logger.debug(f"Restored {len(self._gh_saved_keys)} locked GH points")
-
-    def _on_mode_changed(self, mode: str):
+    def _on_mode_changed(self, mode: InteractionMode, handler=None):
         """Handle interaction mode changes driven by the Mode menu.
 
-        Replaces _on_gap_headway_toggled. Keeps _gh_mode_enabled as the
-        single source of truth consumed by CustomViewBox and the mouse
-        handlers, so no other code needs to change.
-
-        When enabled:
-          - Normal trajectory selection is suppressed.
-          - Hovering a point draws live gap/headway lines.
-          - Clicking a point locks those lines; clicking again unlocks.
-
-        When disabled:
-          - All overlay graphics are removed.
-          - Normal selection behaviour is restored.
-
         Args:
-            mode (str): Either "select" or "gap_headway".
+            mode (InteractionMode enum): handles select, gap headway, shockwave.
         """
-        if mode == "gap_headway":
-            self._gh_mode_enabled = True
-            # Restore previously saved locked points
-            self._restore_gh_locked()
-            logger.debug("Mode changed to: Gap Headway")
-        else:
-            self._gh_mode_enabled = False
-            self._clear_gh_overlay()
-            # Save which points are locked, then remove graphics only
-            self._gh_saved_keys = set(self._gh_locked_items.keys())
-            self._clear_gh_all_locked()
-            self._tooltip.hide()
-            logger.debug("Mode changed to: Select Trajectory")
-
-    def _draw_gh_overlay(self, veh_id: int, veh_time: float, veh_dist: float,
-                             gap_b, gap_f, hway_b, hway_f, *,
-                             target_list: list):
-            """Draw gap and headway lines + labels for the given point.
-    
-            Items are appended to `target_list` (either _gh_overlay_items for
-            transient hover lines or _gh_locked_items for persistent locked lines)
-            so the two sets can be cleared independently.  The caller is
-            responsible for clearing the appropriate list before calling.
-    
-            Axes convention (same as the plot):
-                x-axis → time (s)
-                y-axis → distance (m)
-    
-            gap_b / gap_f  are distances (m) → drawn as vertical segments
-                            (same time, ± distance).
-            hway_b / hway_f are times   (s) → drawn as horizontal segments
-                            (same distance, ± time).
-    
-            Args:
-                veh_id      : vehicle identifier (used only for logging).
-                veh_time    : x-coordinate of the source point (s).
-                veh_dist    : y-coordinate of the source point (m).
-                gap_b, gap_f   : backward/forward spatial gap (m); may be None/NaN.
-                hway_b, hway_f : backward/forward time headway (s); may be None/NaN.
-                target_list    : list to append created pg items to.
-            """
-            NUDGE_PX = 10
-            LINE_PEN    = pg.mkPen(color=(120, 120, 120), width=3,
-                                   style=Qt.PenStyle.SolidLine)
-            LABEL_COLOR = (80, 80, 80)
-    
-            def _add_line(x0, y0, x1, y1):
-                item = pg.PlotDataItem([x0, x1], [y0, y1], pen=LINE_PEN)
-                self._scatter_plot.addItem(item)
-                target_list.append(item)
-
-            def _add_label(x, y, text, anchor, angle=0, dx_px=0, dy_px=0):
-                item = pg.TextItem(text=text, color=LABEL_COLOR, anchor=anchor,
-                                   angle=angle)
-                item.setFont(pg.QtGui.QFont("Arial", 8))
-                if dx_px != 0 or dy_px != 0:
-                    px_w, px_h = self._scatter_plot.getViewBox().viewPixelSize()
-                    x = x + dx_px * px_w
-                    y = y + dy_px * px_h
-                item.setPos(x, y)
-                self._scatter_plot.addItem(item)
-                target_list.append(item)
-                
-            # ── vertical lines (gap — same time, different distance) ─────────────
-            #
-            # gap_f: other vehicle is at higher dist at same time → line goes UP
-            #        label: rotated 90°, right of and above source point
-            # gap_b: other vehicle is at lower dist at same time  → line goes DOWN
-            #        label: rotated 90°, left of and below source point
-    
-            if math.isfinite(gap_f):
-                y_end = veh_dist + gap_f
-                _add_line(veh_time, veh_dist, veh_time, y_end)
-                _add_label(veh_time, veh_dist,
-                           f"{gap_f:.2f} m",
-                           anchor=(0.0, 0.0),
-                           angle=90,
-                           dy_px=NUDGE_PX)
-    
-            if math.isfinite(gap_b):
-                y_end = veh_dist - gap_b
-                _add_line(veh_time, veh_dist, veh_time, y_end)
-                _add_label(veh_time, veh_dist,
-                           f"{gap_b:.2f} m",
-                           anchor=(1.0, 1.0),
-                           angle=90,
-                           dy_px=-NUDGE_PX)
-    
-            # ── horizontal lines (headway — same distance, different time) ───────
-            #
-            # hway_f: other vehicle passed this distance earlier → line goes LEFT
-            #         label: left of and above source point
-            # hway_b: other vehicle passed this distance later   → line goes RIGHT
-            #         label: right of and below source point
-    
-            if math.isfinite(hway_f):
-                x_end = veh_time - hway_f
-                _add_line(veh_time, veh_dist, x_end, veh_dist)
-                _add_label(veh_time, veh_dist,
-                           f"{hway_f:.2f} s",
-                           anchor=(1.0, 1.0),
-                           dx_px=-NUDGE_PX)
-    
-            if math.isfinite(hway_b):
-                x_end = veh_time + hway_b
-                _add_line(veh_time, veh_dist, x_end, veh_dist)
-                _add_label(veh_time, veh_dist,
-                           f"{hway_b:.2f} s",
-                           anchor=(0.0, 0.0),
-                           dx_px=NUDGE_PX)
-    
-            logger.debug(
-                f"Drew GH overlay for veh {veh_id} at t={veh_time:.2f}: "
-                f"gap_b={gap_b}, gap_f={gap_f}, hway_b={hway_b}, hway_f={hway_f}"
-            )
-
-    def _find_gap_hway(self, veh_id: int, veh_time: float, veh_dist: float
-                           ) -> tuple:
-            """Find gap and headway in a single pass over segments.
-    
-            For each other vehicle's segment, first attempts a gap measurement
-            if the segment brackets veh_time.  When a gap is found the segment
-            extents are narrowed:
-    
-            - Forward gap (vehicle ahead at veh_time): it hasn't reached veh_dist
-              yet, so the crossing must be after veh_time.  Narrow the search
-              window to [gap_idx, seg_end) by advancing seg_start and updating
-              t_min / d_min.
-            - Backward gap (vehicle behind at veh_time): it already passed
-              veh_dist, so the crossing was before veh_time.  Narrow the search
-              window to [seg_start, gap_idx+2) by pulling back seg_end and
-              updating t_max / d_max.
-    
-            After narrowing, forward headway (hway_f) and backward headway
-            (hway_b) are each checked independently against the (possibly
-            narrowed) extents and scanned in their respective directions.
-            Segments where no gap was found still get the full headway scan
-            with original extents.
-    
-            Returns ``float('inf')`` for any direction with no candidate.
-            ``_draw_gh_overlay`` already handles this via its ``_finite()``
-            helper which returns ``None`` for non-finite values.
-    
-            Args:
-                veh_id:   Vehicle ID of the subject point (skipped).
-                veh_time: Time coordinate of the subject point (seconds).
-                veh_dist: Distance coordinate of the subject point (metres).
-    
-            Returns:
-                ``(gap_f, gap_b, hway_f, hway_b)`` as positive magnitudes,
-                or ``float('inf')`` for any direction with no candidate.
-            """
-            INF = float('inf')
-            gap_f = INF
-            gap_b = INF
-            hway_f = INF
-            hway_b = INF
-    
-            for sid, series in self._series.items():
-                if sid == veh_id:
-                    continue
-    
-                t_arr = series['veh_time']
-                d_arr = series['veh_dist_trav']
-
-                for seg_start, seg_end, t_min, t_max, d_min, d_max, seg_t, seg_d in series.get('segments', []):
-    
-                    # ── Gap check: does this segment bracket veh_time? ────────
-                    if t_min <= veh_time <= t_max:
-                        idx = int(np.searchsorted(seg_t, veh_time, side='left'))
-                        idx = min(idx, len(seg_t) - 1)
-    
-                        if seg_t[idx] == veh_time:
-                            diff = float(seg_d[idx]) - veh_dist
-                            abs_idx = seg_start + idx
-                        else:
-                            lo, hi = idx - 1, idx
-                            pct = (veh_time - seg_t[lo]) / (seg_t[hi] - seg_t[lo])
-                            diff = float(seg_d[lo] + pct * (seg_d[hi] - seg_d[lo])) - veh_dist
-                            abs_idx = seg_start + lo
-
-                        if diff > 0:
-                            if diff < gap_f:
-                                gap_f = diff
-                            # Vehicle ahead → crossing is after veh_time
-                            seg_end = min(abs_idx + 2, seg_end)
-                            t_max = float(t_arr[seg_end - 1])
-                            d_max = float(d_arr[seg_end - 1])
-
-                        elif diff < 0:
-                            abs_diff = -diff
-                            if abs_diff < gap_b:
-                                gap_b = abs_diff
-                            # Vehicle behind → crossing was before veh_time
-                            seg_start = abs_idx
-                            t_min = float(t_arr[abs_idx])
-                            d_min = float(d_arr[abs_idx])
-    
-                    # ── Forward headway: scan backward for crossing before veh_time
-                    if d_min <= veh_dist <= d_max:
-                        for i in range(seg_end - 2, seg_start - 1, -1):
-                            d0 = float(d_arr[i])
-                            d1 = float(d_arr[i + 1])
-                            if not ((d0 <= veh_dist <= d1) or (d1 <= veh_dist <= d0)):
-                                continue
-                            t0 = float(t_arr[i])
-                            t1 = float(t_arr[i + 1])
-                            span = d1 - d0
-                            if span == 0.0:
-                                pct = 1.0
-                            else:
-                                pct = max(0.0, min(1.0, (veh_dist - d0) / span))
-                            crossing_time = t0 + pct * (t1 - t0)
-                            diff = veh_time - crossing_time
-                            if diff > 0.0:
-                                if diff < hway_f:
-                                    hway_f = diff
-                                break
-    
-                    # ── Backward headway: scan forward for crossing after veh_time
-                    if d_min <= veh_dist <= d_max:
-                        for i in range(seg_start, seg_end - 1):
-                            d0 = float(d_arr[i])
-                            d1 = float(d_arr[i + 1])
-                            if not ((d0 <= veh_dist <= d1) or (d1 <= veh_dist <= d0)):
-                                continue
-                            t0 = float(t_arr[i])
-                            t1 = float(t_arr[i + 1])
-                            span = d1 - d0
-                            if span == 0.0:
-                                pct = 0.0
-                            else:
-                                pct = max(0.0, min(1.0, (veh_dist - d0) / span))
-                            crossing_time = t0 + pct * (t1 - t0)
-                            diff = crossing_time - veh_time
-                            if diff > 0.0:
-                                if diff < hway_b:
-                                    hway_b = diff
-                                break
-    
-            return gap_f, gap_b, hway_f, hway_b
+        self._active_handler.on_exit(self)
+        self._active_handler = handler or self._HANDLER_FACTORIES.get(
+            mode, InteractionModeHandler
+        )()
+        self._interaction_mode = mode
+        self._active_handler.on_enter(self)
+        logger.debug(f"Mode changed to: {mode.value}")
 
     def _compute_min_spans(self):
         """Compute aspect-ratio-aware minimum spans from the current slider limits.
@@ -1176,3 +917,30 @@ class TimeSpacePlotWidget(QWidget):
         else:
             self._min_time_span = self._BASE_MIN_SPAN
             self._min_dist_span = self._BASE_MIN_SPAN
+
+    def _on_slope_slider_released(self):
+        value = float(self._slope_slider.value())
+        self._active_handler.on_slope_changed(self, value)
+    
+    def _on_vicinity_slider_released(self):
+        value = self._vicinity_slider.value() * 0.01
+        self._active_handler.on_vicinity_changed(self, value)
+
+    def _on_shockwave_action_triggered(self):
+        """Show ShockwaveConfigDialog; activate mode on OK, restore previous on Cancel."""
+        from comp.shockwave import ShockwaveConfigDialog
+        dlg = ShockwaveConfigDialog(self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            mode    = dlg.selected_interaction_mode()
+            handler = ShockwaveSemiAutoModeHandler(
+                slope_percentile=dlg.selected_slope_percentile(),
+                vicinity=dlg.selected_vicinity(),
+            )
+            # Also sync the slope slider to the config dialog's chosen value.
+            self._slope_slider.setValue(int(dlg.selected_slope_percentile()))
+            self._on_mode_changed(mode, handler=handler)
+        else:
+            # Restore the previously active mode's action check state.
+            prev = self._mode_actions.get(self._interaction_mode)
+            if prev:
+                prev.setChecked(True)

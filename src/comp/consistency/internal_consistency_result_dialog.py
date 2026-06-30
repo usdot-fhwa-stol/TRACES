@@ -17,21 +17,43 @@ Plot colours are fixed:
   Acceleration — red   (#d62728)
   Jerk         — green (#2ca02c)
 
+Cross-plot synchronization
+---------------------------
+  - The crosshair (vertical line) moves together on all three plots,
+    regardless of which plot's scene generated the mouse-move event.
+  - The crosshair is added with ignoreBounds=True so that moving it does
+    not perturb continuous auto-range -- without this, the view would
+    appear to "auto-pan" whenever the line approached the view's edges.
+  - Time (x) is linked across all three ViewBoxes via setXLink, so
+    panning/zooming time on any one plot moves all three.
+  - Y is intentionally NOT linked -- speed/accel/jerk have unrelated
+    scales.  Y-axis mouse interaction is disabled and each plot's y-axis
+    is kept in continuous auto-range, so each plot independently
+    rescales to fit whatever is visible in the (shared) time window.
+  - The corner "A" auto-range button on any one plot resets all three.
+  - Hovering near a curve in any plot shows THREE small floating labels
+    (one per plot, parented to that plot), each positioned next to that
+    plot's own curve and containing only that plot's own time/value/
+    calculated-value rows.  QToolTip can't be used for this because it's
+    a single OS-level widget -- only one can ever be visible at a time,
+    which is why a single combined tooltip was the earlier approach.
+
 HTML export uses comp.plot_export.build_svg_html / export_plot_to_svg,
 which are shared with JerkBoxPlotDialog.
 """
 
 import logging
 from pathlib import Path
-from typing import List, Dict, Tuple
+from typing import List, Dict, Optional, Tuple
 
 import numpy as np
 import pyqtgraph as pg
 from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QSplitter,
     QPushButton, QComboBox, QTableWidget, QTableWidgetItem,
-    QHeaderView, QFileDialog, QMessageBox, QWidget, QToolTip,
+    QHeaderView, QFileDialog, QMessageBox, QWidget, QLabel,
 )
 
 from .internal_consistency_comp import InternalConsistencyResult
@@ -68,9 +90,24 @@ _PLOTS = [
     ("Jerk",         "veh_jerk",  "veh_jerk_cal",  "Jerk (m/s³)",   "#2ca02c"),
 ]
 
+_TOOLTIP_LABEL_STYLE = (
+    "QLabel {"
+    "  background-color: #ffffe1;"
+    "  border: 1px solid #767676;"
+    "  padding: 2px 5px;"
+    "  font-size: 11px;"
+    "  color: #000000;"
+    "}"
+)
+
 
 class InternalConsistencyResultDialog(QDialog):
     """Combined right-click output dialog for Module 4."""
+
+    # Snap tolerance in data units (seconds along the x/time axis).
+    _TOOLTIP_T_TOL: float = 0.1
+    # Snap tolerance in screen pixels for deciding a tooltip should appear.
+    _TOOLTIP_PIXEL_TOL: float = 12.0
 
     def __init__(self, parent, results: List[InternalConsistencyResult]):
         super().__init__(parent)
@@ -99,6 +136,7 @@ class InternalConsistencyResultDialog(QDialog):
         # Parallel lists populated in _build_plot_panel; one entry per plot.
         self._plot_curves:  List[List[pg.PlotDataItem]] = []  # [plot_idx][curve_idx]
         self._vlines:       List[pg.InfiniteLine] = []        # vertical crosshair per plot
+        self._tooltip_labels: List[QLabel] = []                # floating per-plot tooltip
 
         self._setup_ui()
         self._load_trajectory(0)
@@ -124,9 +162,10 @@ class InternalConsistencyResultDialog(QDialog):
         layout = QVBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(2)
-        self._plot_widgets = []
-        self._plot_curves  = []
-        self._vlines       = []
+        self._plot_widgets   = []
+        self._plot_curves    = []
+        self._vlines         = []
+        self._tooltip_labels = []
         for title, _orig, _cal, ylabel, _color in _PLOTS:
             pw = pg.PlotWidget()
             pw.setBackground("w")
@@ -137,12 +176,28 @@ class InternalConsistencyResultDialog(QDialog):
             pw.addLegend(offset=(5, 5))
 
             # Vertical crosshair — hidden until the mouse enters a plot.
+            # ignoreBounds=True keeps the line's x-position out of the
+            # auto-range bounding box; without it, moving the line near
+            # the view's edges makes continuous auto-range "chase" it and
+            # the plot appears to pan on its own.
             vline = pg.InfiniteLine(angle=90, movable=False,
                                     pen=pg.mkPen("#888888", width=1,
                                                  style=Qt.PenStyle.DashLine))
             vline.setVisible(False)
-            pw.addItem(vline)
+            pw.addItem(vline, ignoreBounds=True)
             self._vlines.append(vline)
+
+            # Floating per-plot tooltip. A real child QWidget (not the OS
+            # QToolTip), so up to three can be visible simultaneously,
+            # each positioned next to its own plot's curve.
+            # WA_TransparentForMouseEvents lets mouse-move events pass
+            # through to the GraphicsView underneath, so the label sitting
+            # on top of a plot never interrupts the hover/crosshair sync.
+            lbl = QLabel(pw)
+            lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+            lbl.setStyleSheet(_TOOLTIP_LABEL_STYLE)
+            lbl.hide()
+            self._tooltip_labels.append(lbl)
 
             # Wire mouse-move on every plot scene to the shared handler.
             pw.scene().sigMouseMoved.connect(
@@ -152,6 +207,25 @@ class InternalConsistencyResultDialog(QDialog):
             self._plot_widgets.append(pw)
             self._plot_curves.append([])   # filled in _refresh_plots
             layout.addWidget(pw)
+
+        # ── Cross-plot synchronization ───────────────────────────────────
+        # Time is the same physical axis on all three plots, so link it:
+        # panning/zooming time on any one plot moves all three. Y is left
+        # unlinked -- speed/accel/jerk have unrelated scales, so each
+        # plot's y-axis stays in continuous auto-range instead, rescaling
+        # on its own to fit whatever time window is currently visible.
+        ref_vb = self._plot_widgets[0].getViewBox()
+        for pw in self._plot_widgets:
+            vb = pw.getViewBox()
+            vb.setMouseEnabled(x=True, y=False)
+            pw.enableAutoRange(axis="y", enable=True)
+            if vb is not ref_vb:
+                vb.setXLink(ref_vb)
+
+            # The built-in "A" corner button only resets its own plot by
+            # default; add our own handler so it resets all three.
+            pw.getPlotItem().autoBtn.clicked.connect(self._on_auto_btn_clicked)
+
         return container
 
     def _build_right_panel(self) -> QWidget:
@@ -195,6 +269,8 @@ class InternalConsistencyResultDialog(QDialog):
             item = QTableWidgetItem(abbrev)
             item.setToolTip(full)
             self._raw_table.setHorizontalHeaderItem(ci, item)
+
+        self._raw_table.cellClicked.connect(self._on_raw_row_clicked)
         return self._raw_table
 
     def _build_footer(self) -> QHBoxLayout:
@@ -246,16 +322,26 @@ class InternalConsistencyResultDialog(QDialog):
         self._next_btn.setEnabled(idx < n - 1)
 
     def _refresh_plots(self, rows: List[InternalConsistencyResult]):
+        # Hide any tooltip left over from the previous trajectory before
+        # the underlying curve data changes out from under it.
+        for lbl in self._tooltip_labels:
+            lbl.hide()
+
         t = np.asarray([r.veh_time for r in rows], dtype=np.float64)
 
         for pi, (pw, (_title, orig_attr, cal_attr, _ylabel, color)) in enumerate(
                 zip(self._plot_widgets, _PLOTS)):
             pw.clear()
             pw.addLegend(offset=(5, 5))
-            # Re-add the crosshair (clear() removes all items including it).
+            # Re-add the crosshair (clear() removes all items including
+            # it). ignoreBounds=True for the same reason as on initial
+            # construction -- see _build_plot_panel. Note: the floating
+            # tooltip QLabel is a native Qt child widget, not a scene
+            # item, so it survives pw.clear() untouched and needs no
+            # re-adding here.
             vline = self._vlines[pi]
             vline.setVisible(False)
-            pw.addItem(vline)
+            pw.addItem(vline, ignoreBounds=True)
 
             curves: List[pg.PlotDataItem] = []
 
@@ -279,21 +365,25 @@ class InternalConsistencyResultDialog(QDialog):
 
             self._plot_curves[pi] = curves
 
-            # Reset view so the new data fills the viewport.
+            # Reset view so the new trajectory's data fills the viewport.
+            # Y stays in continuous auto-range afterward (set once in
+            # _build_plot_panel); X will too, until the user manually
+            # pans/zooms it, at which point pyqtgraph respects that and
+            # stops auto-fitting x for this trajectory.
             pw.enableAutoRange()
 
-    def _refresh_raw_table(self, rows: List[InternalConsistencyResult]):
+    def _refresh_raw_table(self, rows):
         self._raw_table.setRowCount(len(rows))
+        last_idx = len(rows) - 1
         for ri, r in enumerate(rows):
             for ci, (abbrev, full, attr, fmt) in enumerate(_RAW_COLUMNS):
                 val = getattr(r, attr)
-                if attr in ("event_id", "veh_id"):
-                    text = str(val)
-                else:
-                    text = "" if _isnan(val) else fmt.format(val)
+                text = "" if _isnan(val) else fmt.format(val)
                 item = QTableWidgetItem(text)
-                item.setTextAlignment(
-                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                if ri == last_idx and attr.endswith("_cal"):
+                    item.setToolTip("No following record to derive this value")
+                    item.setBackground(QColor("#f0f0f0"))
                 self._raw_table.setItem(ri, ci, item)
 
     def _refresh_stats_table(self, key: Tuple[int, int]):
@@ -313,75 +403,145 @@ class InternalConsistencyResultDialog(QDialog):
                 Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self._stats_table.setItem(0, ci, item)
 
+    def _on_raw_row_clicked(self, row: int, _col: int):
+        rows = self._traj_data[self._traj_keys[self._current_idx]]
+        t_val = rows[row].veh_time
+        for vline in self._vlines:
+            vline.setValue(t_val)
+            vline.setVisible(True)
+
+    # ── Auto-range button ────────────────────────────────────────────────
+
+    def _on_auto_btn_clicked(self, *_args):
+        """The corner 'A' button only auto-ranges its own plot by
+        default; this makes it reset all three so the views stay
+        comparable after the user has manually panned/zoomed.
+        """
+        for pw in self._plot_widgets:
+            pw.enableAutoRange()
+
     # ── Tooltip / crosshair ───────────────────────────────────────────────
 
-    # Snap tolerance in data units (seconds along the x/time axis).
-    _TOOLTIP_T_TOL: float = 0.1
-
     def _on_mouse_moved(self, pos, source_pw: pg.PlotWidget):
-        """Show a QToolTip and move the crosshair when the mouse is near a curve.
+        """Move the crosshair on all three plots together, and show one
+        small floating label per plot -- each positioned next to that
+        plot's own curve, containing only that plot's own time/value/
+        calculated-value rows -- rather than a single combined tooltip
+        anchored to whichever plot the mouse happens to be over.
 
-        ``pos`` is in scene coordinates of ``source_pw``'s scene.  We move the
-        vertical crosshair on *all* plots to the same x value so they stay in
-        sync, but only search for the nearest point in ``source_pw``.
+        ``pos`` is in scene coordinates of ``source_pw``'s scene.
         """
         pi = self._plot_widgets.index(source_pw)
         vb = source_pw.getViewBox()
 
         if not source_pw.sceneBoundingRect().contains(pos):
-            # Mouse has left this plot — hide its crosshair and tooltip.
-            self._vlines[pi].setVisible(False)
-            QToolTip.hideText()
+            # Mouse has left this plot — hide all crosshairs and labels.
+            for vline in self._vlines:
+                vline.setVisible(False)
+            for lbl in self._tooltip_labels:
+                lbl.hide()
             return
 
         data_pt = vb.mapSceneToView(pos)
         mx = data_pt.x()
 
-        # Move only this plot's crosshair.
-        self._vlines[pi].setValue(mx)
-        self._vlines[pi].setVisible(True)
+        # All three crosshairs move together, regardless of which plot's
+        # scene actually generated this event.
+        for vline in self._vlines:
+            vline.setValue(mx)
+            vline.setVisible(True)
 
-        # Search the curves in the source plot for the closest y value.
-        curves = self._plot_curves[pi]
-        best_dist = float("inf")
-        best_label: str = ""
-        best_y: float = float("nan")
+        # Whether any tooltip appears at all is decided by proximity to a
+        # curve in the plot under the mouse.
+        hit = self._closest_point(pi, mx, data_pt.y(), vb)
+        if hit is None:
+            for lbl in self._tooltip_labels:
+                lbl.hide()
+            return
+        hit_x, _hit_y, _hit_label, _hit_dist = hit
 
-        for curve in curves:
+        # Each plot gets its own label, built only from its own values at
+        # hit_x, and positioned next to its own curve -- not the cursor.
+        for qi, pw in enumerate(self._plot_widgets):
+            lbl = self._tooltip_labels[qi]
+            vals = self._values_at_time(qi, hit_x)
+            if not vals:
+                lbl.hide()
+                continue
+
+            lines = [f"t = {hit_x:.4f} s"]
+            ys = []
+            for _x, y, name in vals:
+                lines.append(f"{name}: {y:.4f}")
+                ys.append(y)
+
+            lbl.setText("\n".join(lines))
+            lbl.adjustSize()
+            self._place_tooltip_label(lbl, pw, pw.getViewBox(),
+                                      hit_x, sum(ys) / len(ys))
+
+    def _values_at_time(self, qi: int, hit_x: float) -> List[Tuple[float, float, str]]:
+        """(x, y, label) for every curve in plot `qi` with a sample within
+        _TOOLTIP_T_TOL of hit_x -- i.e. that plot's own original and/or
+        calculated value at this instant.
+        """
+        out: List[Tuple[float, float, str]] = []
+        for curve in self._plot_curves[qi]:
             xdata, ydata = curve.getData()
             if xdata is None or len(xdata) == 0:
                 continue
-            # Restrict search to a narrow time window for performance.
+            idx = int(np.argmin(np.abs(xdata - hit_x)))
+            if abs(xdata[idx] - hit_x) <= self._TOOLTIP_T_TOL:
+                out.append((float(xdata[idx]), float(ydata[idx]), curve.name() or ""))
+        return out
+
+    def _place_tooltip_label(self, label: QLabel, pw: pg.PlotWidget, vb,
+                             x: float, y: float) -> None:
+        """Position `label` (a child widget of `pw`) at the pixel location
+        of data point (x, y) in `pw`'s own view, offset slightly so it
+        doesn't sit directly on top of the curve point, and clamped so it
+        never extends past that plot's own edges.
+        """
+        scene_pt  = vb.mapViewToScene(pg.Point(x, y))
+        widget_pt = pw.mapFromScene(scene_pt)
+        px = widget_pt.x() + 10
+        py = widget_pt.y() - label.height() - 8
+        px = max(0, min(int(px), pw.width()  - label.width()))
+        py = max(0, min(int(py), pw.height() - label.height()))
+        label.move(px, py)
+        label.show()
+        label.raise_()
+
+    def _closest_point(
+        self, pi: int, mx: float, my: float, vb
+    ) -> Optional[Tuple[float, float, str, float]]:
+        """Closest curve point to (mx, my) in plot `pi`, by on-screen
+        pixel distance.
+
+        Returns (x, y, label, pixel_dist), or None if nothing in that
+        plot is within _TOOLTIP_PIXEL_TOL pixels of the cursor.
+        """
+        best_dist = float("inf")
+        best: Optional[Tuple[float, float, str, float]] = None
+        for curve in self._plot_curves[pi]:
+            xdata, ydata = curve.getData()
+            if xdata is None or len(xdata) == 0:
+                continue
             mask = np.abs(xdata - mx) <= self._TOOLTIP_T_TOL
             if not mask.any():
                 continue
-            xs = xdata[mask]
-            ys = ydata[mask]
-            # Find index closest to mx in the x direction.
+            xs, ys = xdata[mask], ydata[mask]
             idx = int(np.argmin(np.abs(xs - mx)))
-            # Convert y-distance to view pixels for a display-size-independent threshold.
-            y_view  = ys[idx]
-            my_view = data_pt.y()
-            # Transform both to pixel space to compute pixel distance.
-            pt_scene  = vb.mapViewToScene(pg.Point(xs[idx], y_view))
-            cur_scene = vb.mapViewToScene(pg.Point(mx,       my_view))
-            pixel_dist = (pt_scene - cur_scene).manhattanLength()
-            if pixel_dist < best_dist:
-                best_dist  = pixel_dist
-                best_label = curve.name() or ""
-                best_y     = float(y_view)
-                best_x     = float(xs[idx])
-
-        _PIXEL_THRESHOLD = 12
-        if best_dist <= _PIXEL_THRESHOLD and not np.isnan(best_y):
-            _title, _o, _c, ylabel, _col = _PLOTS[pi]
-            tip = f"t = {best_x:.4f} s\n{best_label}: {best_y:.4f}"
-            screen_pos = source_pw.mapToGlobal(
-                source_pw.mapFromScene(pos).toPointF().toPoint()
-            )
-            QToolTip.showText(screen_pos, tip)
-        else:
-            QToolTip.hideText()
+            # Pixel distance, so the threshold is display-size independent.
+            pt_scene  = vb.mapViewToScene(pg.Point(xs[idx], ys[idx]))
+            cur_scene = vb.mapViewToScene(pg.Point(mx, my))
+            dist = (pt_scene - cur_scene).manhattanLength()
+            if dist < best_dist:
+                best_dist = dist
+                best = (float(xs[idx]), float(ys[idx]), curve.name() or "", dist)
+        if best is not None and best[3] <= self._TOOLTIP_PIXEL_TOL:
+            return best
+        return None
 
     # ── Footer slots ──────────────────────────────────────────────────────
 

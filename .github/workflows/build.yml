@@ -14,7 +14,11 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install pyinstaller>=6.0 numpy>=1.26 pyqt6>=6.4 pyqtgraph>=0.13 superqt utm
+        pip install pyinstaller>=6.0
+        pip install -r requirements.txt
+
+    - name: Show installed versions
+      run: pip list
 
     - name: Build with PyInstaller
       shell: powershell

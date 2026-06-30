@@ -57,6 +57,24 @@ class InternalConsistencyComp(BaseComp):
     jerk from acceleration.  Compares each reconstructed signal with the
     corresponding column in the dataset (when present) to produce error terms.
 
+    Indexing convention
+    --------------------
+    Every "_cal" value is a forward difference over the interval
+    [t[i], t[i+1]] and is stored at index i — the record where that
+    interval *begins* — not at i+1 where it ends.  This means the *last*
+    record of every (event_id, veh_id) series is always NaN for every
+    calculated column (there is no i+1 to pair it with), so the blank row
+    in any displayed table lands at the bottom, not the top.
+
+    Source preference
+    ------------------
+    Acceleration is reconstructed from measured speed wherever a measured
+    value is available at both endpoints of the interval, falling back to
+    the reconstructed speed only where the measured value is missing
+    (row-level) or the veh_speed column is absent from the dataset
+    entirely.  Jerk follows the identical pattern one level up, preferring
+    measured acceleration over veh_accel_cal.
+
     The computed columns are written back to the events table by the dialog's
     _on_worker_finished, NOT by this class.  comp_series is purely computational.
     """
@@ -78,7 +96,7 @@ class InternalConsistencyComp(BaseComp):
         options  = self._resolve_options(options)
         gap_pts  = int(options["missing_gap_points"])
         time_step = float(options["time_step"])
-        gap_secs = gap_pts * time_step   # convert to seconds for time_diff comparison
+        gap_secs = gap_pts * time_step   # convert to seconds for interval comparison
 
         if veh_ids is None:
             veh_ids = self._event_veh_ids(db_connection, event_id)
@@ -127,22 +145,25 @@ class InternalConsistencyComp(BaseComp):
             if n == 0:
                 continue
 
-            t    = np.asarray(d["veh_time"],    dtype=np.float64)
+            t    = np.asarray(d["veh_time"],      dtype=np.float64)
             dist = np.asarray(d["veh_dist_trav"], dtype=np.float64)
 
             orig_speed = self._to_nan_array(d["veh_speed"]) if has_speed else np.full(n, NAN)
             orig_accel = self._to_nan_array(d["veh_accel"]) if has_accel else np.full(n, NAN)
             orig_jerk  = self._to_nan_array(d["veh_jerk"])  if has_jerk  else np.full(n, NAN)
 
-            # Compute time differences.
-            time_diff = np.empty(n, dtype=np.float64)
-            time_diff[0] = NAN
-            time_diff[1:] = np.diff(t)
+            # ── Reconstruction, with values attributed to the START of the
+            # interval that produced them (see class docstring).
+            speed_cal = self._derivative_from_start(dist, t, gap_secs)
 
-            # Reconstruct signals following the pseudocode exactly.
-            speed_cal = self._estimate_speed(dist, time_diff, gap_secs)
-            accel_cal = self._estimate_accel(speed_cal, time_diff, gap_secs)
-            jerk_cal  = self._estimate_jerk(accel_cal, time_diff, gap_secs)
+            # Acceleration prefers measured speed; falls back to speed_cal
+            # wherever a measured reading is missing or absent altogether.
+            speed_for_accel = self._prefer_measured(orig_speed, speed_cal)
+            accel_cal = self._derivative_from_start(speed_for_accel, t, gap_secs)
+
+            # Jerk follows the same pattern, one level up.
+            accel_for_jerk = self._prefer_measured(orig_accel, accel_cal)
+            jerk_cal = self._derivative_from_start(accel_for_jerk, t, gap_secs)
 
             # Error terms: original − reconstructed; NaN when source absent.
             speed_err = self._error(orig_speed, speed_cal) if has_speed else np.full(n, NAN)
@@ -190,44 +211,43 @@ class InternalConsistencyComp(BaseComp):
     # ── Reconstruction helpers ────────────────────────────────────────────
 
     @staticmethod
-    def _estimate_speed(dist: np.ndarray, time_diff: np.ndarray,
-                        gap_secs: float) -> np.ndarray:
-        n = len(dist)
+    def _derivative_from_start(source: np.ndarray, t: np.ndarray,
+                               gap_secs: float) -> np.ndarray:
+        """Forward-difference rate of change, assigned to the interval's
+        *starting* record.
+
+        For each i, out[i] approximates d(source)/dt over [t[i], t[i+1]]
+        using (source[i+1] - source[i]) / (t[i+1] - t[i]).  The result is
+        stored at index i, where the interval begins, rather than at i+1
+        where it ends — so out[n-1] is always NaN (no i+1 exists to pair
+        the last record with), and any record skipped because the gap
+        exceeds gap_secs, or because either endpoint is NaN, is also NaN.
+        """
+        n = len(source)
         out = np.full(n, NAN)
-        for i in range(1, n):
-            td = time_diff[i]
+        for i in range(n - 1):
+            td = t[i + 1] - t[i]
             if np.isnan(td) or td <= 0 or td > gap_secs:
                 continue
-            out[i] = (dist[i] - dist[i - 1]) / td
+            a, b = source[i], source[i + 1]
+            if np.isnan(a) or np.isnan(b):
+                continue
+            out[i] = (b - a) / td
         return out
 
     @staticmethod
-    def _estimate_accel(speed_cal: np.ndarray, time_diff: np.ndarray,
-                        gap_secs: float) -> np.ndarray:
-        n = len(speed_cal)
-        out = np.full(n, NAN)
-        for i in range(1, n):
-            td = time_diff[i]
-            if np.isnan(td) or td <= 0 or td > gap_secs:
-                continue
-            if np.isnan(speed_cal[i]) or np.isnan(speed_cal[i - 1]):
-                continue
-            out[i] = (speed_cal[i] - speed_cal[i - 1]) / td
-        return out
+    def _prefer_measured(measured: np.ndarray, calculated: np.ndarray) -> np.ndarray:
+        """Element-wise: the measured value where present, else the
+        calculated (reconstructed) value.
 
-    @staticmethod
-    def _estimate_jerk(accel_cal: np.ndarray, time_diff: np.ndarray,
-                       gap_secs: float) -> np.ndarray:
-        n = len(accel_cal)
-        out = np.full(n, NAN)
-        for i in range(1, n):
-            td = time_diff[i]
-            if np.isnan(td) or td <= 0 or td > gap_secs:
-                continue
-            if np.isnan(accel_cal[i]) or np.isnan(accel_cal[i - 1]):
-                continue
-            out[i] = (accel_cal[i] - accel_cal[i - 1]) / td
-        return out
+        Used so acceleration is derived from real speed readings wherever
+        they exist, and jerk from real acceleration readings wherever they
+        exist — falling back to the reconstructed signal only where the
+        measured one is missing at that row, or the column is absent from
+        the dataset entirely (in which case `measured` is all-NaN and
+        every element falls back to `calculated`).
+        """
+        return np.where(np.isnan(measured), calculated, measured)
 
     @staticmethod
     def _error(original: np.ndarray, computed: np.ndarray) -> np.ndarray:
