@@ -1,0 +1,419 @@
+"""Right-click "Filter > Spline Fitting > On <Base>" preview window (Figure 4).
+
+Opens for exactly one (event_id, veh_id) trajectory. Lets the user try
+different smoothness (s) / degree (k) values and see the resulting spline
+fit overlaid on the original measured data, plus a live goodness-of-fit
+readout for whichever kinematic is currently displayed. Nothing here is
+ever written to the database — this dialog is parameter exploration only,
+matching the SplineReport's "no output to be saved" instruction for the
+right-click pathway.
+
+Synchronous by design: a single trajectory's worth of points fits well
+within the time budget of a direct call, so this dialog does not use
+BaseAnalysisDialog / BaseAnalysisWorker at all (no progress bar, no
+QThread). Re-fitting only happens when the user clicks "Update Plot" —
+not on every keystroke in the s/k controls.
+
+Precondition (enforced by the caller, plot/custom_view_box.py)
+----------------------------------------------------------------
+The caller is expected to verify, before constructing this dialog, that
+the trajectory has at least min(allowed_k_options(fitting_base)) + 1
+valid points for fitting_base — mirroring SplineReport's
+RightClickSplineFitting Step 2, which performs that check immediately
+after the menu selection and before the testing window ever opens. This
+class defensively re-checks the same condition in __init__ as a fallback
+and closes itself with a message if it's violated, but does not duplicate
+the caller's UI-level menu-disabling responsibility (greying out "Filter"
+with a tooltip — see custom_view_box.py).
+
+Fitting base is fixed for the dialog's lifetime (shown as a read-only
+label, Figure 4's "Fitting Base: {fitting_base}") — only the display
+variable, s, and k are adjustable here.
+
+Measured data is read with is_spline_imputed excluded (where that column
+exists): this window is about testing fit quality against real
+measurements, not against rows synthesized by a previous "fill missing
+rows" run.
+"""
+
+import logging
+from typing import Dict, Optional
+
+import numpy as np
+import pyqtgraph as pg
+from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtWidgets import (
+    QButtonGroup, QCheckBox, QComboBox, QDialog, QDoubleSpinBox,
+    QFormLayout, QGroupBox, QHBoxLayout, QLabel, QMessageBox,
+    QPushButton, QRadioButton, QVBoxLayout,
+)
+from superqt import QLabeledRangeSlider
+
+from .spline_comp import (
+    BASE_LABELS, KINEMATICS, FITTING_BASES, allowed_k_options,
+    apply_spline_fit, compute_error_metrics,
+)
+
+logger = logging.getLogger(__name__)
+
+_KINEMATIC_LABELS = {
+    "position":     "Position (m)",
+    "speed":        "Speed (m/s)",
+    "acceleration": "Acceleration (m/s²)",
+    "jerk":         "Jerk (m/s³)",
+}
+
+_MIN_POINTS_MESSAGE = (
+    "Not enough valid data points for a spline fit on this trajectory.\n\n"
+    "At least k+1 non-missing values are required for the smallest "
+    "selectable spline degree."
+)
+
+
+class SplineTestingDialog(QDialog):
+    """Right-click spline fitting preview/testing window — never writes to the DB."""
+
+    def __init__(self, parent, db_connection, event_id: int, veh_id: int,
+                 fitting_base: str, series_color: str = "#1f77b4"):
+        super().__init__(parent)
+        if fitting_base not in FITTING_BASES:
+            raise ValueError(f"Unknown fitting_base: {fitting_base!r}")
+
+        self._db_connection = db_connection
+        self._event_id = event_id
+        self._veh_id = veh_id
+        self._fitting_base = fitting_base
+        self._series_color = series_color
+
+        self._time: np.ndarray = np.array([], dtype=np.float64)
+        self._measured: Dict[str, np.ndarray] = {k: np.array([]) for k in KINEMATICS}
+        self._time_valid: np.ndarray = np.array([], dtype=np.float64)
+        self._base_valid: np.ndarray = np.array([], dtype=np.float64)
+
+        self._kinematic_result: Optional[Dict[str, np.ndarray]] = None
+        self._last_s: float = 0.0
+
+        self.setWindowTitle(f"Spline Fitting Test — Event {event_id}, Vehicle {veh_id}")
+        self.setModal(False)
+
+        self._load_data()
+
+        min_required = min(allowed_k_options(fitting_base)) + 1
+        if self._time_valid.size < min_required:
+            QMessageBox.warning(self.parent(), "Spline Fitting", _MIN_POINTS_MESSAGE)
+            QTimer.singleShot(0, self.close)
+            return
+
+        self._setup_ui()
+        self._reset_y_slider_range(self._fitting_base)
+        self._size_and_center_dialog()
+        self._draw_plot()                # original data only — no fit yet
+        self._update_fit_status_label()
+
+    # ── Data loading (read-only — never writes anything back) ───────────
+
+    def _load_data(self):
+        from comp.base_comp import BaseComp
+        cols = BaseComp._events_columns(self._db_connection)
+        has_speed = "veh_speed" in cols
+        has_accel = "veh_accel" in cols
+        has_jerk  = "veh_jerk"  in cols
+        has_flag  = "is_spline_imputed" in cols
+
+        select_cols = ["veh_time", "veh_dist_trav"]
+        if has_speed:
+            select_cols.append("veh_speed")
+        if has_accel:
+            select_cols.append("veh_accel")
+        if has_jerk:
+            select_cols.append("veh_jerk")
+
+        where_extra = (
+            " AND (is_spline_imputed = 0 OR is_spline_imputed IS NULL)"
+            if has_flag else ""
+        )
+        sql = (
+            f"SELECT {', '.join(select_cols)} FROM events "
+            f"WHERE event_id = ? AND veh_id = ?{where_extra} "
+            f"ORDER BY veh_time"
+        )
+        cursor = self._db_connection.cursor()
+        cursor.execute(sql, (self._event_id, self._veh_id))
+        rows = cursor.fetchall()
+        n = len(rows)
+
+        col_idx = {name: i for i, name in enumerate(select_cols)}
+
+        def column(name: str) -> np.ndarray:
+            if name not in col_idx:
+                return np.full(n, np.nan)
+            i = col_idx[name]
+            return np.array(
+                [r[i] if r[i] is not None else np.nan for r in rows],
+                dtype=np.float64,
+            )
+
+        self._time = column("veh_time")
+        self._measured = {
+            "position":     column("veh_dist_trav"),
+            "speed":        column("veh_speed"),
+            "acceleration": column("veh_accel"),
+            "jerk":         column("veh_jerk"),
+        }
+
+        base_array = self._measured[self._fitting_base]
+        valid_mask = ~np.isnan(base_array)
+        self._time_valid = self._time[valid_mask]
+        self._base_valid = base_array[valid_mask]
+
+        # Defensive de-dup, matching SplineComp.comp_series.
+        if self._time_valid.size >= 2 and np.any(np.diff(self._time_valid) <= 0):
+            _, uniq_idx = np.unique(self._time_valid, return_index=True)
+            uniq_idx = np.sort(uniq_idx)
+            self._time_valid = self._time_valid[uniq_idx]
+            self._base_valid = self._base_valid[uniq_idx]
+
+    # ── UI ────────────────────────────────────────────────────────────────
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+
+        info_label = QLabel(f"Fitting Base: {BASE_LABELS[self._fitting_base]}")
+        font = info_label.font()
+        font.setBold(True)
+        info_label.setFont(font)
+        layout.addWidget(info_label)
+
+        body = QHBoxLayout()
+
+        # ── Left: plot + view-range sliders ──
+        plot_col = QVBoxLayout()
+        self._plot = pg.PlotWidget()
+        self._plot.setLabel("bottom", "Time (s)")
+        self._plot.showGrid(x=True, y=True, alpha=0.2)
+        self._legend = self._plot.addLegend()
+        plot_col.addWidget(self._plot, stretch=1)
+
+        t_min = float(self._time.min()) if self._time.size else 0.0
+        t_max = float(self._time.max()) if self._time.size else 1.0
+        self._time_slider = QLabeledRangeSlider(Qt.Orientation.Horizontal)
+        self._time_slider.setRange(t_min, t_max)
+        self._time_slider.setValue((t_min, t_max))
+        self._time_slider.valueChanged.connect(self._on_view_slider_changed)
+        plot_col.addWidget(QLabel("Time Range:"))
+        plot_col.addWidget(self._time_slider)
+
+        self._y_slider = QLabeledRangeSlider(Qt.Orientation.Horizontal)
+        self._y_slider.valueChanged.connect(self._on_view_slider_changed)
+        plot_col.addWidget(QLabel("Value Range:"))
+        plot_col.addWidget(self._y_slider)
+
+        body.addLayout(plot_col, stretch=3)
+
+        # ── Right: controls ──
+        control_col = QVBoxLayout()
+
+        display_group = QGroupBox("Display Variable")
+        display_form = QVBoxLayout(display_group)
+        self._display_buttons = QButtonGroup(self)
+        for key in KINEMATICS:
+            rb = QRadioButton(BASE_LABELS[key])
+            rb.setProperty("kinematic_key", key)
+            if key == self._fitting_base:
+                rb.setChecked(True)
+            self._display_buttons.addButton(rb)
+            display_form.addWidget(rb)
+        self._display_buttons.buttonClicked.connect(self._on_display_variable_changed)
+        control_col.addWidget(display_group)
+
+        param_form = QFormLayout()
+        self._s_spin = QDoubleSpinBox()
+        self._s_spin.setRange(0.0, 1_000_000.0)
+        self._s_spin.setDecimals(4)
+        self._s_spin.setValue(0.0)
+        param_form.addRow("Smoothness (s):", self._s_spin)
+
+        self._k_combo = QComboBox()
+        for k in allowed_k_options(self._fitting_base):
+            self._k_combo.addItem(str(k), k)
+        param_form.addRow("Degree (k):", self._k_combo)
+        control_col.addLayout(param_form)
+
+        self._show_original_check = QCheckBox("Show Original Data")
+        self._show_original_check.setChecked(True)
+        self._show_original_check.stateChanged.connect(self._draw_plot)
+        control_col.addWidget(self._show_original_check)
+
+        self._show_filtered_check = QCheckBox("Show Filtered Data")
+        self._show_filtered_check.setChecked(True)
+        self._show_filtered_check.stateChanged.connect(self._draw_plot)
+        control_col.addWidget(self._show_filtered_check)
+
+        self._update_btn = QPushButton("Update Plot")
+        self._update_btn.clicked.connect(self._on_update_plot)
+        control_col.addWidget(self._update_btn)
+
+        self._fit_status_label = QLabel("No spline fit applied yet.")
+        self._fit_status_label.setWordWrap(True)
+        control_col.addWidget(self._fit_status_label)
+
+        control_col.addStretch()
+
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self.close)
+        control_col.addWidget(close_btn)
+
+        body.addLayout(control_col, stretch=1)
+        layout.addLayout(body)
+
+    def _size_and_center_dialog(self):
+        container = self.parent()
+        if container is not None and container.parent() is not None:
+            container = container.parent()
+        if container is not None:
+            parent_geom = container.frameGeometry()
+            self.resize(int(parent_geom.width() * 0.7), int(parent_geom.height() * 0.7))
+            self_geom = self.frameGeometry()
+            self_geom.moveCenter(parent_geom.center())
+            self.move(self_geom.topLeft())
+        else:
+            self.resize(900, 650)
+
+    # ── Display-variable / slider helpers ────────────────────────────────
+
+    def _current_display_key(self) -> str:
+        btn = self._display_buttons.checkedButton()
+        return btn.property("kinematic_key") if btn else self._fitting_base
+
+    def _reset_y_slider_range(self, display_key: str):
+        arrays = [self._measured[display_key]]
+        if self._kinematic_result is not None:
+            arrays.append(self._kinematic_result[f"calc_{display_key}"])
+        combined = np.concatenate(arrays)
+        combined = combined[~np.isnan(combined)]
+        if combined.size == 0:
+            y_min, y_max = -1.0, 1.0
+        else:
+            y_min, y_max = float(np.min(combined)), float(np.max(combined))
+            if y_min == y_max:
+                y_min -= 1.0
+                y_max += 1.0
+        self._y_slider.blockSignals(True)
+        self._y_slider.setRange(y_min, y_max)
+        self._y_slider.setValue((y_min, y_max))
+        self._y_slider.blockSignals(False)
+
+    def _on_view_slider_changed(self, *_):
+        t_lo, t_hi = self._time_slider.value()
+        y_lo, y_hi = self._y_slider.value()
+        self._plot.getViewBox().setRange(xRange=[t_lo, t_hi], yRange=[y_lo, y_hi], padding=0)
+
+    def _on_display_variable_changed(self, _btn):
+        self._reset_y_slider_range(self._current_display_key())
+        self._draw_plot()
+        self._update_fit_status_label()
+
+    # ── Fit / plot ────────────────────────────────────────────────────────
+
+    def _on_update_plot(self):
+        s = self._s_spin.value()
+        k = self._k_combo.currentData()
+        if k is None:
+            return
+
+        result = apply_spline_fit(
+            self._time_valid, self._base_valid, self._fitting_base,
+            s=s, k=k, target_timestamps=self._time,
+        )
+        if result is None:
+            QMessageBox.warning(
+                self, "Spline Fitting",
+                "Spline fit failed for the current parameters (insufficient "
+                "valid points, duplicate timestamps, or an internal error). "
+                "Try adjusting s or k.")
+            return   # keep previous kinematic_result / plot, per SplineReport
+
+        self._kinematic_result = result
+        self._last_s = s
+        self._draw_plot()
+        self._update_fit_status_label()
+
+    @staticmethod
+    def _split_segments(time_array: np.ndarray, value_array: np.ndarray):
+        """Yield (t_seg, v_seg) runs of contiguous non-NaN values, so plotted
+        lines break at gaps instead of connecting across missing data."""
+        valid = ~np.isnan(value_array)
+        if not np.any(valid):
+            return
+        edges = np.diff(valid.astype(np.int8))
+        starts = list(np.where(edges == 1)[0] + 1)
+        ends = list(np.where(edges == -1)[0] + 1)
+        if valid[0]:
+            starts.insert(0, 0)
+        if valid[-1]:
+            ends.append(len(valid))
+        for s_idx, e_idx in zip(starts, ends):
+            yield time_array[s_idx:e_idx], value_array[s_idx:e_idx]
+
+    def _draw_plot(self, *_):
+        self._plot.clear()
+        self._legend.clear()
+
+        display_key = self._current_display_key()
+        self._plot.setLabel("left", _KINEMATIC_LABELS[display_key])
+
+        if self._show_original_check.isChecked():
+            measured = self._measured[display_key]
+            first = True
+            for t_seg, v_seg in self._split_segments(self._time, measured):
+                item = pg.PlotDataItem(
+                    x=t_seg, y=v_seg,
+                    pen=pg.mkPen(color=self._series_color, width=2),
+                )
+                self._plot.addItem(item)
+                if first:
+                    self._legend.addItem(item, "Original Data")
+                    first = False
+
+        if self._show_filtered_check.isChecked() and self._kinematic_result is not None:
+            calc = self._kinematic_result[f"calc_{display_key}"]
+            first = True
+            for t_seg, v_seg in self._split_segments(self._time, calc):
+                item = pg.PlotDataItem(
+                    x=t_seg, y=v_seg,
+                    pen=pg.mkPen(color=self._series_color, width=2,
+                                 style=Qt.PenStyle.DashLine),
+                )
+                self._plot.addItem(item)
+                if first:
+                    self._legend.addItem(item, f"Spline Fit (s = {self._last_s})")
+                    first = False
+
+        self._on_view_slider_changed()
+
+    # ── Live goodness-of-fit readout ─────────────────────────────────────
+
+    def _update_fit_status_label(self):
+        display_key = self._current_display_key()
+        if self._kinematic_result is None:
+            self._fit_status_label.setText("No spline fit applied yet.")
+            return
+
+        measured = self._measured[display_key]
+        calculated = self._kinematic_result[f"calc_{display_key}"]
+        rmse, mae, max_err, min_err, mean_err = compute_error_metrics(measured, calculated)
+
+        label = BASE_LABELS[display_key]
+        role = "fitted base" if display_key == self._fitting_base else "derived"
+
+        if np.isnan(rmse):
+            self._fit_status_label.setText(
+                f"{label} ({role}): no overlapping measured points to compare.")
+            return
+
+        n_compared = int(np.sum(~np.isnan(measured) & ~np.isnan(calculated)))
+        self._fit_status_label.setText(
+            f"{label} ({role}) vs. measured — n={n_compared}\n"
+            f"RMSE: {rmse:.4f}   MAE: {mae:.4f}\n"
+            f"Max: {max_err:.4f}   Min: {min_err:.4f}   Mean: {mean_err:.4f}"
+        )
