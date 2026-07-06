@@ -37,7 +37,7 @@ class EventSelectionDialog(QDialog):
     def _setup_ui(self):
         layout = QVBoxLayout(self)
 
-        layout.addWidget(QLabel("Select one or more events to include in the export:"))
+        layout.addWidget(QLabel("Select one or more events:"))
 
         self._list = QListWidget()
         self._list.setSelectionMode(QListWidget.SelectionMode.MultiSelection)

@@ -470,7 +470,7 @@ class ShockwaveModeHandler(InteractionModeHandler):
     
         pen = pg.mkPen(color=color, width=3)
         pen.setStyle(Qt.PenStyle.CustomDashLine)
-        pen.setDashPattern([10, 8])   # longer dash, longer gap than the old DashLine default
+        pen.setDashPattern([4, 4])   # longer dash, longer gap than the old DashLine default
         line = pg.PlotDataItem(t_range, d_range, pen=pen)
         widget._scatter_plot.addItem(line)
     

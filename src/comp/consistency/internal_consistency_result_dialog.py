@@ -351,15 +351,17 @@ class InternalConsistencyResultDialog(QDialog):
             # Original — solid line
             if not np.all(np.isnan(orig)):
                 c = pw.plot(t, orig,
-                            pen=pg.mkPen(color=color, width=1.5),
+                            pen=pg.mkPen(color=color, width=4),
                             name=orig_attr.replace("_", " "))
                 curves.append(c)
 
             # Reconstructed — dashed, same colour
             if not np.all(np.isnan(cal)):
+                pen = pg.mkPen(color=color, width=4)
+                pen.setStyle(Qt.PenStyle.CustomDashLine)
+                pen.setDashPattern([4, 4])   # longer dash, longer gap than the old DashLine default
                 c = pw.plot(t, cal,
-                            pen=pg.mkPen(color=color, width=1.5,
-                                         style=Qt.PenStyle.DashLine),
+                            pen=pen,
                             name=cal_attr.replace("_", " "))
                 curves.append(c)
 

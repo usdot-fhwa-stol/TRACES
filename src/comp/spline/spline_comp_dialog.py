@@ -45,6 +45,13 @@ _INSERT_COLUMNS = [
     "is_spline_imputed",
 ]
 
+_MEASURED_COL_LABEL: dict = {
+    "position":     "veh_dist_trav",
+    "speed":        "veh_speed",
+    "acceleration": "veh_accel",
+    "jerk":         "veh_jerk",
+}
+
 
 class SplineCompDialog(BaseAnalysisDialog):
     """Spline Fitting parameter dialog — top-level only.
@@ -173,7 +180,12 @@ class SplineCompDialog(BaseAnalysisDialog):
         for i in range(self._base_combo.count()):
             key = self._base_combo.itemData(i)
             enabled = availability.get(key, False)
-            self._base_combo.model().item(i).setEnabled(enabled)
+            item = self._base_combo.model().item(i)
+            item.setEnabled(enabled)
+            if not enabled:
+                item.setToolTip(
+                    f"required column ({_MEASURED_COL_LABEL[key]}) "
+                    f"is absent from this dataset")
             any_enabled = any_enabled or enabled
 
         selected = False

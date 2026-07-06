@@ -16,6 +16,7 @@ class MainWindow(QMainWindow):
         _recent_menu (QMenu): Submenu for recent files.
         _export_menu (QMenu): Submenu for export options.
         _mode_menu (QMenu): Top-level menu used by plots to set interaction mode.
+        _data_menu (QMenu): Top-level menu used by plots to perform data manipulation.
         _db_connection (sqlite3.Connection): Current database connection.
         _plot_widget (TimeSpacePlotWidget): Plot widget for displaying trajectory data.
         _selected_export_columns (list): List of selected column names for export.
@@ -28,6 +29,7 @@ class MainWindow(QMainWindow):
         self._recent_menu = None
         self._export_menu = None
         self._mode_menu = None
+        self._data_menu = None
         self._db_connection = None
         self._plot_widget = None
         self._import_dialog = None
@@ -124,6 +126,16 @@ class MainWindow(QMainWindow):
         log_action.triggered.connect(self._show_log_viewer)
         view_menu.addAction(log_action)
 
+        # Data menu
+        self._data_menu = QMenu("&Data", self)
+        menu_bar.addMenu(self._data_menu)
+        self._data_menu.menuAction().setVisible(False)  # hidden until DB is open
+
+        spline_fitting_action = QAction("&Spline Fitting", self)
+        spline_fitting_action.triggered.connect(self._run_spline_fitting)
+        self._data_menu.addAction(spline_fitting_action)
+
+        # Analysis menu
         self._analysis_menu = QMenu("&Analysis", self)
         menu_bar.addMenu(self._analysis_menu)
         self._analysis_menu.menuAction().setVisible(False)  # hidden until DB is open
@@ -352,6 +364,7 @@ class MainWindow(QMainWindow):
             if result == QDialog.DialogCode.Accepted:
                 # Plot widget will be created in _create_plot_widget callback
                 self._export_menu.setEnabled(True)
+                self._data_menu.menuAction().setVisible(True)
                 self._analysis_menu.menuAction().setVisible(True)
             else:
                 # User cancelled settings dialog, close database and reset window
@@ -382,6 +395,7 @@ class MainWindow(QMainWindow):
             if result == QDialog.DialogCode.Accepted:
                 # Plot widget will be created in _create_plot_widget callback
                 self._export_menu.setEnabled(True)
+                self._data_menu.menuAction().setVisible(True)
                 self._analysis_menu.menuAction().setVisible(True)
             else:
                 # User cancelled settings dialog, close database and reset window
@@ -425,6 +439,7 @@ class MainWindow(QMainWindow):
             if result == QDialog.DialogCode.Accepted:
                 # Plot widget will be created in _create_plot_widget callback
                 self._export_menu.setEnabled(True)
+                self._data_menu.menuAction().setVisible(True)
                 self._analysis_menu.menuAction().setVisible(True)
             else:
                 # User cancelled settings dialog, close database and reset window
@@ -452,6 +467,7 @@ class MainWindow(QMainWindow):
         
         # Disable export menu
         self._export_menu.setEnabled(False)
+        self._data_menu.menuAction().setVisible(False)
         self._analysis_menu.menuAction().setVisible(False)
         
         # Reset plot mode menu
@@ -629,6 +645,24 @@ class MainWindow(QMainWindow):
 
         self._save_settings()
         super().closeEvent(event)
+
+    def _run_spline_fitting(self):
+        """Handle the Data > Spline Fitting menu action."""
+        if not self._db_connection:
+            QMessageBox.warning(self, "Warning", "No database is currently open.")
+            return
+    
+        from .event_selection_dialog import EventSelectionDialog
+        sel_dlg = EventSelectionDialog(self, self._db_connection)
+        if sel_dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        event_ids = sel_dlg.selected_event_ids
+        if not event_ids:
+            return
+    
+        from comp.spline import SplineCompDialog
+        dlg = SplineCompDialog(self, self._db_connection, event_ids=event_ids)
+        dlg.exec()
 
     def _run_jerk_analysis(self):
         from comp.jerk import JerkCompDialog

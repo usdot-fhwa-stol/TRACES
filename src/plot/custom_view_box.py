@@ -19,6 +19,7 @@ import pyqtgraph as pg
 logger = logging.getLogger(__name__)
 _NOT_IMPLEMENTED_TOOLTIP = "Not yet implemented."
 _NO_SELECTION_TOOLTIP    = "Select one or more vehicles to enable."
+_SINGLE_SELECTION_TOOLTIP = "Filtering is only available when one trajectory is selected."
 
 class CustomViewBox(pg.ViewBox):
     """Custom ViewBox that handles selection box drawing when Shift is held and custom context menus.
@@ -64,6 +65,9 @@ class CustomViewBox(pg.ViewBox):
             {'filter': 'ASO', 'label': 'Plots', 'submenu': [
                 {'filter': 'SO', 'label': 'Time-Speed Plot', 'callback': self._show_time_speed_dialog},
                 {'filter': 'SO', 'label': 'Time-Accel Plot', 'callback': self._show_time_accel_dialog},
+            ]},
+            {'filter': 'ASO', 'label': 'Filter', 'submenu': [
+                {'single_only': True, 'label': 'Spline Fitting', 'callback': self._open_spline_testing_dialog},
             ]},
             {'filter': 'ASO', 'label': 'Noise Analysis',     'submenu': [
                 {'label': 'Jerk Analysis',          'callback': self._run_jerk_analysis_rightclick},
@@ -358,38 +362,43 @@ class CustomViewBox(pg.ViewBox):
         context_menu.addSeparator()
 
         # Add menu items based on registry and current context.
+        vehicle_count = len(self._get_target_vehicle_ids())
         for item in self._context_menu_registry:
-            if menu_type not in item['filter']:
-                continue
-            if 'submenu' in item:
-                sub = QMenu(item['label'], context_menu)
-                sub.setToolTipsVisible(True)
-                for sub_item in item['submenu']:
-                    sub_action = QAction(sub_item['label'], sub)
-                    sub_filter = sub_item.get('filter')
-                    context_ok = sub_filter is None or menu_type in sub_filter
-                    if sub_item.get('callback') is None:
-                        sub_action.setEnabled(False)
-                        sub_action.setToolTip(sub_item.get('disabled_tooltip', _NOT_IMPLEMENTED_TOOLTIP))
-                    elif not context_ok:
-                        sub_action.setEnabled(False)
-                        sub_action.setToolTip(sub_item.get('disabled_tooltip', _NO_SELECTION_TOOLTIP))
+                    if menu_type not in item['filter']:
+                        continue
+                    if 'submenu' in item:
+                        sub = QMenu(item['label'], context_menu)
+                        sub.setToolTipsVisible(True)
+                        for sub_item in item['submenu']:
+                            sub_action = QAction(sub_item['label'], sub)
+                            sub_filter = sub_item.get('filter')
+                            context_ok = sub_filter is None or menu_type in sub_filter
+                            single_ok = not sub_item.get('single_only') or vehicle_count == 1
+                            if sub_item.get('callback') is None:
+                                sub_action.setEnabled(False)
+                                sub_action.setToolTip(sub_item.get('disabled_tooltip', _NOT_IMPLEMENTED_TOOLTIP))
+                            elif not context_ok:
+                                sub_action.setEnabled(False)
+                                sub_action.setToolTip(sub_item.get('disabled_tooltip', _NO_SELECTION_TOOLTIP))
+                            elif not single_ok:
+                                sub_action.setEnabled(False)
+                                sub_action.setToolTip(sub_item.get('disabled_tooltip', _SINGLE_SELECTION_TOOLTIP))
+                            else:
+                                sub_action.triggered.connect(
+                                    lambda checked, cb=sub_item['callback']: cb()
+                                )
+                            sub.addAction(sub_action)
+        
+                        context_menu.addMenu(sub)
                     else:
-                        sub_action.triggered.connect(
-                            lambda checked, cb=sub_item['callback']: cb()
-                        )
-                    sub.addAction(sub_action)
-
-                context_menu.addMenu(sub)
-            else:
-                action = QAction(item['label'], context_menu)
-                if item.get('callback') is None:
-                    action.setEnabled(False)
-                else:
-                    action.triggered.connect(
-                        lambda checked, cb=item['callback']: cb()
-                    )
-                context_menu.addAction(action)
+                        action = QAction(item['label'], context_menu)
+                        if item.get('callback') is None:
+                            action.setEnabled(False)
+                        else:
+                            action.triggered.connect(
+                                lambda checked, cb=item['callback']: cb()
+                            )
+                        context_menu.addAction(action)
         
         # Show context menu at cursor position
         global_pos = self.parent_widget._scatter_plot.mapToGlobal(
@@ -705,3 +714,34 @@ class CustomViewBox(pg.ViewBox):
             veh_ids=veh_ids,
         )
         dlg.exec()
+
+    def _open_spline_testing_dialog(self):
+        """Open the right-click spline fitting preview window (Filter > Spline
+        Fitting). Fitting base, s, and k are all chosen inside the dialog via
+        its own controls — nothing here depends on which menu path was used.
+        """
+        if not self.parent_widget._db_connection or self.parent_widget._current_event_id is None:
+            logger.warning("No database connection or event ID available for spline fitting")
+            return
+    
+        target_veh_ids = self._get_target_vehicle_ids()
+        if len(target_veh_ids) != 1:
+            logger.warning("Spline Fitting requested without exactly one trajectory in context")
+            return
+        veh_id = target_veh_ids[0]
+    
+        veh_ids, series_colors, _ = self._get_vehicle_data_for_context()
+        try:
+            color = series_colors[veh_ids.index(veh_id)]
+        except (ValueError, IndexError):
+            color = '#1f77b4'
+    
+        from comp.spline import SplineTestingDialog
+        dialog = SplineTestingDialog(
+            self.parent_widget,
+            self.parent_widget._db_connection,
+            self.parent_widget._current_event_id,
+            veh_id,
+        )
+        dialog.show()
+        logger.debug(f"Opened spline testing dialog for vehicle {veh_id}")
