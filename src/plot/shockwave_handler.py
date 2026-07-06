@@ -495,7 +495,7 @@ class ShockwaveModeHandler(InteractionModeHandler):
         from PyQt6.QtWidgets import QMessageBox
         reply = QMessageBox.question(
             widget, "Shockwave Mode",
-            "Shockwave data will be lost, save progress?",
+            "Shockwave data will be lost, save shockwaves?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.Yes,
         )

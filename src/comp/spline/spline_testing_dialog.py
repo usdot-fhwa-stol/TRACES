@@ -46,11 +46,10 @@ from typing import Dict, Optional
 import numpy as np
 import pyqtgraph as pg
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QPalette
 from PyQt6.QtWidgets import (
     QButtonGroup, QCheckBox, QComboBox, QDialog, QDoubleSpinBox,
     QFormLayout, QGroupBox, QHBoxLayout, QLabel, QMessageBox,
-    QPushButton, QRadioButton, QVBoxLayout, QApplication, 
+    QPushButton, QRadioButton, QVBoxLayout,
 )
 
 from .spline_comp import (
@@ -82,10 +81,6 @@ class SplineTestingDialog(QDialog):
         self._db_connection = db_connection
         self._event_id = event_id
         self._veh_id = veh_id
-
-        palette = QApplication.instance().palette()
-        bg_lightness = palette.color(QPalette.ColorRole.Window).lightness()
-        self._plot_color = 'w' if bg_lightness < 128 else 'k'
 
         self._time: np.ndarray = np.array([], dtype=np.float64)
         self._measured: Dict[str, np.ndarray] = {k: np.array([]) for k in KINEMATICS}
@@ -208,6 +203,7 @@ class SplineTestingDialog(QDialog):
         # ── Left: plot ──
         plot_col = QVBoxLayout()
         self._plot = pg.PlotWidget()
+        self._plot.setBackground('w')
         self._plot.setLabel("bottom", "Time (s)")
         self._plot.showGrid(x=True, y=True, alpha=0.2)
         self._legend = self._plot.addLegend()
@@ -389,7 +385,7 @@ class SplineTestingDialog(QDialog):
             for t_seg, v_seg in self._split_segments(self._time, measured):
                 item = pg.PlotDataItem(
                     x=t_seg, y=v_seg,
-                    pen=pg.mkPen(color=self._plot_color, width=4),
+                    pen=pg.mkPen(color='k', width=4),
                 )
                 self._plot.addItem(item)
                 if first:
@@ -397,7 +393,7 @@ class SplineTestingDialog(QDialog):
                     first = False
 
         if self._show_filtered_check.isChecked() and self._kinematic_result is not None:
-            pen = pg.mkPen(color=self._plot_color, width=4)
+            pen = pg.mkPen(color='k', width=4)
             pen.setStyle(Qt.PenStyle.CustomDashLine)
             pen.setDashPattern([4, 4])   # longer dash, longer gap than the old DashLine default
 
