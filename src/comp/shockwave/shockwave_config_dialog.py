@@ -1,3 +1,4 @@
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QDialog, QHBoxLayout, QFormLayout,
     QPushButton, QComboBox, QDoubleSpinBox
@@ -28,12 +29,30 @@ class ShockwaveConfigDialog(QDialog):
         ("Automatic",       "automatic", False),
     ]
 
-    def __init__(self, parent):
+    def __init__(self, parent, db_connection=None, event_id=None):
         super().__init__(parent)
+        self._db_connection = db_connection
+        self._event_id      = event_id
         self.setWindowTitle("Shockwave Analysis — Configuration")
         self.setModal(True)
         self._setup_ui()
         self._on_method_changed()   # initialise Vicinity enabled state
+
+    def _spline_data_available(self) -> bool:
+        """True if calc_position exists and has at least one non-null
+        value for the event currently shown in the time-space plot."""
+        if self._db_connection is None or self._event_id is None:
+            return False
+        cols = {row[1] for row in
+                self._db_connection.execute("PRAGMA table_info(events)").fetchall()}
+        if "calc_position" not in cols:
+            return False
+        row = self._db_connection.execute(
+            "SELECT EXISTS(SELECT 1 FROM events "
+            "WHERE event_id = ? AND calc_position IS NOT NULL)",
+            (self._event_id,),
+        ).fetchone()
+        return bool(row[0])
 
     def _setup_ui(self):
         layout = QFormLayout(self)
@@ -74,6 +93,14 @@ class ShockwaveConfigDialog(QDialog):
         self._data_combo.addItem("Original data", "original")
         self._data_combo.addItem("Filtered data from spline fitting", "spline")
         self._data_combo.model().item(1).setEnabled(False)
+        spline_ok = self._spline_data_available()
+        self._data_combo.model().item(1).setEnabled(spline_ok)
+        if not spline_ok:
+            self._data_combo.setItemData(
+                1,
+                "No spline-fit position data are available for this event",
+                Qt.ItemDataRole.ToolTipRole,
+            )
         layout.addRow("Data selection:", self._data_combo)
 
         # OK / Cancel
@@ -105,3 +132,6 @@ class ShockwaveConfigDialog(QDialog):
 
     def selected_vicinity(self) -> float:
         return self._vicinity_spin.value()
+
+    def selected_data_mode(self) -> str:
+        return self._data_combo.currentData()

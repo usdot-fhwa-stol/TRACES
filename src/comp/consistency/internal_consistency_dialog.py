@@ -119,14 +119,18 @@ class InternalConsistencyDialog(BaseAnalysisDialog):
 
     # ── Worker callable ───────────────────────────────────────────────────
 
-    def _run_for_event(self, conn, event_id, veh_ids, params):
-        """Purely computational — no DB writes.  Schema ALTER happens first."""
+    def _run_for_event(self, conn, event_id, veh_ids, params, progress_callback=None):
+        """Purely computational — no DB writes. Schema ALTER happens first."""
         from .internal_consistency_comp import InternalConsistencyComp
         InternalConsistencyComp.ensure_schema(conn)
         comp = InternalConsistencyComp()
         if veh_ids is not None:
-            return comp.comp_series(conn, event_id, veh_ids, options=params)
-        return comp.comp_event(conn, event_id, options=params)
+            results = comp.comp_series(conn, event_id, veh_ids, options=params)
+        else:
+            results = comp.comp_event(conn, event_id, options=params)
+        if progress_callback is not None:
+            progress_callback()
+        return results
 
     # ── Result handling ───────────────────────────────────────────────────
 

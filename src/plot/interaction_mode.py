@@ -101,3 +101,10 @@ class InteractionModeHandler:
         Only meaningful for Automatic mode; base no-op is correct for all
         Phase 1 and Phase 2 handlers."""
         pass
+
+    def wants_spline_position_data(self, widget) -> bool:
+        """Return True if this mode wants calc_position substituted for
+        veh_dist_trav the next time plot data is (re)loaded. Only
+        meaningful for Shockwave modes configured to use spline-fit data;
+        base no-op returns False for Select and Gap Headway."""
+        return False

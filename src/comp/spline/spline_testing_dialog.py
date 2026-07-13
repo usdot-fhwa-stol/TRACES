@@ -53,8 +53,8 @@ from PyQt6.QtWidgets import (
 )
 
 from .spline_comp import (
-    BASE_LABELS, KINEMATICS, FITTING_BASES, allowed_k_options,
-    apply_spline_fit, compute_error_metrics,
+    BASE_LABELS, KINEMATICS, FITTING_BASES, _ORDER, allowed_k_options,
+    apply_spline_fit, compute_error_metrics, nearest_valid_ic,
 )
 
 logger = logging.getLogger(__name__)
@@ -333,27 +333,39 @@ class SplineTestingDialog(QDialog):
     # ── Fit / plot ────────────────────────────────────────────────────────
 
     def _on_update_plot(self):
-        s = self._s_spin.value()
-        k = self._k_combo.currentData()
-        if k is None:
-            return
-
-        result = apply_spline_fit(
-            self._time_valid, self._base_valid, self._fitting_base,
-            s=s, k=k, target_timestamps=self._time,
-        )
-        if result is None:
-            QMessageBox.warning(
-                self, "Spline Fitting",
-                "Spline fit failed for the current parameters (insufficient "
-                "valid points, duplicate timestamps, or an internal error). "
-                "Try adjusting s or k.")
-            return   # keep previous kinematic_result / plot, per SplineReport
-
-        self._kinematic_result = result
-        self._last_s = s
-        self._draw_plot(auto_range=True)
-        self._update_fit_status_label()
+            s = self._s_spin.value()
+            k = self._k_combo.currentData()
+            if k is None:
+                return
+    
+            base_order = _ORDER[self._fitting_base]
+            initial_conditions = {
+                name: ic
+                for name in ("position", "speed", "acceleration")
+                if _ORDER[name] < base_order
+                for ic in [nearest_valid_ic(
+                    self._time, self._measured[name], self._time_valid[0]
+                )]
+                if ic is not None
+            }
+    
+            result = apply_spline_fit(
+                self._time_valid, self._base_valid, self._fitting_base,
+                s=s, k=k, target_timestamps=self._time,
+                initial_conditions=initial_conditions,
+            )
+            if result is None:
+                QMessageBox.warning(
+                    self, "Spline Fitting",
+                    "Spline fit failed for the current parameters (insufficient "
+                    "valid points, duplicate timestamps, or an internal error). "
+                    "Try adjusting s or k.")
+                return   # keep previous kinematic_result / plot, per SplineReport
+    
+            self._kinematic_result = result
+            self._last_s = s
+            self._draw_plot(auto_range=True)
+            self._update_fit_status_label()
 
     @staticmethod
     def _split_segments(time_array: np.ndarray, value_array: np.ndarray):
@@ -433,8 +445,19 @@ class SplineTestingDialog(QDialog):
             return
 
         n_compared = int(np.sum(~np.isnan(measured) & ~np.isnan(calculated)))
+        base_order = _ORDER[self._fitting_base]
+        missing_ic = [
+            name for name in ("position", "speed", "acceleration")
+            if _ORDER[name] < base_order
+            and nearest_valid_ic(self._time, self._measured[name], self._time_valid[0]) is None
+        ]
+        note = (
+            f"\n(No measured {', '.join(missing_ic)} available to anchor "
+            f"initial conditions — result may be offset.)"
+            if missing_ic else ""
+        )
         self._fit_status_label.setText(
             f"{label} ({role}) vs. measured — n={n_compared}\n"
             f"RMSE: {rmse:.4f}   MAE: {mae:.4f}\n"
-            f"Max: {max_err:.4f}   Min: {min_err:.4f}   Mean: {mean_err:.4f}"
+            f"Max: {max_err:.4f}   Min: {min_err:.4f}   Mean: {mean_err:.4f}{note}"
         )

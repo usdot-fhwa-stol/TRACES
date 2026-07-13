@@ -39,6 +39,7 @@ veh_ids against the veh_ids actually present in the returned rows.
 """
 
 import logging
+import math
 import sqlite3
 from collections import defaultdict
 from dataclasses import dataclass
@@ -52,6 +53,8 @@ from ..base_comp import BaseComp
 logger = logging.getLogger(__name__)
 
 NAN = float("nan")
+_ORDER = {"jerk": 3, "acceleration": 2, "speed": 1, "position": 0}
+_LEVEL_NAME_BY_ORDER = {v: k for k, v in _ORDER.items()}
 
 # ── Base/column registry ────────────────────────────────────────────────────
 
@@ -236,19 +239,31 @@ def apply_spline_fit(
     s: float,
     k: int,
     target_timestamps: np.ndarray,
+    initial_conditions: Optional[Dict[str, Tuple[float, float]]] = None,
 ) -> Optional[Dict[str, np.ndarray]]:
     """Fit a B-spline to (time_valid, base_valid) and derive all four
     kinematics, evaluated at target_timestamps.
 
-    Returns a dict with keys "calc_position", "calc_speed",
-    "calc_acceleration", "calc_jerk", each an array the same length as
-    target_timestamps. Entries outside [time_valid[0], time_valid[-1]]
-    are NaN — no extrapolation. Returns None (and logs) on any failure:
-    too few points, non-increasing time, or a make_splrep exception.
+    initial_conditions: optional {"position"|"speed"|"acceleration": (ic_time, ic_value)}.
+    Needed only for levels strictly below fitting_base's integration order
+    (fitting_base="jerk" needs all three; "speed" needs only "position";
+    "position" needs none). Anchors the constant of integration that
+    scipy's antiderivative() otherwise implicitly sets to zero, so the
+    derived kinematic actually passes through the measured value at
+    ic_time rather than an arbitrary offset/ramp. Each level's ic_time may
+    differ from the others' -- e.g. veh_speed's nearest valid sample may
+    not fall at the same timestamp as veh_dist_trav's -- and the solve
+    accounts for that directly rather than assuming a shared t0.
+
+    A missing entry for a level that needs one leaves that level's
+    integration constant at 0 and logs a warning: the result for that
+    level (and anything integrated further below it) will have the
+    correct shape but may be offset from the true trajectory.
     """
     time_valid = np.asarray(time_valid, dtype=np.float64)
     base_valid = np.asarray(base_valid, dtype=np.float64)
     target_timestamps = np.asarray(target_timestamps, dtype=np.float64)
+    initial_conditions = initial_conditions or {}
 
     if time_valid.size < k + 1:
         logger.warning(
@@ -267,28 +282,46 @@ def apply_spline_fit(
         logger.exception("apply_spline_fit: make_splrep failed: %s", exc)
         return None
 
-    if fitting_base == "position":
-        spl_position = spl_base
-        spl_speed = spl_base.derivative(nu=1)
-        spl_acceleration = spl_base.derivative(nu=2)
-        spl_jerk = spl_base.derivative(nu=3)
-    elif fitting_base == "speed":
-        spl_position = spl_base.antiderivative(nu=1)
-        spl_speed = spl_base
-        spl_acceleration = spl_base.derivative(nu=1)
-        spl_jerk = spl_base.derivative(nu=2)
-    elif fitting_base == "acceleration":
-        spl_position = spl_base.antiderivative(nu=2)
-        spl_speed = spl_base.antiderivative(nu=1)
-        spl_acceleration = spl_base
-        spl_jerk = spl_base.derivative(nu=1)
-    elif fitting_base == "jerk":
-        spl_position = spl_base.antiderivative(nu=3)
-        spl_speed = spl_base.antiderivative(nu=2)
-        spl_acceleration = spl_base.antiderivative(nu=1)
-        spl_jerk = spl_base
-    else:
-        raise ValueError(f"Unknown fitting_base: {fitting_base!r}")
+    base_order = _ORDER[fitting_base]
+    t_ref = time_valid[0]
+
+    # Raw splines at every order <= base_order (implicit zero integration
+    # constant -- these need correcting). Orders > base_order are exact
+    # derivatives and need no correction at all.
+    raw_below = {base_order: spl_base}
+    for order in range(base_order - 1, -1, -1):
+        raw_below[order] = spl_base.antiderivative(base_order - order)
+
+    # Solve correction-polynomial coefficients sequentially, from the
+    # level just below base_order down to position, each anchored at
+    # that level's own (ic_time, ic_value).
+    c: Dict[int, float] = {}
+    for order in range(base_order - 1, -1, -1):
+        name = _LEVEL_NAME_BY_ORDER[order]
+        ic = initial_conditions.get(name)
+        if ic is None:
+            logger.warning(
+                "apply_spline_fit: no initial condition for '%s'; its "
+                "integration constant stays 0 (result may be offset "
+                "from the true trajectory).", name)
+            c[order] = 0.0
+            continue
+        ic_time, ic_value = ic
+        already = sum(
+            c[j] * (ic_time - t_ref) ** (j - order) / math.factorial(j - order)
+            for j in c
+        )
+        c[order] = ic_value - float(raw_below[order](ic_time)) - already
+
+    def eval_order(order: int, t: np.ndarray) -> np.ndarray:
+        if order > base_order:
+            return spl_base.derivative(order - base_order)(t)
+        val = raw_below[order](t)
+        correction = sum(
+            c[j] * (t - t_ref) ** (j - order) / math.factorial(j - order)
+            for j in c if j >= order
+        )
+        return val + correction
 
     n = target_timestamps.size
     result = {
@@ -303,10 +336,10 @@ def apply_spline_fit(
     idx = np.where(in_domain)[0]
     if idx.size:
         pts = target_timestamps[idx]
-        result["calc_position"][idx] = spl_position(pts)
-        result["calc_speed"][idx] = spl_speed(pts)
-        result["calc_acceleration"][idx] = spl_acceleration(pts)
-        result["calc_jerk"][idx] = spl_jerk(pts)
+        result["calc_position"][idx]     = eval_order(_ORDER["position"], pts)
+        result["calc_speed"][idx]        = eval_order(_ORDER["speed"], pts)
+        result["calc_acceleration"][idx] = eval_order(_ORDER["acceleration"], pts)
+        result["calc_jerk"][idx]         = eval_order(_ORDER["jerk"], pts)
 
     return result
 
@@ -364,6 +397,19 @@ def summarize_fit(rows: List[SplineRowResult], fitting_base: str, s: float, k: i
         ))
     return results
 
+def nearest_valid_ic(t_full: np.ndarray, values_full: np.ndarray,
+                      anchor_t: float) -> Optional[Tuple[float, float]]:
+    """Return (time, value) of the valid (non-NaN) sample in values_full
+    closest in time to anchor_t, or None if values_full has no valid
+    entries at all."""
+    valid_mask = ~np.isnan(values_full)
+    if not np.any(valid_mask):
+        return None
+    t_v = t_full[valid_mask]
+    v_v = values_full[valid_mask]
+    idx = int(np.argmin(np.abs(t_v - anchor_t)))
+    return float(t_v[idx]), float(v_v[idx])
+
 
 # ── BaseComp subclass ────────────────────────────────────────────────────────
 
@@ -405,6 +451,7 @@ class SplineComp(BaseComp):
         event_id: int,
         veh_ids: Optional[Iterable[int]],
         options: Optional[Dict[str, Any]] = None,
+        progress_callback = None,
     ) -> List[SplineRowResult]:
         options = self._resolve_options(options)
         fitting_base = options["fitting_base"]
@@ -421,6 +468,11 @@ class SplineComp(BaseComp):
             veh_ids = list(veh_ids)
         if not veh_ids:
             return []
+
+        # Purge previously-imputed rows unconditionally since
+        # fitting parameters (fitting_base/s/k) can change between runs
+        db_connection.execute("DELETE FROM events WHERE event_id = ? AND is_spline_imputed = 1", (event_id,),)
+        db_connection.commit()
 
         columns = self._events_columns(db_connection)
         has_speed = "veh_speed" in columns
@@ -453,6 +505,8 @@ class SplineComp(BaseComp):
         all_rows: List[SplineRowResult] = []
 
         for veh_id in veh_ids:
+            if progress_callback is not None:
+                progress_callback()
             d = raw[veh_id]
             n = len(d["veh_time"])
             if n == 0:
@@ -495,7 +549,18 @@ class SplineComp(BaseComp):
 
             target_t = generate_complete_timestamps(t) if fill_missing_rows else t
 
-            fit = apply_spline_fit(time_valid, base_valid, fitting_base, s, k, target_t)
+            level_arrays = {"position": dist, "speed": speed_meas, "acceleration": accel_meas}
+            initial_conditions = {
+                name: ic
+                for name, arr in level_arrays.items()
+                if _ORDER[name] < _ORDER[fitting_base]
+                for ic in [nearest_valid_ic(t, arr, time_valid[0])]
+                if ic is not None
+            }
+            
+            fit = apply_spline_fit(time_valid, base_valid, fitting_base, s, k, 
+                                   target_t, initial_conditions=initial_conditions)
+
             if fit is None:
                 logger.warning("SplineComp: spline fit failed for event=%s veh=%s.", event_id, veh_id)
                 continue

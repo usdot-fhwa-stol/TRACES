@@ -124,10 +124,33 @@ class SplineCompDialog(BaseAnalysisDialog):
             write_csv=None,   # Spline Fitting has no CSV export path
         )
 
-    def _run_for_event(self, conn, event_id, veh_ids, params):
+    def _progress_maximum(self, event_ids: list, veh_ids, params: dict) -> int:
+        """One tick per event (added in _run_for_event below) plus one
+        tick per vehicle within each event, since SplineComp.comp_series
+        ticks once per vehicle as it's processed."""
+        total_veh = 0
+        if event_ids:
+            placeholders = ",".join("?" for _ in event_ids)
+            cursor = self._db_connection.cursor()
+            cursor.execute(
+                f"SELECT COUNT(*) FROM "
+                f"(SELECT DISTINCT event_id, veh_id FROM events "
+                f"WHERE event_id IN ({placeholders}))",
+                event_ids,
+            )
+            total_veh = cursor.fetchone()[0] or 0
+        return len(event_ids) + total_veh
+
+    def _run_for_event(self, conn, event_id, veh_ids, params, progress_callback=None):
         from .spline_comp import SplineComp
         comp = SplineComp()
-        return comp.comp_event(conn, event_id, options=params)
+        results = comp.comp_series(
+            conn, event_id, veh_ids, options=params,
+            progress_callback=progress_callback,
+        )
+        if progress_callback is not None:
+            progress_callback()   # event-level tick, on top of per-vehicle ticks
+        return results
 
     def _set_controls_enabled(self, enabled: bool):
         super()._set_controls_enabled(enabled)

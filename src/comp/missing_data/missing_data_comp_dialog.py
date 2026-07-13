@@ -107,14 +107,18 @@ class MissingDataCompDialog(BaseAnalysisDialog):
             run_for_event=self._run_for_event,
             write_csv=self._write_csv,
         )
-    
-    def _run_for_event(self, conn, event_id, veh_ids, params):
+
+    def _run_for_event(self, conn, event_id, veh_ids, params, progress_callback=None):
         from .missing_data_comp import MissingDataComp
         comp = MissingDataComp()
         if veh_ids is not None:
-            return comp.comp_series(conn, event_id, veh_ids, options=params)
-        return comp.comp_event(conn, event_id, options=params)
-    
+            results = comp.comp_series(conn, event_id, veh_ids, options=params)
+        else:
+            results = comp.comp_event(conn, event_id, options=params)
+        if progress_callback is not None:
+            progress_callback()
+        return results
+
     def _set_controls_enabled(self, enabled: bool):
         super()._set_controls_enabled(enabled)
         self._gap_threshold_spin.setEnabled(enabled)

@@ -483,11 +483,29 @@ class TimeSpacePlotWidget(QWidget):
             time_min, time_max = self._time_slider.value()
             dist_min, dist_max = self._dist_slider.value()
 
+            from comp.base_comp import BaseComp
+            cols = BaseComp._events_columns(self._db_connection)
+    
+            want_spline = self._active_handler.wants_spline_position_data(self)
+            if want_spline and "calc_position" in cols:
+                position_col = "calc_position"
+                # Include spline-imputed fill rows too -- that's the point of
+                # this mode -- but skip rows the spline never fit at all.
+                where_extra = " AND calc_position IS NOT NULL"
+            else:
+                position_col = "veh_dist_trav"
+                # Outside spline mode, never plot synthetic fill rows as if
+                # they were measured trajectory points.
+                where_extra = (
+                    " AND (is_spline_imputed = 0 OR is_spline_imputed IS NULL)"
+                    if "is_spline_imputed" in cols else ""
+                )
+
             cursor = self._db_connection.cursor()
-            cursor.execute("""
-                SELECT veh_id, veh_time, veh_dist_trav, veh_speed
+            cursor.execute(f"""
+                SELECT veh_id, veh_time, {position_col}, veh_speed
                 FROM events
-                WHERE event_id = ? AND lane_id = ?
+                WHERE event_id = ? AND lane_id = ?{where_extra}
                 ORDER BY veh_id, veh_time
             """, (self._current_event_id, self._lane_combobox.currentData()['lane_id']))
 
@@ -893,6 +911,7 @@ class TimeSpacePlotWidget(QWidget):
         )()
         self._interaction_mode = mode
         self._active_handler.on_enter(self)
+        self._update_plot_data()   # position column may depend on the new handler
         logger.debug(f"Mode changed to: {mode.value}")
 
     def _compute_min_spans(self):
@@ -929,12 +948,13 @@ class TimeSpacePlotWidget(QWidget):
     def _on_shockwave_action_triggered(self):
         """Show ShockwaveConfigDialog; activate mode on OK, restore previous on Cancel."""
         from comp.shockwave import ShockwaveConfigDialog
-        dlg = ShockwaveConfigDialog(self)
+        dlg = ShockwaveConfigDialog(self, self._db_connection, self._current_event_id)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             mode    = dlg.selected_interaction_mode()
             handler = ShockwaveSemiAutoModeHandler(
                 slope_percentile=dlg.selected_slope_percentile(),
                 vicinity=dlg.selected_vicinity(),
+                use_spline_data=(dlg.selected_data_mode() == "spline"),
             )
             # Also sync the slope slider to the config dialog's chosen value.
             self._slope_slider.setValue(int(dlg.selected_slope_percentile()))

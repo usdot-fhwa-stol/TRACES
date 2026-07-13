@@ -24,7 +24,7 @@ class JerkResult:
     min_jerk: float = NAN
     mean_jerk: float = NAN
     sign_inversion_excess_pct: float = NAN
-    # "dataset" | "from_accel" | "from_speed" | "unavailable"
+    # "dataset" | "from_accel" | "from_speed" | "spline_fit" | "unavailable"
     jerk_source: str = "unavailable"
 
 
@@ -37,7 +37,7 @@ class JerkComp(BaseComp):
     OPTIONS_SCHEMA: Dict[str, Any] = {
         "jerk_threshold":      15.0,    # m/s^3
         "missing_gap_seconds": 1.0,     # seconds
-        "jerk_method":         "dataset",  # "dataset" | "from_accel" | "from_speed"
+        "jerk_method":         "dataset",  # "dataset" | "from_accel" | "from_speed" | "spline_fit"
     }
 
     def comp_series(self,
@@ -61,6 +61,7 @@ class JerkComp(BaseComp):
         has_jerk  = "veh_jerk"  in columns
         has_accel = "veh_accel" in columns
         has_speed = "veh_speed" in columns
+        has_calc_jerk = "calc_jerk" in columns # defensive: spline may not have run
 
         series: Dict[int, JerkResult] = {
             v: JerkResult(event_id=event_id, veh_id=v) for v in veh_ids
@@ -75,6 +76,8 @@ class JerkComp(BaseComp):
             select_cols.append("veh_accel")
         elif jerk_method == "from_speed" and has_speed:
             select_cols.append("veh_speed")
+        elif jerk_method == "spline_fit" and has_calc_jerk:
+            select_cols.append("calc_jerk")
         else:
             # Required source column isn't present — every result stays "unavailable".
             logger.warning(
@@ -120,6 +123,10 @@ class JerkComp(BaseComp):
                     r.jerk = self._derive_jerk_from_accel(r.time, r.accel,
                                                           missing_gap_seconds)
                     r.jerk_source = "from_speed"
+            elif jerk_method == "spline_fit":
+                r.jerk = src
+                if r.jerk.size > 0 and np.any(~np.isnan(r.jerk)):
+                    r.jerk_source = "spline_fit"
 
             if r.jerk_source == "unavailable" or r.jerk.size == 0:
                 continue
