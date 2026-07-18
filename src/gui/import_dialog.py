@@ -7,7 +7,7 @@ from pathlib import Path
 from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QProgressBar, QTextEdit, QFileDialog, QMessageBox, QLabel
 from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
 from data_import.base_process import BaseProcess
-from utils import get_user_data_path
+from utils import get_user_data_path, last_dialog_dir, remember_dialog_path
 import importlib
 
 # Set up logger
@@ -414,11 +414,12 @@ class ImportDialog(QDialog):
         file_path, selected_filter = QFileDialog.getOpenFileName(
             self,
             "Select Input File",
-            "",
+            last_dialog_dir(),
             file_types
         )
         
         if file_path:
+            remember_dialog_path(file_path)
             self._input_path = file_path
             self._selected_file_type = selected_filter.split(" (")[0]
             self._output_path = str(Path(file_path).with_suffix(".sqlite"))
@@ -442,6 +443,7 @@ class ImportDialog(QDialog):
         )
         
         if file_path:
+            remember_dialog_path(file_path)
             self._output_path = file_path
             logger.debug(f"Output file changed to: {file_path}")
             self._log_message(f"Info: Output file changed to: {file_path}", True)

@@ -392,7 +392,7 @@ class ExportDialog(QDialog):
                 return
         
         # Show file dialog to select output file
-        from utils import default_save_stem
+        from utils import default_save_stem, last_dialog_dir, remember_dialog_path
         if self.is_export_all_mode:
             stem     = default_save_stem("events_all")
             dialog_title = "Export All Events"
@@ -401,7 +401,7 @@ class ExportDialog(QDialog):
             stem     = default_save_stem(f"events_e{event_id}")
             dialog_title = "Export Selected Columns"
     
-        default_filename = str(Path.home() / f"{stem}.csv")
+        default_filename = str(Path(last_dialog_dir()) / f"{stem}.csv")
     
         file_path, _ = QFileDialog.getSaveFileName(
             self, dialog_title, default_filename,
@@ -410,6 +410,7 @@ class ExportDialog(QDialog):
         
         if not file_path:
             return  # User cancelled
+        remember_dialog_path(file_path)
         
         self._output_path = file_path
         

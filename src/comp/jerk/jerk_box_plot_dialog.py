@@ -169,16 +169,17 @@ class JerkBoxPlotDialog(QDialog):
     # ── Save: HTML with embedded SVG and pan/zoom JS ──────────────────────
 
     def _on_save(self):
-        from utils import default_save_stem
+        from utils import default_save_stem, last_dialog_dir, remember_dialog_path
         import re
         slug = re.sub(r"[^\w]+", "_", self._title).strip("_").lower()
-        default = str(Path.home() / f"{default_save_stem(slug)}.html")
+        default = str(Path(last_dialog_dir()) / f"{default_save_stem(slug)}.html")
         path, _ = QFileDialog.getSaveFileName(
             self, "Save Box Plots", default,
             "HTML Files (*.html);;All Files (*)"
         )
         if not path:
             return
+        remember_dialog_path(path)
         try:
             svg_blocks = [
                 (label, export_plot_to_svg(self._plots[key]))

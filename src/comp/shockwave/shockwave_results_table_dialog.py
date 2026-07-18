@@ -1,6 +1,5 @@
 import csv
 import logging
-import math
 from pathlib import Path
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import (
@@ -100,12 +99,12 @@ class ShockwaveResultsTableDialog(QDialog):
     # ── Save ─────────────────────────────────────────────────────────────
 
     def _on_save(self):
-        from utils import default_save_stem
+        from utils import default_save_stem, last_dialog_dir, remember_dialog_path
 
         n     = len(self._results)
         modes = "_".join(sorted({r.mode for r in self._results})) if self._results else "unknown"
         default = str(
-            Path.home() / f"{default_save_stem(f'shockwave_results_{modes}', f'n{n}')}.csv"
+            Path(last_dialog_dir()) / f"{default_save_stem(f'shockwave_results_{modes}', f'n{n}')}.csv"
         )
         path, _ = QFileDialog.getSaveFileName(
             self, "Save Shockwave Results", default,
@@ -113,6 +112,7 @@ class ShockwaveResultsTableDialog(QDialog):
         )
         if not path:
             return
+        remember_dialog_path(path)
 
         try:
             with Path(path).open("w", newline="", encoding="utf-8") as f:

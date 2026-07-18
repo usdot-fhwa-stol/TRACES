@@ -82,15 +82,6 @@ _KINEMATIC_LABELS = {
     "jerk":         "Jerk (m/s³)",
 }
 
-# Short labels for tab text -- _update_tab_labels() appends "*" to
-# whichever one is currently the applied fitting base.
-_TAB_LABELS = {
-    "position":     "Position",
-    "speed":        "Speed",
-    "acceleration": "Acceleration",
-    "jerk":         "Jerk",
-}
-
 _NO_VIABLE_BASE_MESSAGE = (
     "Not enough valid data on any kinematic variable (position, speed, "
     "acceleration, jerk) to fit a spline for this trajectory."
@@ -120,7 +111,7 @@ class SplineTestingDialog(QDialog):
         # never touch it.
         self._fitting_base: Optional[str] = None
         self._kinematic_result: Optional[Dict[str, np.ndarray]] = None
-        self._last_s: float = 0.0
+        self._last_s: float = 1.0
 
         self._plots: Dict[str, pg.PlotWidget] = {}
         self._legends: Dict[str, pg.LegendItem] = {}
@@ -250,7 +241,7 @@ class SplineTestingDialog(QDialog):
                 pw.enableAutoRange(axis="y", enable=True)
                 self._legends[key] = pw.addLegend()
                 self._plots[key] = pw
-                self._tabs.addTab(pw, _TAB_LABELS[key])
+                self._tabs.addTab(pw, _KINEMATIC_LABELS[key])
     
             # Time is the same physical axis on all four plots, so link it —
             # panning/zooming time on any one tab carries over when switching
@@ -290,7 +281,7 @@ class SplineTestingDialog(QDialog):
             self._s_spin = QDoubleSpinBox()
             self._s_spin.setRange(0.0, 1_000_000.0)
             self._s_spin.setDecimals(4)
-            self._s_spin.setValue(0.0)
+            self._s_spin.setValue(1.0)
             control_bar.addWidget(self._s_spin)
     
             control_bar.addSpacing(12)
@@ -526,7 +517,7 @@ class SplineTestingDialog(QDialog):
         which one it is without opening that tab. No tab is marked until
         the first successful Update Plot click."""
         for i, key in enumerate(KINEMATICS):
-            label = _TAB_LABELS[key]
+            label = _KINEMATIC_LABELS[key]
             is_base = key == self._fitting_base
             self._tabs.setTabText(i, f"{label}*" if is_base else label)
             self._tabs.setTabToolTip(
@@ -573,45 +564,46 @@ class SplineTestingDialog(QDialog):
     # ── Save: HTML with embedded SVG and pan/zoom JS ───────────────────
 
     def _on_save_plots(self):
-            from utils import default_save_stem
-            stem = default_save_stem(
-                f"spline_fit_test_e{self._event_id}_v{self._veh_id}",
-                self._fitting_base or "unfit",
-            )
-            default = str(Path.home() / f"{stem}.html")
-            path, _ = QFileDialog.getSaveFileName(
-                self, "Save Plots", default,
-                "HTML Files (*.html);;All Files (*)",
-            )
-            if not path:
-                return
-    
-            original_index = self._tabs.currentIndex()
-            try:
-                svg_blocks = []
-                for i, key in enumerate(KINEMATICS):
-                    # A tab that's never been the active page has never
-                    # received a real resize/layout pass, so its PlotItem's
-                    # axis geometry and auto-range can be stale or partial.
-                    # Bring it to front and flush the event loop so Qt
-                    # actually lays it out before we export it.
-                    self._tabs.setCurrentIndex(i)
-                    QApplication.processEvents()
-                    svg_blocks.append(
-                        (self._tabs.tabText(i), export_plot_to_svg(self._plots[key]))
-                    )
-    
-                title = f"Spline Fitting Test — Event {self._event_id}, Vehicle {self._veh_id}"
-                if self._kinematic_result is not None:
-                    k = self._k_combo.currentData()
-                    title += (
-                        f" — Base: {BASE_LABELS[self._fitting_base]}, "
-                        f"s = {self._last_s}, k = {k}"
-                    )
-                html = build_svg_html(title, svg_blocks, grid_columns=2, cell_height_px=320)
-                Path(path).write_text(html, encoding="utf-8")
-            except Exception as exc:
-                logger.exception("Failed to save spline testing plots")
-                QMessageBox.critical(self, "Save Failed", f"Could not save file:\n{exc}")
-            finally:
-                self._tabs.setCurrentIndex(original_index)
+        from utils import default_save_stem, last_dialog_dir, remember_dialog_path
+        stem = default_save_stem(
+            f"spline_fit_test_e{self._event_id}_v{self._veh_id}",
+            self._fitting_base or "unfit",
+        )
+        default = str(Path(last_dialog_dir()) / f"{stem}.html")
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save Plots", default,
+            "HTML Files (*.html);;All Files (*)",
+        )
+        if not path:
+            return
+        remember_dialog_path(path)
+
+        original_index = self._tabs.currentIndex()
+        try:
+            svg_blocks = []
+            for i, key in enumerate(KINEMATICS):
+                # A tab that's never been the active page has never
+                # received a real resize/layout pass, so its PlotItem's
+                # axis geometry and auto-range can be stale or partial.
+                # Bring it to front and flush the event loop so Qt
+                # actually lays it out before we export it.
+                self._tabs.setCurrentIndex(i)
+                QApplication.processEvents()
+                svg_blocks.append(
+                    (self._tabs.tabText(i), export_plot_to_svg(self._plots[key]))
+                )
+
+            title = f"Spline Fitting Test — Event {self._event_id}, Vehicle {self._veh_id}"
+            if self._kinematic_result is not None:
+                k = self._k_combo.currentData()
+                title += (
+                    f" — Base: {BASE_LABELS[self._fitting_base]}, "
+                    f"s = {self._last_s}, k = {k}"
+                )
+            html = build_svg_html(title, svg_blocks, grid_columns=2, cell_height_px=320)
+            Path(path).write_text(html, encoding="utf-8")
+        except Exception as exc:
+            logger.exception("Failed to save spline testing plots")
+            QMessageBox.critical(self, "Save Failed", f"Could not save file:\n{exc}")
+        finally:
+            self._tabs.setCurrentIndex(original_index)

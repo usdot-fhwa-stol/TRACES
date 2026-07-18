@@ -145,12 +145,15 @@ class MissingDataBoxPlotDialog(QDialog):
     # ── Save: HTML with embedded SVG and pan/zoom JS ──────────────────────
     
     def _on_save(self):
+        from utils import last_dialog_dir, remember_dialog_path
+        default = str(Path(last_dialog_dir()) / "missing_data_box_plots.html")
         path, _ = QFileDialog.getSaveFileName(
-            self, "Save Box Plots", "missing_data_box_plots.html",
+            self, "Save Box Plots", default,
             "HTML Files (*.html);;All Files (*)"
         )
         if not path:
             return
+        remember_dialog_path(path)
 
         try:
             svg_blocks = [

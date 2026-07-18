@@ -3,7 +3,7 @@ from PyQt6.QtWidgets import QMainWindow, QMenuBar, QMenu, QApplication, QFileDia
 from PyQt6.QtGui import QAction
 from PyQt6.QtCore import QTimer
 from .home_widget import HomeWidget
-from utils import get_user_data_path
+from utils import get_user_data_path, last_dialog_dir, remember_dialog_path
 
 class MainWindow(QMainWindow):
     """Main window for the Trajectory Tools application.
@@ -347,11 +347,15 @@ class MainWindow(QMainWindow):
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Open SQLite Database",
-            "",
+            last_dialog_dir(),
             "SQLite Database (*.sqlite);;SQLite Database (*.db);;SQLite Database (*)"
         )
-        
-        if file_path and self._check_database(file_path):
+
+        if not file_path:
+            return
+        remember_dialog_path(file_path)
+
+        if self._check_database(file_path):
             self.add_recent_file(file_path)
             self.setWindowTitle(f"Trajectory Tools - {file_path}")
             

@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QPushButton, QProgressBar, QFileDialog, QMessageBox,
 )
+from utils import last_dialog_dir, remember_dialog_path
 
 logger = logging.getLogger(__name__)
 
@@ -192,7 +193,7 @@ class BaseAnalysisDialog(QDialog):
         return default_save_stem(label)
     
     def _on_save(self):
-        default = str(Path.home() / f"{self._default_export_stem()}.csv")
+        default = str(Path(last_dialog_dir()) / f"{self._default_export_stem()}.csv")
         dest, _ = QFileDialog.getSaveFileName(
             self,
             f"Save {self._csv_export_label()} Export",
@@ -201,6 +202,7 @@ class BaseAnalysisDialog(QDialog):
         )
         if not dest:
             return
+        remember_dialog_path(dest)
         self._dest_path = dest
         self._start_worker(
             self._export_event_ids, None,

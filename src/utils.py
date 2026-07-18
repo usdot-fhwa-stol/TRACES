@@ -1,8 +1,12 @@
 import sys
 import os
 import shutil
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
+from typing import Optional
+
+
+_last_dialog_dir: Optional[str] = None   # process-wide, not persisted across app restarts
 
 
 def get_resource_path(relative_path: str) -> str:
@@ -58,3 +62,23 @@ def default_save_stem(prefix: str, suffix: str = "") -> str:
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     parts = [p for p in (prefix, suffix, ts) if p]
     return "_".join(parts)
+
+def last_dialog_dir() -> str:
+    """Starting directory for file/directory dialogs: the most recently
+    used location across the app this session, or the user's home
+    directory if none has been used yet."""
+    return _last_dialog_dir or str(Path.home())
+
+def remember_dialog_path(path: str) -> None:
+    """Record the directory containing *path* as the most recently used
+    file-dialog location. *path* may be a file or a directory.
+
+    Call this only after a dialog returns a non-empty/accepted result --
+    never on cancel, so a rejected dialog can't clobber a previously good
+    location.
+    """
+    global _last_dialog_dir
+    if not path:
+        return
+    p = Path(path)
+    _last_dialog_dir = str(p if p.is_dir() else p.parent)

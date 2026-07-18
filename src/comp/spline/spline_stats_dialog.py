@@ -23,6 +23,7 @@ Export All / Export Selected paths once present on the events table.
 import csv
 import logging
 import math
+from pathlib import Path
 from typing import Any, Dict, List
 
 from PyQt6.QtCore import Qt
@@ -169,16 +170,19 @@ class SplineStatsDialog(QDialog):
     # ── Save ──────────────────────────────────────────────────────────────
 
     def _on_save(self):
-        from utils import default_save_stem
+        from utils import default_save_stem, last_dialog_dir, remember_dialog_path
         eids = sorted({r.event_id for r in self._results})
         eid_part = "_".join(str(e) for e in eids) if eids else "eall"
         base = self._params.get("fitting_base", "base")
-        default_name = default_save_stem(f"spline_fit_e{eid_part}", base)
-
+        default_name = str(
+            Path(last_dialog_dir()) / f"{default_save_stem(f'spline_fit_e{eid_part}', base)}.csv"
+        )
+    
         dest, _ = QFileDialog.getSaveFileName(
             self, "Save Spline Fitting Results", default_name, "CSV Files (*.csv)")
         if not dest:
             return
+        remember_dialog_path(dest)
         try:
             self._write_csv(self._results, dest)
         except OSError as exc:
