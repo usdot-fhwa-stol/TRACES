@@ -42,13 +42,14 @@ rows" run.
 
 import logging
 from typing import Dict, Optional
+from pathlib import Path
 
 import numpy as np
 import pyqtgraph as pg
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import (
     QButtonGroup, QCheckBox, QComboBox, QDialog, QDoubleSpinBox,
-    QFormLayout, QGroupBox, QHBoxLayout, QLabel, QMessageBox,
+    QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QMessageBox,
     QPushButton, QRadioButton, QVBoxLayout,
 )
 
@@ -56,6 +57,7 @@ from .spline_comp import (
     BASE_LABELS, KINEMATICS, FITTING_BASES, _ORDER, allowed_k_options,
     apply_spline_fit, compute_error_metrics, nearest_valid_ic,
 )
+from comp.plot_export import export_plot_to_svg, build_svg_html
 
 logger = logging.getLogger(__name__)
 
@@ -232,7 +234,7 @@ class SplineTestingDialog(QDialog):
         self._s_spin = QDoubleSpinBox()
         self._s_spin.setRange(0.0, 1_000_000.0)
         self._s_spin.setDecimals(4)
-        self._s_spin.setValue(0.0)
+        self._s_spin.setValue(1.0)
         param_form.addRow("Smoothness (s):", self._s_spin)
 
         self._k_combo = QComboBox()
@@ -269,6 +271,11 @@ class SplineTestingDialog(QDialog):
         control_col.addWidget(self._fit_status_label)
 
         control_col.addStretch()
+
+        self._save_btn = QPushButton("Save Plots")
+        self._save_btn.setEnabled(False) # no fit yet — nothing to export
+        self._save_btn.clicked.connect(self._on_save_plots)
+        control_col.addWidget(self._save_btn)
 
         close_btn = QPushButton("Close")
         close_btn.clicked.connect(self.close)
@@ -308,6 +315,7 @@ class SplineTestingDialog(QDialog):
         self._fitting_base = base
         self._recompute_valid_arrays(base)
         self._kinematic_result = None   # a fit against the old base doesn't apply here
+        self._save_btn.setEnabled(False)
         self._populate_k_combo(base)
 
         # Display-variable radios follow the new fitting base by default,
@@ -363,6 +371,7 @@ class SplineTestingDialog(QDialog):
                 return   # keep previous kinematic_result / plot, per SplineReport
     
             self._kinematic_result = result
+            self._save_btn.setEnabled(True)
             self._last_s = s
             self._draw_plot(auto_range=True)
             self._update_fit_status_label()
@@ -461,3 +470,75 @@ class SplineTestingDialog(QDialog):
             f"RMSE: {rmse:.4f}   MAE: {mae:.4f}\n"
             f"Max: {max_err:.4f}   Min: {min_err:.4f}   Mean: {mean_err:.4f}{note}"
         )
+
+    def _build_export_plot(self, key: str) -> pg.PlotWidget:
+        """Render kinematic *key* into a standalone PlotWidget for SVG export.
+        Independent of self._plot, so all four kinematics can be captured
+        regardless of which one the radio buttons currently show."""
+        plot = pg.PlotWidget()
+        plot.resize(640, 420)   # never shown/laid out, so give SVGExporter a real size
+        plot.setBackground('w')
+        plot.setLabel("bottom", "Time (s)")
+        plot.setLabel("left", _KINEMATIC_LABELS[key])
+        plot.showGrid(x=True, y=True, alpha=0.2)
+        legend = plot.addLegend()
+    
+        if self._show_original_check.isChecked():
+            measured = self._measured[key]
+            first = True
+            for t_seg, v_seg in self._split_segments(self._time, measured):
+                item = pg.PlotDataItem(x=t_seg, y=v_seg, pen=pg.mkPen(color='k', width=4))
+                plot.addItem(item)
+                if first:
+                    legend.addItem(item, "Original Data")
+                    first = False
+    
+        if self._show_filtered_check.isChecked() and self._kinematic_result is not None:
+            pen = pg.mkPen(color='k', width=4)
+            pen.setStyle(Qt.PenStyle.CustomDashLine)
+            pen.setDashPattern([4, 4])
+            calc = self._kinematic_result[f"calc_{key}"]
+            first = True
+            for t_seg, v_seg in self._split_segments(self._time, calc):
+                item = pg.PlotDataItem(x=t_seg, y=v_seg, pen=pen)
+                plot.addItem(item)
+                if first:
+                    legend.addItem(item, f"Spline Fit (s = {self._last_s})")
+                    first = False
+    
+        plot.autoRange()
+        return plot
+
+    def _on_save_plots(self):
+        if self._kinematic_result is None:
+            return  # Save button is disabled in this state; defensive no-op
+    
+        from utils import default_save_stem
+        stem = default_save_stem(
+            f"spline_fit_test_e{self._event_id}_v{self._veh_id}", self._fitting_base,
+        )
+        default = str(Path.home() / f"{stem}.html")
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save Plots", default, "HTML Files (*.html);;All Files (*)",
+        )
+        if not path:
+            return
+    
+        try:
+            svg_blocks = []
+            for key in KINEMATICS:
+                label = BASE_LABELS[key]
+                if key == self._fitting_base:
+                    label += " (Fitting Base)"
+                svg_blocks.append((label, export_plot_to_svg(self._build_export_plot(key))))
+    
+            k = self._k_combo.currentData()
+            title = (
+                f"Spline Fitting Test — Event {self._event_id}, Vehicle {self._veh_id} — "
+                f"Base: {BASE_LABELS[self._fitting_base]}, s = {self._last_s}, k = {k}"
+            )
+            html = build_svg_html(title, svg_blocks, grid_columns=2, cell_height_px=320)
+            Path(path).write_text(html, encoding="utf-8")
+        except Exception as exc:
+            logger.exception("Failed to save spline testing plots")
+            QMessageBox.critical(self, "Save Failed", f"Could not save file:\n{exc}")

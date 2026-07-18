@@ -96,7 +96,7 @@ class SplineCompDialog(BaseAnalysisDialog):
         self._s_spin = QDoubleSpinBox()
         self._s_spin.setRange(0.0, 1_000_000.0)
         self._s_spin.setDecimals(4)
-        self._s_spin.setValue(0.0)
+        self._s_spin.setValue(1.0)
         form.addRow("Smoothness level (s):", self._s_spin)
 
         self._k_combo = QComboBox()
