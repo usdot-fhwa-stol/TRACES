@@ -1,28 +1,40 @@
 """Right-click "Filter > Spline Fitting" preview window (Figure 4).
 
 Opens for exactly one (event_id, veh_id) trajectory. Lets the user choose
-a fitting base (Position/Speed/Acceleration/Jerk) via a combobox, try
-different smoothness (s) / degree (k) values, and see the resulting
-spline fit overlaid on the original measured data, plus a live
-goodness-of-fit readout for whichever kinematic is currently displayed.
-Nothing here is ever written to the database — this dialog is parameter
-exploration only, matching the SplineReport's "no output to be saved"
-instruction for the right-click pathway.
+a fitting base (Position/Speed/Acceleration/Jerk), try different
+smoothness (s) / degree (k) values, and see the resulting spline fit
+overlaid on the original measured data on all four kinematic plots at
+once, each in its own tab, plus a per-plot goodness-of-fit readout shown
+as that plot's title. Nothing here is ever written to the database —
+this dialog is parameter exploration only, matching the SplineReport's
+"no output to be saved" instruction for the right-click pathway.
 
 Fitting base is selectable, not fixed, so a single dialog instance covers
 all four bases rather than requiring four separate menu entries. Combobox
 entries are disabled (with a tooltip) for any base lacking at least
 min(allowed_k_options(base)) + 1 valid measured points on this trajectory.
-Switching the fitting base discards any existing fit (a fit against one
-base's data doesn't carry over to another) and resets the k options to
-that base's allowed set.
+
+Base/s/k combo and spin changes have no effect on any plot until "Update
+Plot" is clicked -- changing the base combo only refreshes the k-degree
+options (which are inherently tied to the base) so a valid choice is
+available before the next Update. The currently-viewed tab never changes
+as a side effect of any control, including Update Plot -- the user is
+judging how new parameters affected whichever plot they're already
+looking at. The tab belonging to the base actually used by the last
+successful fit is marked with a trailing "*" in its label.
+
+All four plots are persistent widgets (one per kinematic), kept alive for
+the life of the dialog rather than rebuilt from a single shared plot.
+Their time (x) axes are linked so panning/zooming on one tab is preserved
+when switching to another; each plot's y-axis is left independently
+auto-ranging since the four kinematics have unrelated scales. Because the
+four plots always exist, HTML/SVG export (Save Plots) reads directly from
+them -- no separate offscreen rendering step is needed.
 
 Synchronous by design: a single trajectory's worth of points fits well
 within the time budget of a direct call, so this dialog does not use
 BaseAnalysisDialog / BaseAnalysisWorker at all (no progress bar, no
-QThread). Re-fitting only happens when the user clicks "Update Plot" —
-not on every keystroke in the s/k controls, and not merely from switching
-the display-variable radio.
+QThread).
 
 Precondition (enforced by the caller, plot/custom_view_box.py)
 ----------------------------------------------------------------
@@ -38,26 +50,28 @@ Measured data is read with is_spline_imputed excluded (where that column
 exists): this window is about testing fit quality against real
 measurements, not against rows synthesized by a previous "fill missing
 rows" run.
+
+HTML export uses comp.plot_export.build_svg_html / export_plot_to_svg,
+which are shared with JerkBoxPlotDialog / InternalConsistencyResultDialog.
 """
 
 import logging
-from typing import Dict, Optional
 from pathlib import Path
+from typing import Dict, Optional
 
 import numpy as np
 import pyqtgraph as pg
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import (
-    QButtonGroup, QCheckBox, QComboBox, QDialog, QDoubleSpinBox,
-    QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QMessageBox,
-    QPushButton, QRadioButton, QVBoxLayout,
+    QApplication, QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog,
+    QHBoxLayout, QLabel, QMessageBox, QPushButton, QTabWidget, QVBoxLayout,
 )
 
+from comp.plot_export import export_plot_to_svg, build_svg_html
 from .spline_comp import (
     BASE_LABELS, KINEMATICS, FITTING_BASES, _ORDER, allowed_k_options,
     apply_spline_fit, compute_error_metrics, nearest_valid_ic,
 )
-from comp.plot_export import export_plot_to_svg, build_svg_html
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +80,15 @@ _KINEMATIC_LABELS = {
     "speed":        "Speed (m/s)",
     "acceleration": "Acceleration (m/s²)",
     "jerk":         "Jerk (m/s³)",
+}
+
+# Short labels for tab text -- _update_tab_labels() appends "*" to
+# whichever one is currently the applied fitting base.
+_TAB_LABELS = {
+    "position":     "Position",
+    "speed":        "Speed",
+    "acceleration": "Acceleration",
+    "jerk":         "Jerk",
 }
 
 _NO_VIABLE_BASE_MESSAGE = (
@@ -87,12 +110,20 @@ class SplineTestingDialog(QDialog):
         self._time: np.ndarray = np.array([], dtype=np.float64)
         self._measured: Dict[str, np.ndarray] = {k: np.array([]) for k in KINEMATICS}
 
-        self._fitting_base: str = "position"
         self._time_valid: np.ndarray = np.array([], dtype=np.float64)
         self._base_valid: np.ndarray = np.array([], dtype=np.float64)
 
+        # "Applied" state — reflects the last successfully computed fit,
+        # never the raw combo/spin values. None until Update Plot succeeds
+        # for the first time. This drives the dashed fit traces, the
+        # per-plot titles, and the tab asterisk; combo/spin changes alone
+        # never touch it.
+        self._fitting_base: Optional[str] = None
         self._kinematic_result: Optional[Dict[str, np.ndarray]] = None
         self._last_s: float = 0.0
+
+        self._plots: Dict[str, pg.PlotWidget] = {}
+        self._legends: Dict[str, pg.LegendItem] = {}
 
         self.setWindowTitle(f"Spline Fitting Test — Event {event_id}, Vehicle {veh_id}")
         self.setModal(False)
@@ -112,9 +143,9 @@ class SplineTestingDialog(QDialog):
         if idx >= 0:
             self._base_combo.setCurrentIndex(idx)
         # Unconditional: Qt does not re-emit currentIndexChanged if idx was
-        # already 0 (the case when "position" is both the default and the
-        # first combo entry), so the initial render can't rely on the signal.
-        self._on_fitting_base_changed()
+        # already 0, so the initial k-combo population can't rely solely
+        # on the signal firing.
+        self._on_base_combo_changed()
 
         self._size_and_center_dialog()
 
@@ -199,90 +230,109 @@ class SplineTestingDialog(QDialog):
     # ── UI ────────────────────────────────────────────────────────────────
 
     def _setup_ui(self, availability: Dict[str, bool]):
-        layout = QVBoxLayout(self)
-        body = QHBoxLayout()
-
-        # ── Left: plot ──
-        plot_col = QVBoxLayout()
-        self._plot = pg.PlotWidget()
-        self._plot.setBackground('w')
-        self._plot.setLabel("bottom", "Time (s)")
-        self._plot.showGrid(x=True, y=True, alpha=0.2)
-        self._legend = self._plot.addLegend()
-        plot_col.addWidget(self._plot, stretch=1)
-
-        body.addLayout(plot_col, stretch=3)
-
-        # ── Right: controls ──
-        control_col = QVBoxLayout()
-
-        param_form = QFormLayout()
-
-        self._base_combo = QComboBox()
-        for key in FITTING_BASES:
-            self._base_combo.addItem(BASE_LABELS[key], key)
-            idx = self._base_combo.count() - 1
-            if not availability[key]:
-                item = self._base_combo.model().item(idx)
-                item.setEnabled(False)
-                item.setToolTip(
-                    f"Not enough valid {BASE_LABELS[key].lower()} data "
-                    f"points on this trajectory.")
-        self._base_combo.currentIndexChanged.connect(self._on_fitting_base_changed)
-        param_form.addRow("Fitting Base:", self._base_combo)
-
-        self._s_spin = QDoubleSpinBox()
-        self._s_spin.setRange(0.0, 1_000_000.0)
-        self._s_spin.setDecimals(4)
-        self._s_spin.setValue(1.0)
-        param_form.addRow("Smoothness (s):", self._s_spin)
-
-        self._k_combo = QComboBox()
-        param_form.addRow("Degree (k):", self._k_combo)
-        control_col.addLayout(param_form)
-
-        display_group = QGroupBox("Display Variable")
-        display_form = QVBoxLayout(display_group)
-        self._display_buttons = QButtonGroup(self)
-        for key in KINEMATICS:
-            rb = QRadioButton(BASE_LABELS[key])
-            rb.setProperty("kinematic_key", key)
-            self._display_buttons.addButton(rb)
-            display_form.addWidget(rb)
-        self._display_buttons.buttonClicked.connect(self._on_display_variable_changed)
-        control_col.addWidget(display_group)
-
-        self._show_original_check = QCheckBox("Show Original Data")
-        self._show_original_check.setChecked(True)
-        self._show_original_check.stateChanged.connect(self._draw_plot)
-        control_col.addWidget(self._show_original_check)
-
-        self._show_filtered_check = QCheckBox("Show Filtered Data")
-        self._show_filtered_check.setChecked(True)
-        self._show_filtered_check.stateChanged.connect(self._draw_plot)
-        control_col.addWidget(self._show_filtered_check)
-
-        self._update_btn = QPushButton("Update Plot")
-        self._update_btn.clicked.connect(self._on_update_plot)
-        control_col.addWidget(self._update_btn)
-
-        self._fit_status_label = QLabel("No spline fit applied yet.")
-        self._fit_status_label.setWordWrap(True)
-        control_col.addWidget(self._fit_status_label)
-
-        control_col.addStretch()
-
-        self._save_btn = QPushButton("Save Plots")
-        self._save_btn.setEnabled(False) # no fit yet — nothing to export
-        self._save_btn.clicked.connect(self._on_save_plots)
-        control_col.addWidget(self._save_btn)
-
-        close_btn = QPushButton("Close")
-        close_btn.clicked.connect(self.close)
-        control_col.addWidget(close_btn)
-
-        body.addLayout(control_col, stretch=1)
-        layout.addLayout(body)
+            layout = QVBoxLayout(self)
+    
+            # ── Top: one tab per kinematic, each holding its own persistent plot ──
+            self._tabs = QTabWidget()
+            self._tabs.setTabPosition(QTabWidget.TabPosition.North)
+    
+            for key in KINEMATICS:
+                pw = pg.PlotWidget()
+                pw.setBackground('w')
+                pw.setLabel("bottom", "Time (s)")
+                pw.setLabel("left", _KINEMATIC_LABELS[key])
+                pw.showGrid(x=True, y=True, alpha=0.2)
+                # Never guaranteed to be the active tab, so it may never be
+                # laid out by the QTabWidget's stack before Save Plots runs —
+                # give SVGExporter a real size to work with regardless.
+                pw.setMinimumSize(500, 350)
+                pw.getViewBox().setMouseEnabled(x=True, y=False)
+                pw.enableAutoRange(axis="y", enable=True)
+                self._legends[key] = pw.addLegend()
+                self._plots[key] = pw
+                self._tabs.addTab(pw, _TAB_LABELS[key])
+    
+            # Time is the same physical axis on all four plots, so link it —
+            # panning/zooming time on any one tab carries over when switching
+            # tabs. Y is deliberately left unlinked: each kinematic has its
+            # own scale, and continuous auto-range keeps it independently
+            # fit to whatever time window is currently visible.
+            ref_vb = self._plots[KINEMATICS[0]].getViewBox()
+            for key in KINEMATICS:
+                vb = self._plots[key].getViewBox()
+                if vb is not ref_vb:
+                    vb.setXLink(ref_vb)
+                # The built-in "A" corner button only resets its own plot by
+                # default; this makes it reset all four together.
+                self._plots[key].getPlotItem().autoBtn.clicked.connect(self._on_auto_btn_clicked)
+    
+            layout.addWidget(self._tabs, stretch=1)
+    
+            # ── Bottom: controls laid out horizontally ──
+            control_bar = QHBoxLayout()
+    
+            control_bar.addWidget(QLabel("Fitting Base:"))
+            self._base_combo = QComboBox()
+            for key in FITTING_BASES:
+                self._base_combo.addItem(BASE_LABELS[key], key)
+                idx = self._base_combo.count() - 1
+                if not availability[key]:
+                    item = self._base_combo.model().item(idx)
+                    item.setEnabled(False)
+                    item.setToolTip(
+                        f"Not enough valid {BASE_LABELS[key].lower()} data "
+                        f"points on this trajectory.")
+            self._base_combo.currentIndexChanged.connect(self._on_base_combo_changed)
+            control_bar.addWidget(self._base_combo)
+    
+            control_bar.addSpacing(12)
+            control_bar.addWidget(QLabel("Smoothness (s):"))
+            self._s_spin = QDoubleSpinBox()
+            self._s_spin.setRange(0.0, 1_000_000.0)
+            self._s_spin.setDecimals(4)
+            self._s_spin.setValue(0.0)
+            control_bar.addWidget(self._s_spin)
+    
+            control_bar.addSpacing(12)
+            control_bar.addWidget(QLabel("Degree (k):"))
+            self._k_combo = QComboBox()
+            control_bar.addWidget(self._k_combo)
+    
+            control_bar.addSpacing(20)
+            self._show_original_check = QCheckBox("Show Original Data")
+            self._show_original_check.setChecked(True)
+            self._show_original_check.stateChanged.connect(self._on_series_visibility_changed)
+            control_bar.addWidget(self._show_original_check)
+    
+            self._show_filtered_check = QCheckBox("Show Filtered Data")
+            self._show_filtered_check.setChecked(True)
+            self._show_filtered_check.stateChanged.connect(self._on_series_visibility_changed)
+            control_bar.addWidget(self._show_filtered_check)
+    
+            control_bar.addStretch()
+    
+            self._update_btn = QPushButton("Update Plot")
+            self._update_btn.clicked.connect(self._on_update_plot)
+            control_bar.addWidget(self._update_btn)
+    
+            # Left enabled by default — the original-data traces are always
+            # exportable even before any fit has been computed.
+            self._save_btn = QPushButton("Save Plots")
+            self._save_btn.clicked.connect(self._on_save_plots)
+            control_bar.addWidget(self._save_btn)
+    
+            close_btn = QPushButton("Close")
+            close_btn.clicked.connect(self.close)
+            control_bar.addWidget(close_btn)
+    
+            layout.addLayout(control_bar)
+    
+            # Original-data traces don't depend on fitting parameters at all,
+            # so draw them once up front, independent of the base combo.
+            for key in KINEMATICS:
+                self._redraw_plot(key)
+                self._update_plot_title(key)
+            self._update_tab_labels()
 
     def _size_and_center_dialog(self):
         container = self.parent()
@@ -297,6 +347,15 @@ class SplineTestingDialog(QDialog):
         else:
             self.resize(900, 650)
 
+    # ── Cross-plot synchronization ──────────────────────────────────────
+
+    def _on_auto_btn_clicked(self, *_args):
+        """The corner 'A' button only auto-ranges its own plot by
+        default; this makes it reset all four so the tabs stay
+        comparable after the user has manually panned/zoomed one."""
+        for pw in self._plots.values():
+            pw.enableAutoRange()
+
     # ── Fitting-base combobox ─────────────────────────────────────────────
 
     def _populate_k_combo(self, base: str):
@@ -307,74 +366,68 @@ class SplineTestingDialog(QDialog):
         self._k_combo.setCurrentIndex(0)
         self._k_combo.blockSignals(False)
 
-    def _on_fitting_base_changed(self, _index=None):
+    def _on_base_combo_changed(self, _index=None):
+        """Refresh the k-degree options and the regression input arrays
+        for the newly selected base. Deliberately does *not* touch any
+        plot, self._fitting_base, or self._kinematic_result — per the
+        "no effect until Update Plot" rule, a base change only stages
+        what the *next* Update Plot click will use."""
         base = self._base_combo.currentData()
         if base is None:
             return
-
-        self._fitting_base = base
         self._recompute_valid_arrays(base)
-        self._kinematic_result = None   # a fit against the old base doesn't apply here
-        self._save_btn.setEnabled(False)
         self._populate_k_combo(base)
 
-        # Display-variable radios follow the new fitting base by default,
-        # mirroring the right-click pathway's original "default = fitting_base".
-        for btn in self._display_buttons.buttons():
-            if btn.property("kinematic_key") == base:
-                btn.setChecked(True)
-                break
+    def _on_series_visibility_changed(self, *_args):
+            for key in KINEMATICS:
+                self._redraw_plot(key)
 
-        self._draw_plot(auto_range=True)
-        self._update_fit_status_label()
-
-    # ── Display-variable / slider helpers ────────────────────────────────
-
-    def _current_display_key(self) -> str:
-        btn = self._display_buttons.checkedButton()
-        return btn.property("kinematic_key") if btn else self._fitting_base
-
-    def _on_display_variable_changed(self, _btn):
-        self._draw_plot(auto_range=True)
-        self._update_fit_status_label()
-
-    # ── Fit / plot ────────────────────────────────────────────────────────
+    # ── Fit ──────────────────────────────────────────────────────────────
 
     def _on_update_plot(self):
-            s = self._s_spin.value()
-            k = self._k_combo.currentData()
-            if k is None:
-                return
-    
-            base_order = _ORDER[self._fitting_base]
-            initial_conditions = {
-                name: ic
-                for name in ("position", "speed", "acceleration")
-                if _ORDER[name] < base_order
-                for ic in [nearest_valid_ic(
-                    self._time, self._measured[name], self._time_valid[0]
-                )]
-                if ic is not None
-            }
-    
-            result = apply_spline_fit(
-                self._time_valid, self._base_valid, self._fitting_base,
-                s=s, k=k, target_timestamps=self._time,
-                initial_conditions=initial_conditions,
-            )
-            if result is None:
-                QMessageBox.warning(
-                    self, "Spline Fitting",
-                    "Spline fit failed for the current parameters (insufficient "
-                    "valid points, duplicate timestamps, or an internal error). "
-                    "Try adjusting s or k.")
-                return   # keep previous kinematic_result / plot, per SplineReport
-    
-            self._kinematic_result = result
-            self._save_btn.setEnabled(True)
-            self._last_s = s
-            self._draw_plot(auto_range=True)
-            self._update_fit_status_label()
+        base = self._base_combo.currentData()
+        s = self._s_spin.value()
+        k = self._k_combo.currentData()
+        if base is None or k is None:
+            return
+
+        self._recompute_valid_arrays(base)   # defensive re-sync with the current combo state
+
+        base_order = _ORDER[base]
+        initial_conditions = {
+            name: ic
+            for name in ("position", "speed", "acceleration")
+            if _ORDER[name] < base_order
+            for ic in [nearest_valid_ic(
+                self._time, self._measured[name], self._time_valid[0]
+            )]
+            if ic is not None
+        }
+
+        result = apply_spline_fit(
+            self._time_valid, self._base_valid, base,
+            s=s, k=k, target_timestamps=self._time,
+            initial_conditions=initial_conditions,
+        )
+        if result is None:
+            QMessageBox.warning(
+                self, "Spline Fitting",
+                "Spline fit failed for the current parameters (insufficient "
+                "valid points, duplicate timestamps, or an internal error). "
+                "Try adjusting s or k.")
+            return   # previous applied fit / plots / tab labels stay exactly as they were
+
+        self._fitting_base = base
+        self._kinematic_result = result
+        self._last_s = s
+
+        for key in KINEMATICS:
+            self._redraw_plot(key)
+            self._update_plot_title(key)
+        self._update_tab_labels()
+        # self._tabs.setCurrentIndex(...) is never called — the user is
+        # judging how the new parameters affected the plot they're
+        # already looking at.
 
     @staticmethod
     def _split_segments(time_array: np.ndarray, value_array: np.ndarray):
@@ -393,24 +446,27 @@ class SplineTestingDialog(QDialog):
         for s_idx, e_idx in zip(starts, ends):
             yield time_array[s_idx:e_idx], value_array[s_idx:e_idx]
 
-    def _draw_plot(self, *_, auto_range: bool = False):
-        self._plot.clear()
-        self._legend.clear()
+    # ── Per-plot drawing ─────────────────────────────────────────────────
 
-        display_key = self._current_display_key()
-        self._plot.setLabel("left", _KINEMATIC_LABELS[display_key])
+    def _redraw_plot(self, key: str):
+        """Rebuild both the original-data and spline-fit traces for one
+        kinematic's plot. Called for all four keys after a checkbox
+        toggle or a successful Update Plot."""
+        plot = self._plots[key]
+        plot.clear()
+        self._legends[key].clear()
 
         if self._show_original_check.isChecked():
-            measured = self._measured[display_key]
+            measured = self._measured[key]
             first = True
             for t_seg, v_seg in self._split_segments(self._time, measured):
                 item = pg.PlotDataItem(
                     x=t_seg, y=v_seg,
                     pen=pg.mkPen(color='k', width=4),
                 )
-                self._plot.addItem(item)
+                plot.addItem(item)
                 if first:
-                    self._legend.addItem(item, "Original Data")
+                    self._legends[key].addItem(item, "Original Data")
                     first = False
 
         if self._show_filtered_check.isChecked() and self._kinematic_result is not None:
@@ -418,39 +474,30 @@ class SplineTestingDialog(QDialog):
             pen.setStyle(Qt.PenStyle.CustomDashLine)
             pen.setDashPattern([4, 4])   # longer dash, longer gap than the old DashLine default
 
-            calc = self._kinematic_result[f"calc_{display_key}"]
+            calc = self._kinematic_result[f"calc_{key}"]
             first = True
             for t_seg, v_seg in self._split_segments(self._time, calc):
-                item = pg.PlotDataItem(
-                    x=t_seg, y=v_seg,
-                    pen=pen,
-                )
-                self._plot.addItem(item)
+                item = pg.PlotDataItem(x=t_seg, y=v_seg, pen=pen)
+                plot.addItem(item)
                 if first:
-                    self._legend.addItem(item, f"Spline Fit (s = {self._last_s})")
+                    self._legends[key].addItem(item, f"Spline Fit (s = {self._last_s})")
                     first = False
 
-        if auto_range:
-            self._plot.autoRange()
+    # ── Live goodness-of-fit as each plot's itle ───────────
 
-    # ── Live goodness-of-fit readout ─────────────────────────────────────
-
-    def _update_fit_status_label(self):
-        display_key = self._current_display_key()
+    def _update_plot_title(self, key: str):
+        plot = self._plots[key]
         if self._kinematic_result is None:
-            self._fit_status_label.setText("No spline fit applied yet.")
+            plot.setTitle("No spline fit applied yet.", size="9pt")
             return
 
-        measured = self._measured[display_key]
-        calculated = self._kinematic_result[f"calc_{display_key}"]
+        measured = self._measured[key]
+        calculated = self._kinematic_result[f"calc_{key}"]
         rmse, mae, max_err, min_err, mean_err = compute_error_metrics(measured, calculated)
-
-        label = BASE_LABELS[display_key]
-        role = "fitted base" if display_key == self._fitting_base else "derived"
+        role = "fitted base" if key == self._fitting_base else "derived"
 
         if np.isnan(rmse):
-            self._fit_status_label.setText(
-                f"{label} ({role}): no overlapping measured points to compare.")
+            plot.setTitle(f"({role}) — no overlapping measured points to compare", size="9pt")
             return
 
         n_compared = int(np.sum(~np.isnan(measured) & ~np.isnan(calculated)))
@@ -461,15 +508,29 @@ class SplineTestingDialog(QDialog):
             and nearest_valid_ic(self._time, self._measured[name], self._time_valid[0]) is None
         ]
         note = (
-            f"\n(No measured {', '.join(missing_ic)} available to anchor "
-            f"initial conditions — result may be offset.)"
+            f" — no measured {', '.join(missing_ic)} to anchor initial "
+            f"conditions; result may be offset"
             if missing_ic else ""
         )
-        self._fit_status_label.setText(
-            f"{label} ({role}) vs. measured — n={n_compared}\n"
-            f"RMSE: {rmse:.4f}   MAE: {mae:.4f}\n"
-            f"Max: {max_err:.4f}   Min: {min_err:.4f}   Mean: {mean_err:.4f}{note}"
+        plot.setTitle(
+            f"({role})  n={n_compared}   RMSE: {rmse:.4f}   MAE: {mae:.4f}   "
+            f"Max: {max_err:.4f}   Min: {min_err:.4f}   Mean: {mean_err:.4f}{note}",
+            size="9pt",
         )
+
+    # ── Tab labels ───────────────────────────────────────────────────────
+
+    def _update_tab_labels(self):
+        """Append '*' to the tab of whichever kinematic was used as the
+        fitting base for the currently applied fit, so the user can tell
+        which one it is without opening that tab. No tab is marked until
+        the first successful Update Plot click."""
+        for i, key in enumerate(KINEMATICS):
+            label = _TAB_LABELS[key]
+            is_base = key == self._fitting_base
+            self._tabs.setTabText(i, f"{label}*" if is_base else label)
+            self._tabs.setTabToolTip(
+                i, "Used as the spline fitting base" if is_base else "")
 
     def _build_export_plot(self, key: str) -> pg.PlotWidget:
         """Render kinematic *key* into a standalone PlotWidget for SVG export.
@@ -509,36 +570,48 @@ class SplineTestingDialog(QDialog):
         plot.autoRange()
         return plot
 
+    # ── Save: HTML with embedded SVG and pan/zoom JS ───────────────────
+
     def _on_save_plots(self):
-        if self._kinematic_result is None:
-            return  # Save button is disabled in this state; defensive no-op
-    
-        from utils import default_save_stem
-        stem = default_save_stem(
-            f"spline_fit_test_e{self._event_id}_v{self._veh_id}", self._fitting_base,
-        )
-        default = str(Path.home() / f"{stem}.html")
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Save Plots", default, "HTML Files (*.html);;All Files (*)",
-        )
-        if not path:
-            return
-    
-        try:
-            svg_blocks = []
-            for key in KINEMATICS:
-                label = BASE_LABELS[key]
-                if key == self._fitting_base:
-                    label += " (Fitting Base)"
-                svg_blocks.append((label, export_plot_to_svg(self._build_export_plot(key))))
-    
-            k = self._k_combo.currentData()
-            title = (
-                f"Spline Fitting Test — Event {self._event_id}, Vehicle {self._veh_id} — "
-                f"Base: {BASE_LABELS[self._fitting_base]}, s = {self._last_s}, k = {k}"
+            from utils import default_save_stem
+            stem = default_save_stem(
+                f"spline_fit_test_e{self._event_id}_v{self._veh_id}",
+                self._fitting_base or "unfit",
             )
-            html = build_svg_html(title, svg_blocks, grid_columns=2, cell_height_px=320)
-            Path(path).write_text(html, encoding="utf-8")
-        except Exception as exc:
-            logger.exception("Failed to save spline testing plots")
-            QMessageBox.critical(self, "Save Failed", f"Could not save file:\n{exc}")
+            default = str(Path.home() / f"{stem}.html")
+            path, _ = QFileDialog.getSaveFileName(
+                self, "Save Plots", default,
+                "HTML Files (*.html);;All Files (*)",
+            )
+            if not path:
+                return
+    
+            original_index = self._tabs.currentIndex()
+            try:
+                svg_blocks = []
+                for i, key in enumerate(KINEMATICS):
+                    # A tab that's never been the active page has never
+                    # received a real resize/layout pass, so its PlotItem's
+                    # axis geometry and auto-range can be stale or partial.
+                    # Bring it to front and flush the event loop so Qt
+                    # actually lays it out before we export it.
+                    self._tabs.setCurrentIndex(i)
+                    QApplication.processEvents()
+                    svg_blocks.append(
+                        (self._tabs.tabText(i), export_plot_to_svg(self._plots[key]))
+                    )
+    
+                title = f"Spline Fitting Test — Event {self._event_id}, Vehicle {self._veh_id}"
+                if self._kinematic_result is not None:
+                    k = self._k_combo.currentData()
+                    title += (
+                        f" — Base: {BASE_LABELS[self._fitting_base]}, "
+                        f"s = {self._last_s}, k = {k}"
+                    )
+                html = build_svg_html(title, svg_blocks, grid_columns=2, cell_height_px=320)
+                Path(path).write_text(html, encoding="utf-8")
+            except Exception as exc:
+                logger.exception("Failed to save spline testing plots")
+                QMessageBox.critical(self, "Save Failed", f"Could not save file:\n{exc}")
+            finally:
+                self._tabs.setCurrentIndex(original_index)
