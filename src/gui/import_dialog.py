@@ -4,9 +4,10 @@ import logging
 import math
 from datetime import datetime
 from pathlib import Path
-from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QProgressBar, QTextEdit, QFileDialog, QMessageBox, QLabel
+from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QProgressBar, QTextEdit, QFileDialog, QMessageBox, QLabel, QApplication
 from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
 from data_import.base_process import BaseProcess
+from data_import.postgres_helper import process_postgres_csv
 from utils import get_user_data_path
 import importlib
 
@@ -300,23 +301,28 @@ class ImportDialog(QDialog):
         
         # Button row
         button_layout = QHBoxLayout()
-        self._input_button = QPushButton("Input")
+        self._input_button = QPushButton("Input CSV")
+        self._db_button = QPushButton("Input DB")
         self._output_button = QPushButton("Output")
         self._import_button = QPushButton("Import")
         self._interrupt_button = QPushButton("Interrupt")
 
         self._input_button.setToolTip("Select the input file to import")
+        self._db_button.setToolTip("Select a CSV file containing a Postgres URI")
         self._output_button.setToolTip("Set the database output path")
         self._import_button.setToolTip("Begin importing the selected file")
         self._interrupt_button.setToolTip("Stop the running import process")
         
         self._input_button.setEnabled(False)
+        self._db_button.setEnabled(False)
         self._output_button.setEnabled(False)
         self._import_button.setEnabled(False)
         self._interrupt_button.setEnabled(False)
 
         button_layout.addStretch()
         button_layout.addWidget(self._input_button)
+        button_layout.addStretch()
+        button_layout.addWidget(self._db_button)
         button_layout.addStretch()
         button_layout.addWidget(self._output_button)
         button_layout.addStretch()
@@ -329,6 +335,7 @@ class ImportDialog(QDialog):
         
         # Connect signals
         self._input_button.clicked.connect(self._select_input)
+        self._db_button.clicked.connect(self._select_db_input)
         self._output_button.clicked.connect(self._select_output)
         self._import_button.clicked.connect(self._on_import)
         self._interrupt_button.clicked.connect(self._interrupt_import)
@@ -389,6 +396,7 @@ class ImportDialog(QDialog):
             self._log_message(f"Info: Available file types for import: {file_types}", True)
             self._log_message("Info: Please select an input file.", True)
             self._input_button.setEnabled(True)
+            self._db_button.setEnabled(True)
 
     def _log_message(self, message: str, is_html: bool = False):
         """Log a message to the text edit and log file."""
@@ -590,6 +598,13 @@ class ImportDialog(QDialog):
             self._worker_thread.deleteLater()
             self._worker_thread = None
 
+        if self._input_path and "tmp" in self._input_path.lower():
+            try:
+                Path(self._input_path).unlink()
+                logger.debug(f"Cleaned up temporary CSV: {self._input_path}")
+            except Exception as e:
+                logger.error(f"Failed to delete temp CSV {self._input_path}: {e}") 
+
         self._input_path = ""
         self._output_path = ""
         self._selected_file_type = ""
@@ -640,3 +655,43 @@ class ImportDialog(QDialog):
             self.import_finished.emit("")
 
         event.accept()
+
+    def _select_db_input(self):
+        """Handle database URI file selection and processing."""
+        
+        # 1. Build the exact same file types string as the normal input button
+        file_types = ";;".join([f"{ft} (*.{config['file_ext']})" for ft, config in self._configs.items()])
+        
+        # 2. Open the file dialog, allowing the user to select the URI CSV AND the config type
+        file_path, selected_filter = QFileDialog.getOpenFileName(
+            self,
+            "Select DB URI File",
+            "",
+            file_types
+        )
+        
+        if file_path:
+            # 3. Extract the config type exactly like the original code does
+            config_type = selected_filter.split(" (")[0]
+            
+            self._log_message("Info: Connecting to database...", True)
+            QApplication.processEvents()
+            # Call the external helper
+            temp_path = process_postgres_csv(self, file_path)
+            
+            if temp_path:
+                # 4. Carry the selected JSON config and temp path into the main process
+                self._input_path = temp_path
+                self._selected_file_type = config_type
+                
+                # Automatically set an output path based on the chosen config
+                self._output_path = str(Path(temp_path).with_suffix(".sqlite"))
+                
+                self._log_message(f"Info: Database query complete. Data staged for {config_type}.", True)
+                self._log_message(f"Info: Output file set to: {self._output_path}", True)
+                self._log_message("Info: You can change the output file.", True)
+                
+                self._output_button.setEnabled(True)
+                self._import_button.setEnabled(True)
+            else:
+                self._log_message("Warning: Database selection canceled or failed.", False)
