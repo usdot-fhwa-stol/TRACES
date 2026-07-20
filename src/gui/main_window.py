@@ -263,17 +263,31 @@ class MainWindow(QMainWindow):
             if self._home_widget and self.centralWidget() == self._home_widget:
                 self._home_widget.refresh(self._recent_files)
 
+    # Columns that every valid trajectory database must provide in the
+    # events table. Matches the required set enforced by the import
+    # configuration check (BaseProcess.check_configuration implementations).
+    _REQUIRED_EVENTS_COLUMNS = ("event_id", "veh_id", "veh_time",
+                                "lane_id", "veh_dist_trav")
+
     def _check_database(self, file_path: str) -> bool:
-        """Check if the file is a valid SQLite database with correct events table.
+        """Check if the file is a valid trajectory database.
+
+        With the config-driven import schema, databases no longer share a
+        fixed column layout. A valid database is one that:
+            * contains an ``events`` table with the required columns
+              (event_id, veh_id, veh_time, lane_id, veh_dist_trav),
+            * contains a ``ranges`` table (created last by the import
+              worker, so its presence also marks a completed import),
+            * has at least one record in ``events``.
+
+        All other columns are optional; consumers must check for them via
+        ``PRAGMA table_info(events)`` before use.
 
         Args:
             file_path (str): Path to the SQLite database file.
 
         Returns:
-            bool: True if database is valid and contains data, False otherwise.
-
-        Raises:
-            sqlite3.Error: If SQLite operations fail.
+            bool: True if the database is valid and contains data, False otherwise.
         """
         import sqlite3
         try:
@@ -281,49 +295,40 @@ class MainWindow(QMainWindow):
             conn = sqlite3.connect(file_path)
             cursor = conn.cursor()
 
-            # Check if events table exists
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='events'")
-            if not cursor.fetchone():
+            # Check that both required tables exist
+            cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' "
+                "AND name IN ('events', 'ranges')"
+            )
+            found_tables = {row[0] for row in cursor.fetchall()}
+
+            if "events" not in found_tables:
                 conn.close()
-                QMessageBox.critical(self, "Error", "Database does not contain an 'events' table.")
+                QMessageBox.critical(self, "Error",
+                                     "Database does not contain an 'events' table.")
                 return False
 
-            # Check table schema
-            expected_columns = {
-                "event_id": "INTEGER",
-                "veh_id": "INTEGER",
-                "veh_time": "REAL",
-                "lane_id": "INTEGER",
-                "orig_lane_id": "INTEGER",
-                "x_map_loc": "REAL",
-                "y_map_loc": "REAL",
-                "x_frenet_loc": "REAL",
-                "y_frenet_loc": "REAL",
-                "x_map_origin": "REAL",
-                "y_map_origin": "REAL",
-                "veh_lat": "REAL",
-                "veh_lon": "REAL",
-                "veh_speed": "REAL",
-                "veh_accel": "REAL",
-                "veh_length": "REAL",
-                "veh_width": "REAL",
-                "veh_automation": "INTEGER",
-                "osm_way_id": "INTEGER",
-                "osm_speed_limit": "INTEGER",
-                "osm_traffic_control": "INTEGER",
-                "preceding_veh_id": "INTEGER",
-                "veh_dist_trav": "REAL",
-                "event_name": "TEXT"
-            }
+            if "ranges" not in found_tables:
+                conn.close()
+                QMessageBox.critical(
+                    self, "Error",
+                    "Database does not contain a 'ranges' table. The import "
+                    "may not have completed successfully — re-import the "
+                    "source file.")
+                return False
 
+            # Check that the events table has the required columns
             cursor.execute("PRAGMA table_info(events)")
-#            columns = {row[1]: row[2] for row in cursor.fetchall()}
-            
-#            if columns != expected_columns:
-#                conn.close()
-#                QMessageBox.critical(self, "Error", 
-#                                   "Events table schema does not match expected format.")
-#                return False
+            existing_columns = {row[1] for row in cursor.fetchall()}
+            missing = [c for c in self._REQUIRED_EVENTS_COLUMNS
+                       if c not in existing_columns]
+            if missing:
+                conn.close()
+                QMessageBox.critical(
+                    self, "Error",
+                    "Events table is missing required column(s): "
+                    f"{', '.join(missing)}.")
+                return False
 
             # Check for at least one record
             cursor.execute("SELECT COUNT(*) FROM events")
