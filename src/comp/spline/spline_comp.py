@@ -118,10 +118,12 @@ class SplineRowResult:
 
     ``is_spline_imputed=False`` rows already exist in the events table —
     only the four calc_* columns get UPDATEd. ``is_spline_imputed=True``
-    rows do not exist yet and must be INSERTed; ``lane_id``/``orig_lane_id``
-    are inherited from the temporally nearest *earlier* measured record
-    (per the application's row-creation rule), and every measured column
-    besides those two stays NULL.
+    rows do not exist yet and must be INSERTed; ``lane_id``
+    is inherited from the temporally nearest *earlier* measured record
+    (per the application's row-creation rule) so imputed rows appear
+    under the correct lane filter, and every other measured column stays
+    NULL — including orig_lane_id, since an imputed row has no original
+    source record for it to describe.
 
     The meas_* fields are never written to the database — they exist only
     so summarize_fit() can compare calculated vs. measured values for
@@ -135,7 +137,6 @@ class SplineRowResult:
     is_spline_imputed: bool
 
     lane_id: Optional[int] = None
-    orig_lane_id: Optional[int] = None
 
     calc_position: float = NAN
     calc_speed: float = NAN
@@ -479,7 +480,7 @@ class SplineComp(BaseComp):
         has_accel = "veh_accel" in columns
         has_jerk = "veh_jerk" in columns
 
-        select_cols = ["veh_id", "veh_time", "veh_dist_trav", "lane_id", "orig_lane_id"]
+        select_cols = ["veh_id", "veh_time", "veh_dist_trav", "lane_id"]
         if has_speed:
             select_cols.append("veh_speed")
         if has_accel:
@@ -518,7 +519,6 @@ class SplineComp(BaseComp):
             accel_meas = self._to_nan_array(d["veh_accel"]) if has_accel else np.full(n, NAN)
             jerk_meas = self._to_nan_array(d["veh_jerk"]) if has_jerk else np.full(n, NAN)
             lane_ids = d["lane_id"]
-            orig_lane_ids = d["orig_lane_id"]
 
             base_array = {
                 "position": dist,
@@ -581,7 +581,7 @@ class SplineComp(BaseComp):
                     all_rows.append(SplineRowResult(
                         event_id=event_id, veh_id=veh_id, veh_time=float(tt),
                         is_spline_imputed=False,
-                        lane_id=lane_ids[j], orig_lane_id=orig_lane_ids[j],
+                        lane_id=lane_ids[j],
                         calc_position=fit["calc_position"][i],
                         calc_speed=fit["calc_speed"][i],
                         calc_acceleration=fit["calc_acceleration"][i],
@@ -594,7 +594,7 @@ class SplineComp(BaseComp):
                     all_rows.append(SplineRowResult(
                         event_id=event_id, veh_id=veh_id, veh_time=float(tt),
                         is_spline_imputed=True,
-                        lane_id=lane_ids[j], orig_lane_id=orig_lane_ids[j],
+                        lane_id=lane_ids[j],
                         calc_position=fit["calc_position"][i],
                         calc_speed=fit["calc_speed"][i],
                         calc_acceleration=fit["calc_acceleration"][i],

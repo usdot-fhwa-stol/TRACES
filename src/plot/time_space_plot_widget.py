@@ -115,6 +115,8 @@ class TimeSpacePlotWidget(QWidget):
         self._mode_actions       = {}    # InteractionMode → QAction
         self._shockwave_action   = None  # stored for cancel-restore
         self._shockwave_slider_widget = None  # created in _setup_ui
+        self._tooltip_select = ("lane_id, veh_speed, veh_accel, "
+                                "veh_automation, veh_length")
 
         logger.debug("TimeSpacePlotWidget initialized")
         
@@ -483,9 +485,28 @@ class TimeSpacePlotWidget(QWidget):
             time_min, time_max = self._time_slider.value()
             dist_min, dist_max = self._dist_slider.value()
 
-            from comp.base_comp import BaseComp
-            cols = BaseComp._events_columns(self._db_connection)
-    
+            from utils import events_columns
+            cols = events_columns(self._db_connection)
+
+            # Gate speed-dependent features on column presence. veh_speed is
+            # optional under the config-driven import schema.
+            has_speed = "veh_speed" in cols
+            self._speed_toggle.setEnabled(has_speed)
+            self._vertical_gradient.setEnabled(has_speed)
+            if not has_speed and self._speed_gradient_enabled:
+                self._speed_toggle.setChecked(False)
+                self._speed_gradient_enabled = False
+            speed_expr = "veh_speed" if has_speed else "NULL AS veh_speed"
+
+            # Cache the optional-column SELECT expressions for the hover
+            # tooltip query. These columns are import-time only (never added
+            # by analysis modules), so caching per data reload is safe.
+            self._tooltip_select = ", ".join(
+                col if col in cols else f"NULL AS {col}"
+                for col in ("lane_id", "veh_speed", "veh_accel",
+                            "veh_automation", "veh_length")
+            )
+
             want_spline = self._active_handler.wants_spline_position_data(self)
             if want_spline and "calc_position" in cols:
                 position_col = "calc_position"
@@ -503,7 +524,7 @@ class TimeSpacePlotWidget(QWidget):
 
             cursor = self._db_connection.cursor()
             cursor.execute(f"""
-                SELECT veh_id, veh_time, {position_col}, veh_speed
+                SELECT veh_id, veh_time, {position_col}, {speed_expr}
                 FROM events
                 WHERE event_id = ? AND lane_id = ?{where_extra}
                 ORDER BY veh_id, veh_time
@@ -674,8 +695,12 @@ class TimeSpacePlotWidget(QWidget):
 
             if self._last_queried_point != current_point:
                 cursor = self._db_connection.cursor()
-                cursor.execute("""
-                    SELECT lane_id, veh_speed, veh_accel, veh_automation, veh_length
+                tooltip_select = getattr(
+                    self, "_tooltip_select",
+                    "lane_id, veh_speed, veh_accel, veh_automation, veh_length"
+                )
+                cursor.execute(f"""
+                    SELECT {tooltip_select}
                     FROM   events
                     WHERE  event_id = ? AND veh_id = ? AND veh_time = ?
                 """, (self._current_event_id, veh_id, veh_time))

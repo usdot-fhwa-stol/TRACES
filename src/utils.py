@@ -82,3 +82,33 @@ def remember_dialog_path(path: str) -> None:
         return
     p = Path(path)
     _last_dialog_dir = str(p if p.is_dir() else p.parent)
+
+def events_columns(db_connection) -> set:
+    """Return the set of column names present in the events table.
+
+    With the config-driven import schema, databases only guarantee the
+    required columns (event_id, veh_id, veh_time, lane_id, veh_dist_trav).
+    Every consumer of an optional column — veh_speed, veh_accel,
+    orig_lane_id, veh_length, and so on — must check for its presence
+    before referencing it in SQL. This helper is the single shared way
+    to do that check.
+
+    Note: analysis modules may ALTER TABLE to add computed columns
+    (veh_speed_cal, calc_*, is_spline_imputed, ...) during a session, so
+    the result reflects the table at call time and should be re-queried
+    per operation rather than cached for the lifetime of a connection.
+
+    Args:
+        db_connection: Open connection to a trajectory database.
+
+    Returns:
+        set: Column names currently present in the events table. Empty
+            set if the table does not exist.
+    """
+    import sqlite3
+    try:
+        cursor = db_connection.cursor()
+        cursor.execute("PRAGMA table_info(events)")
+        return {row[1] for row in cursor.fetchall()}
+    except sqlite3.Error:
+        return set()

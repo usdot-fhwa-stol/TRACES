@@ -40,7 +40,7 @@ from .spline_comp import (
 logger = logging.getLogger(__name__)
 
 _INSERT_COLUMNS = [
-    "event_id", "veh_id", "veh_time", "lane_id", "orig_lane_id",
+    "event_id", "veh_id", "veh_time", "lane_id",
     "calc_position", "calc_speed", "calc_acceleration", "calc_jerk",
     "is_spline_imputed",
 ]
@@ -276,7 +276,7 @@ class SplineCompDialog(BaseAnalysisDialog):
                     f"INSERT INTO events ({', '.join(_INSERT_COLUMNS)}) "
                     f"VALUES ({placeholders})",
                     [
-                        (r.event_id, r.veh_id, r.veh_time, r.lane_id, r.orig_lane_id,
+                        (r.event_id, r.veh_id, r.veh_time, r.lane_id,
                          r.calc_position, r.calc_speed, r.calc_acceleration,
                          r.calc_jerk, 1)
                         for r in imputed_rows

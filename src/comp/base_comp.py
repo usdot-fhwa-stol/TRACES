@@ -59,9 +59,11 @@ class BaseComp(ABC):
 
     @staticmethod
     def _events_columns(db_connection: sqlite3.Connection) -> set:
-        cursor = db_connection.cursor()
-        cursor.execute("PRAGMA table_info(events)")
-        return {row[1] for row in cursor.fetchall()}
+        """Column names present in the events table. Delegates to the shared
+        utils.events_columns helper so plot and gui modules can perform the
+        same check without importing from the comp package."""
+        from utils import events_columns
+        return events_columns(db_connection)
 
     @staticmethod
     def _event_veh_ids(db_connection: sqlite3.Connection, event_id: int) -> List[int]:

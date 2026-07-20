@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import QMenu
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction
 import pyqtgraph as pg
+from utils import events_columns
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -63,8 +64,8 @@ class CustomViewBox(pg.ViewBox):
         self._context_menu_registry = [
             {'filter': 'ASO', 'label': 'Statistics',         'callback': self._generate_statistics},
             {'filter': 'ASO', 'label': 'Plots', 'submenu': [
-                {'filter': 'SO', 'label': 'Time-Speed Plot', 'callback': self._show_time_speed_dialog},
-                {'filter': 'SO', 'label': 'Time-Accel Plot', 'callback': self._show_time_accel_dialog},
+                {'filter': 'SO', 'label': 'Time-Speed Plot', 'callback': self._show_time_speed_dialog, 'requires_column': 'veh_speed'},
+                {'filter': 'SO', 'label': 'Time-Accel Plot', 'callback': self._show_time_accel_dialog, 'requires_column': 'veh_accel'},
             ]},
             {'filter': 'ASO', 'label': 'Filter', 'submenu': [
                 {'single_only': True, 'label': 'Spline Fitting', 'callback': self._open_spline_testing_dialog},
@@ -362,6 +363,7 @@ class CustomViewBox(pg.ViewBox):
         context_menu.addSeparator()
 
         # Add menu items based on registry and current context.
+        available_cols = events_columns(self.parent_widget._db_connection) if self.parent_widget._db_connection else set()
         vehicle_count = len(self._get_target_vehicle_ids())
         for item in self._context_menu_registry:
                     if menu_type not in item['filter']:
@@ -374,6 +376,8 @@ class CustomViewBox(pg.ViewBox):
                             sub_filter = sub_item.get('filter')
                             context_ok = sub_filter is None or menu_type in sub_filter
                             single_ok = not sub_item.get('single_only') or vehicle_count == 1
+                            req_col = sub_item.get('requires_column')
+                            column_ok = req_col is None or req_col in available_cols
                             if sub_item.get('callback') is None:
                                 sub_action.setEnabled(False)
                                 sub_action.setToolTip(sub_item.get('disabled_tooltip', _NOT_IMPLEMENTED_TOOLTIP))
@@ -383,6 +387,10 @@ class CustomViewBox(pg.ViewBox):
                             elif not single_ok:
                                 sub_action.setEnabled(False)
                                 sub_action.setToolTip(sub_item.get('disabled_tooltip', _SINGLE_SELECTION_TOOLTIP))
+                            elif not column_ok:
+                                sub_action.setEnabled(False)
+                                sub_action.setToolTip(
+                                    f"This dataset does not contain the {req_col} column.")
                             else:
                                 sub_action.triggered.connect(
                                     lambda checked, cb=sub_item['callback']: cb()
@@ -728,14 +736,8 @@ class CustomViewBox(pg.ViewBox):
         if len(target_veh_ids) != 1:
             logger.warning("Spline Fitting requested without exactly one trajectory in context")
             return
+
         veh_id = target_veh_ids[0]
-    
-        veh_ids, series_colors, _ = self._get_vehicle_data_for_context()
-        try:
-            color = series_colors[veh_ids.index(veh_id)]
-        except (ValueError, IndexError):
-            color = '#1f77b4'
-    
         from comp.spline import SplineTestingDialog
         dialog = SplineTestingDialog(
             self.parent_widget,
