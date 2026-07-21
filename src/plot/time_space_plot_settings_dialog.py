@@ -20,6 +20,8 @@ class TimeSpacePlotSettingsDialog(QDialog):
     Attributes:
         _db_connection (sqlite3.Connection): Database connection for querying.
         _defaults (dict): Control values when re-opened from plot widget.
+        _search_action (QAction): action for activating search vehicle feature.
+        _had_prior_event (bool): flag that prior event was selected.
         _event_combobox (QComboBox): Combobox for selecting event ID.
         _lane_count_label (QLabel): Label displaying number of lanes.
         _veh_count_label (QLabel): Label displaying number of vehicles.
@@ -36,17 +38,23 @@ class TimeSpacePlotSettingsDialog(QDialog):
     # event_id, time_min, time_max, dist_min, dist_max, event_summary
     settings_applied = pyqtSignal(int, float, float, float, float, dict)
 
-    def __init__(self, parent=None, db_connection: sqlite3.Connection = None, defaults: dict = None):
+    def __init__(self, parent = None, db_connection: sqlite3.Connection = None, 
+                 defaults: dict = None, search_action = None):
         """Initialize the TimeSpacePlotSettingsDialog.
         
         Args:
             parent: Parent widget (typically MainWindow or TimeSpacePlotWidget).
             db_connection (sqlite3.Connection): Database connection for querying.
             defaults (dict): Default settings to restore when reopening dialog.
+            search_action (QAction): Optional View > Search Vehicle action. When
+                given, this dialog owns disabling it immediately on open and
+                re-enabling it on close, per the rules in `_on_finished`.
         """
         super().__init__(parent)
         self._db_connection = db_connection
         self._defaults = defaults
+        self._search_action = search_action
+        self._had_prior_event = bool(defaults and "event_id" in defaults)
         self._event_combobox = None
         self._lane_count_label = None
         self._veh_count_label = None
@@ -60,6 +68,10 @@ class TimeSpacePlotSettingsDialog(QDialog):
         self._current_event_summary = {}
         
         logger.debug("TimeSpacePlotSettingsDialog initialized")
+
+        if self._search_action is not None:
+            self._search_action.setEnabled(False)
+            self.finished.connect(self._on_finished)
         
         self._setup_ui()
         self._populate_events()
@@ -429,3 +441,22 @@ class TimeSpacePlotSettingsDialog(QDialog):
             self._current_event_summary,
         )
         self.accept()
+
+    def _on_finished(self, result: int):
+        """Re-enable the Search Vehicle action once a valid event_id is
+        confirmed again.
+
+        This happens either because the dialog was accepted (a new or
+        re-confirmed event_id is now set), or because it was cancelled but a
+        previously valid event still stands (the plot widget's existing
+        event_id is unaffected by the cancel). If the dialog was cancelled
+        with no prior event (e.g. the very first dialog shown after import),
+        the action stays disabled -- no event has ever been confirmed.
+
+        Args:
+            result (int): QDialog.DialogCode passed by the `finished` signal.
+        """
+        if self._search_action is None:
+            return
+        if result == QDialog.DialogCode.Accepted or self._had_prior_event:
+            self._search_action.setEnabled(True)

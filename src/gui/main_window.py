@@ -1,9 +1,13 @@
+import logging
 from pathlib import Path
 from PyQt6.QtWidgets import QMainWindow, QMenuBar, QMenu, QApplication, QFileDialog, QMessageBox, QDialog
 from PyQt6.QtGui import QAction
 from PyQt6.QtCore import QTimer
 from .home_widget import HomeWidget
 from utils import get_user_data_path, last_dialog_dir, remember_dialog_path
+
+# Set up logger
+logger = logging.getLogger(__name__)
 
 class MainWindow(QMainWindow):
     """Main window for the Trajectory Tools application.
@@ -20,6 +24,9 @@ class MainWindow(QMainWindow):
         _db_connection (sqlite3.Connection): Current database connection.
         _plot_widget (TimeSpacePlotWidget): Plot widget for displaying trajectory data.
         _selected_export_columns (list): List of selected column names for export.
+        _search_vehicle_action (QAction): View > Search Vehicle menu action;
+            enabled/disabled by TimeSpacePlotSettingsDialog.
+        _search_dialog (VehicleSearchDialog): Modeless vehicle search dialog, or None.
     """
 
     def __init__(self):
@@ -34,6 +41,8 @@ class MainWindow(QMainWindow):
         self._plot_widget = None
         self._import_dialog = None
         self._selected_export_columns = []  # Initially empty list of selected export columns
+        self._search_vehicle_action = None
+        self._search_dialog = None
         self._home_widget = None
         self._log_viewer_dialog = None
         
@@ -121,7 +130,13 @@ class MainWindow(QMainWindow):
         # View menu
         view_menu = QMenu("&View", self)
         menu_bar.addMenu(view_menu)
-        
+
+        self._search_vehicle_action = QAction("&Search Vehicle", self)
+        self._search_vehicle_action.setEnabled(False)
+        self._search_vehicle_action.triggered.connect(self._open_vehicle_search_dialog)
+        self._search_vehicle_action.changed.connect(self._on_search_action_changed)
+        view_menu.addAction(self._search_vehicle_action)
+
         log_action = QAction("&Log", self)
         log_action.triggered.connect(self._show_log_viewer)
         view_menu.addAction(log_action)
@@ -366,7 +381,8 @@ class MainWindow(QMainWindow):
             
             # Show settings dialog before creating plot widget
             from plot.time_space_plot_settings_dialog import TimeSpacePlotSettingsDialog
-            settings_dialog = TimeSpacePlotSettingsDialog(parent=self, db_connection=self._db_connection)
+            settings_dialog = TimeSpacePlotSettingsDialog(parent=self, 
+                db_connection=self._db_connection, search_action=self._search_vehicle_action)
             settings_dialog.settings_applied.connect(self._create_plot_widget)
             
             result = settings_dialog.exec()
@@ -397,7 +413,8 @@ class MainWindow(QMainWindow):
             
             # Show settings dialog before creating plot widget
             from plot.time_space_plot_settings_dialog import TimeSpacePlotSettingsDialog
-            settings_dialog = TimeSpacePlotSettingsDialog(parent=self, db_connection=self._db_connection)
+            settings_dialog = TimeSpacePlotSettingsDialog(parent=self, 
+                db_connection=self._db_connection, search_action=self._search_vehicle_action)
             settings_dialog.settings_applied.connect(self._create_plot_widget)
             
             result = settings_dialog.exec()
@@ -441,7 +458,8 @@ class MainWindow(QMainWindow):
         if self._db_connection:
             # Show settings dialog before creating plot widget
             from plot.time_space_plot_settings_dialog import TimeSpacePlotSettingsDialog
-            settings_dialog = TimeSpacePlotSettingsDialog(parent=self, db_connection=self._db_connection)
+            settings_dialog = TimeSpacePlotSettingsDialog(parent=self, 
+                db_connection=self._db_connection, search_action=self._search_vehicle_action)
             settings_dialog.settings_applied.connect(self._create_plot_widget)
             
             result = settings_dialog.exec()
@@ -456,6 +474,10 @@ class MainWindow(QMainWindow):
 
     def _close_database_and_reset(self):
         """Close the current database connection and reset the window state."""
+        if self._search_dialog:
+            self._search_dialog.close()
+        self._search_vehicle_action.setEnabled(False)
+
         # Close database connection
         if self._db_connection:
             self._db_connection.close()
@@ -498,6 +520,7 @@ class MainWindow(QMainWindow):
         from plot.time_space_plot_widget import TimeSpacePlotWidget
         if not self._plot_widget:
             self._plot_widget = TimeSpacePlotWidget(mode_menu=self._mode_menu)
+            self._plot_widget.set_search_action(self._search_vehicle_action)
         
         # Set database connection and apply settings with all parameters
         self._plot_widget.set_database(self._db_connection)
@@ -622,6 +645,31 @@ class MainWindow(QMainWindow):
         self._recent_files = self._recent_files[:7]  # Keep only 7 recent files
         self._update_recent_menu()
 
+    def _open_vehicle_search_dialog(self):
+        """Open (or bring forward) the modeless VehicleSearchDialog."""
+        if not self._plot_widget:
+            logger.warning("No plot widget available for vehicle search")
+            return
+
+        if self._search_dialog is None:
+            from plot.vehicle_search_dialog import VehicleSearchDialog
+            self._search_dialog = VehicleSearchDialog(
+                parent=self, veh_ids=self._plot_widget.get_vehicle_ids())
+            self._search_dialog.vehicle_selected.connect(self._plot_widget.select_searched_vehicle)
+        else:
+            self._search_dialog.set_vehicle_ids(self._plot_widget.get_vehicle_ids())
+
+        self._search_dialog.show()
+        self._search_dialog.raise_()
+        self._search_dialog.activateWindow()
+
+    def _on_search_action_changed(self):
+        """React to the Search Vehicle action's enabled state, which is owned
+        by TimeSpacePlotSettingsDialog. Close the modeless search dialog
+        whenever the action becomes disabled (event no longer confirmed)."""
+        if not self._search_vehicle_action.isEnabled() and self._search_dialog is not None:
+            self._search_dialog.close()
+
     def _show_log_viewer(self) -> None:
         """Show the modeless System Log Viewer dialog.
     
@@ -648,6 +696,9 @@ class MainWindow(QMainWindow):
         """
         if self._log_viewer_dialog is not None:
             self._log_viewer_dialog.close()
+
+        if self._search_dialog is not None:
+            self._search_dialog.close()
 
         if self._db_connection:
             self._db_connection.close()
