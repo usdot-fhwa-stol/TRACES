@@ -24,7 +24,7 @@ class ShockwaveResultsTableDialog(QDialog):
         ("Shockwave ID",      "id",         "{:d}",   Qt.AlignmentFlag.AlignRight),
         ("Mode",              "mode",       "{}",     Qt.AlignmentFlag.AlignLeft),
         ("Equation",          "equation",   "{}",     Qt.AlignmentFlag.AlignLeft),
-        ("Speed (dist/time)", "slope",      "{:.4f}", Qt.AlignmentFlag.AlignRight),
+        ("Speed (m/s)", "slope",      "{:.4f}", Qt.AlignmentFlag.AlignRight),
         ("R²",                "r_squared",  "{:.4f}", Qt.AlignmentFlag.AlignRight),
         ("Points Used",       "num_points", "{:d}",   Qt.AlignmentFlag.AlignRight),
     ]

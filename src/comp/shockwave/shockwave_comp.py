@@ -22,7 +22,7 @@ class InflectionPoint:
 class ShockwaveResult:
     id:         int
     mode:       str            # "semi_auto" | "manual" | "automatic"
-    slope:      float          # shockwave speed (distance unit / time unit)
+    slope:      float          # shockwave speed (m/s)
     intercept:  float
     r_squared:  float
     equation:   str            # "distance = {slope} * time + {intercept}"
@@ -69,7 +69,6 @@ class ShockwaveComp:
 
         Falls back to (0, mean(y)) when the x-range is degenerate.
         """
-        n    = len(x)
         xbar = x.mean()
         ybar = y.mean()
         denom = np.sum((x - xbar) ** 2)

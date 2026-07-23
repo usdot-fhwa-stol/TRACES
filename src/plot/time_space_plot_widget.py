@@ -264,11 +264,17 @@ class TimeSpacePlotWidget(QWidget):
             logger.warning("No database connection available for settings dialog")
             return
 
+        # Only hand control of the action to the dialog if we're currently
+        # in Select mode -- otherwise it's already (correctly) disabled by
+        # the active non-Select mode and must stay that way regardless of
+        # whether the dialog is accepted or cancelled.
+        search_action = self._search_action if self._interaction_mode == InteractionMode.SELECT else None
+
         settings_dialog = TimeSpacePlotSettingsDialog(parent=self, db_connection=self._db_connection, 
             defaults = {"event_id": self._current_event_id, 
                 "dist_range": self._dist_range, 
                 "time_range": self._time_range},
-            search_action=self._search_action)
+            search_action=search_action)
         settings_dialog.settings_applied.connect(self._apply_settings)
 
         # Show dialog modally
@@ -332,6 +338,7 @@ class TimeSpacePlotWidget(QWidget):
         )
         
         self._setup_mode_menu()
+        self._update_search_action_for_mode(InteractionMode.SELECT)
         
     def _initialize_series_from_ids(self):
         """Initialize the _series dictionary using the provided vehicle IDs."""
@@ -926,6 +933,24 @@ class TimeSpacePlotWidget(QWidget):
         self._mode_menu.menuAction().setVisible(True)
         logger.debug("Mode menu populated and enabled")
 
+    def _update_search_action_for_mode(self, mode: InteractionMode):
+        """Vehicle search only makes sense in Select mode, since it relies on
+        the default lasso/click selection to highlight the found trajectory.
+        Enable the Search Vehicle action only when returning to Select (and
+        only if an event is active); disable it for every other mode.
+        MainWindow reactively closes an open search dialog whenever this
+        action becomes disabled (see MainWindow._on_search_action_changed),
+        so no separate close call is needed here.
+
+        Args:
+            mode (InteractionMode): The mode just switched to.
+        """
+        if self._search_action is None:
+            return
+        self._search_action.setEnabled(
+            mode == InteractionMode.SELECT and self._current_event_id is not None
+        )
+
     def _on_mode_changed(self, mode: InteractionMode, handler=None):
         """Handle interaction mode changes driven by the Mode menu.
 
@@ -937,6 +962,8 @@ class TimeSpacePlotWidget(QWidget):
             mode, InteractionModeHandler
         )()
         self._interaction_mode = mode
+        self._active_handler.on_enter(self)
+        self._update_search_action_for_mode(mode)
         self._active_handler.on_enter(self)
         self._update_plot_data()   # position column may depend on the new handler
         logger.debug(f"Mode changed to: {mode.value}")

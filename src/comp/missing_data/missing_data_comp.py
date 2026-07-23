@@ -48,10 +48,21 @@ class MissingDataComp(BaseComp):
         if not veh_ids:
             return []
 
+        # Exclude synthetic spline-fill rows -- they exist to plug a gap,
+        # so counting them as "present" would hide the very gaps this
+        # module is meant to report. Column is optional (only added once
+        # Spline Fitting has run), so gate on its presence.
+        columns = self._events_columns(db_connection)
+        imputed_filter = (
+            " AND (is_spline_imputed = 0 OR is_spline_imputed IS NULL)"
+            if "is_spline_imputed" in columns else ""
+        )
+
         placeholders = ",".join("?" for _ in veh_ids)
         sql = (
             f"SELECT veh_id, veh_time FROM events "
-            f"WHERE event_id = ? AND veh_id IN ({placeholders}) "
+            f"WHERE event_id = ? AND veh_id IN ({placeholders})"
+            f"{imputed_filter} "
             f"ORDER BY veh_id, veh_time"
         )
         cursor = db_connection.cursor()
