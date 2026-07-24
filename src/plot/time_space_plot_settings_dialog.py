@@ -30,7 +30,7 @@ class TimeSpacePlotSettingsDialog(QDialog):
         _record_count_label (QLabel): Label displaying current record count.
         _apply_button (QPushButton): Button to apply settings.
         _current_event_id (int): Currently selected event ID.
-        _record_limit (int): Maximum allowed records (100,000).
+        _record_limit (int): Maximum allowed records.
         _current_event_summary (dict): dictonary of rollups for current event.
     """
     
