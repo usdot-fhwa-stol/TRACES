@@ -15,8 +15,47 @@
 - [11. Exporting Data](#11-exporting-data)
 - [12. Vehicle Search](#12-vehicle-search)
 - [13. System Log Viewer](#13-system-log-viewer)
-- [14. About Dialog](#14-about-dialog)
 - [Configuration Guide](trajectory-tools-config-guide.md)
+
+---
+
+## Table of Figures
+
+| Figure | Title | Section |
+|---|---|---|
+| Figure  1 | Trajectory Tools main window showing a populated time-space plot | [1. Introduction](#1-introduction) |
+| Figure  2 | Start screen with no recent files | [2. Getting Started](#2-getting-started) |
+| Figure  3 | Start screen with recent files populated | [2. Getting Started](#2-getting-started) |
+| Figure  4 | File menu showing Open, Recent, and Import | [3. Opening a Database vs. Importing CSV Data](#3-opening-a-database-vs-importing-csv-data) |
+| Figure  5 | Import dialog with input file selected, ready to import | [3. Opening a Database vs. Importing CSV Data](#3-opening-a-database-vs-importing-csv-data) |
+| Figure  6 | Import dialog mid-import with progress | [3. Opening a Database vs. Importing CSV Data](#3-opening-a-database-vs-importing-csv-data) |
+| Figure  7 | Import completion popup on success | [3. Opening a Database vs. Importing CSV Data](#3-opening-a-database-vs-importing-csv-data) |
+| Figure  8 | Time Space Plot Settings dialog for a newly opened database | [4. Selecting an Event to Plot](#4-selecting-an-event-to-plot) |
+| Figure  9 | Vehicle Limit Exceeded warning dialog | [4. Selecting an Event to Plot](#4-selecting-an-event-to-plot) |
+| Figure 10 | Analysis menu open, showing two disabled placeholder items | [5. Main Window Tour](#5-main-window-tour) |
+| Figure 11 | Mode menu open with Select Trajectory checked | [5. Main Window Tour](#5-main-window-tour) |
+| Figure 12 | Time-space plot with data loaded, no selection | [6. The Time-Space Plot](#6-the-time-space-plot) |
+| Figure 13 | Time-space plot with Show Speed enabled and a selection active | [6. The Time-Space Plot](#6-the-time-space-plot) |
+| Figure 14 | Right-click menu in the "All" context | [7. Right-Click Menu on the Plot](#7-right-click-menu-on-the-plot) |
+| Figure 15 | Noise Analysis submenu expanded | [7. Right-Click Menu on the Plot](#7-right-click-menu-on-the-plot) |
+| Figure 16 | Gap Headway mode with a locked overlay | [8. Interaction Modes](#8-interaction-modes) |
+| Figure 17 | Shockwave configuration dialog | [8. Interaction Modes](#8-interaction-modes) |
+| Figure 18 | Shockwave chain under construction | [8. Interaction Modes](#8-interaction-modes) |
+| Figure 19 | Committed shockwave with the floating results panel | [8. Interaction Modes](#8-interaction-modes) |
+| Figure 20 | Shockwave results table | [8. Interaction Modes](#8-interaction-modes) |
+| Figure 21 | Event selection checklist | [9. Data Menu — Spline Fitting](#9-data-menu--spline-fitting) |
+| Figure 22 | Spline Fitting parameter dialog | [9. Data Menu — Spline Fitting](#9-data-menu--spline-fitting) |
+| Figure 23 | Spline Fit Statistics results table | [9. Data Menu — Spline Fitting](#9-data-menu--spline-fitting) |
+| Figure 24 | Right-click Spline Fitting preview dialog | [9. Data Menu — Spline Fitting](#9-data-menu--spline-fitting) |
+| Figure 25 | Jerk Analysis parameter dialog | [10. Analysis Menu — Jerk, Missing Data, Internal Consistency](#10-analysis-menu--jerk-missing-data-internal-consistency) |
+| Figure 26 | Jerk Analysis box plot results | [10. Analysis Menu — Jerk, Missing Data, Internal Consistency](#10-analysis-menu--jerk-missing-data-internal-consistency) |
+| Figure 27 | Missing Data parameter dialog | [10. Analysis Menu — Jerk, Missing Data, Internal Consistency](#10-analysis-menu--jerk-missing-data-internal-consistency) |
+| Figure 28 | Internal Consistency combined results dialog | [10. Analysis Menu — Jerk, Missing Data, Internal Consistency](#10-analysis-menu--jerk-missing-data-internal-consistency) |
+| Figure 29 | Export Selected dialog | [11. Exporting Data](#11-exporting-data) |
+| Figure 30 | Export Analysis submenu | [11. Exporting Data](#11-exporting-data) |
+| Figure 31 | Export completion dialog | [11. Exporting Data](#11-exporting-data) |
+| Figure 32 | Vehicle Search dialog with a filtered result list | [12. Vehicle Search](#12-vehicle-search) |
+| Figure 33 | System Log Viewer window | [13. System Log Viewer](#13-system-log-viewer) |
 
 ---
 
@@ -32,6 +71,8 @@ This guide walks through the application in the order you're likely to use it: g
 
 ![Trajectory Tools main window showing a populated time-space plot](images/01-main-window-overview.png)
 *The main window with a database open and an event plotted: the time-space plot in the center, the speed gradient bar and "Show Speed" toggle on the left, time/distance range sliders and lane selector on the right, and the full menu bar (File, View, Data, Analysis, Mode) visible across the top.*
+
+*Figure 1 Trajectory Tools main window showing a populated time-space plot*
 
 ---
 
@@ -52,8 +93,12 @@ Trajectory Tools opens to a start screen with two options and a recent-files lis
 ![Start screen with no recent files](images/02-start-screen-empty.png)
 *Start screen on first launch: the two-card layout (Open Trajectories / Import Data) and an empty "No recent files" state below.*
 
+*Figure 2 Start screen with no recent files*
+
 ![Start screen with recent files populated](images/03-start-screen-recent-files.png)
 *Start screen after several databases have been opened, showing the Recent Trajectories list with multiple entries.*
+
+*Figure 3 Start screen with recent files populated*
 
 These same two actions are also available from the **File** menu (**Open** and **Import**), covered next.
 
@@ -70,6 +115,8 @@ You'll typically import a CSV once, then reopen the resulting database directly 
 
 ![File menu showing Open, Recent, and Import](images/04-file-menu-open-import.png)
 *File menu expanded, with the Recent submenu showing several previously opened databases.*
+
+*Figure 4 File menu showing Open, Recent, and Import*
 
 ### 3.1 Opening an Existing Database
 
@@ -94,6 +141,8 @@ Use **File → Import** or click **Import Data** on the start screen to open the
 ![Import dialog with input file selected, ready to import](images/05-import-dialog-ready.png)
 *Import dialog after selecting an input CSV: the log area shows the available file types and the selected input/output paths, with the Output and Import buttons enabled.*
 
+*Figure 5 Import dialog with input file selected, ready to import*
+
 **Running an import:**
 
 1. Click **Input** and choose a CSV file. The file type filter is built from your available configurations. The output database path is set automatically (same name, `.sqlite` extension) but can be changed with **Output**.
@@ -103,6 +152,8 @@ Use **File → Import** or click **Import Data** on the start screen to open the
 ![Import dialog mid-import with progress](images/06-import-dialog-progress.png)
 *Import dialog partway through an import: progress bar around 60%, log area scrolled to recent messages, Interrupt button enabled.*
 
+*Figure 6 Import dialog mid-import with progress*
+
 **When it finishes**, a completion popup appears:
 
 - **Success** — "Continue" closes the Import dialog and opens the Time Space Plot Settings dialog for the new database (same as opening it directly); "Back" returns to the Import dialog so you can import another file in the same session.
@@ -110,6 +161,8 @@ Use **File → Import** or click **Import Data** on the start screen to open the
 
 ![Import completion popup on success](images/07-import-complete-popup.png)
 *The "Import Complete" popup with its message text and the Continue / Back buttons.*
+
+*Figure 7 Import completion popup on success*
 
 Duplicate records (identical `event_id`, `veh_id`, and `veh_time`) are silently skipped rather than duplicated, so re-running an import over the same data is safe.
 
@@ -121,6 +174,8 @@ Whenever a database is opened — via File → Open, a Recent entry, or right af
 
 ![Time Space Plot Settings dialog for a newly opened database](images/08-plot-settings-dialog-initial.png)
 *Settings dialog immediately after opening a database: event name centered at top, the Event dropdown with Lanes and Total Vehicles counts beside it, the Time and Distance range sliders below (each spanning the event's full extent), and the record-count readout and Apply button at the bottom.*
+
+*Figure 8 Time Space Plot Settings dialog for a newly opened database*
 
 ### Choosing an Event
 
@@ -143,6 +198,8 @@ If you click **Apply** while over the limit, a warning dialog tells you how many
 
 ![Vehicle Limit Exceeded warning dialog](images/09-vehicle-limit-exceeded.png)
 *Warning shown on Apply when the selected time/distance window contains more than 500 vehicles, with the count filled in and Cancel as the highlighted default.*
+
+*Figure 9 Vehicle Limit Exceeded warning dialog*
 
 ### Applying Settings
 
@@ -200,12 +257,16 @@ A single item, **Spline Fitting**, which first asks you to select one or more ev
 ![Analysis menu open, showing two disabled placeholder items](images/10-analysis-menu.png)
 *Analysis menu with Jerk Analysis, Missing Data, and Internal Consistency enabled, and Platoon Consistency / Spectral Analysis grayed out as not-yet-implemented placeholders.*
 
+*Figure 10 Analysis menu open, showing two disabled placeholder items*
+
 ### Mode Menu
 
 Populated only once a plot exists, with three mutually exclusive, checkable actions: **Select Trajectory** (the default), **Gap Headway**, and **Shockwave**. Selecting Shockwave first prompts for configuration; only its **Semi-Automatic** method is currently implemented — Manual and Automatic appear in that configuration dialog but are disabled for now. Full behavior in [§8](#8-interaction-modes).
 
 ![Mode menu open with Select Trajectory checked](images/11-mode-menu.png)
 *Mode menu showing the three checkable interaction modes, with Select Trajectory active (checked) by default.*
+
+*Figure 11 Mode menu open with Select Trajectory checked*
 
 ---
 
@@ -215,6 +276,8 @@ The time-space plot is the application's central view: vehicle position (distanc
 
 ![Time-space plot with data loaded, no selection](images/12-time-space-plot-layout.png)
 *Full plot widget layout: the vertical speed-gradient legend and "Show Speed" toggle on the left, the plot canvas with the horizontal time range slider beneath it in the center, and the event button, vertical distance range slider, and lane dropdown on the right.*
+
+*Figure 12 Time-space plot with data loaded, no selection*
 
 ### Layout
 
@@ -249,6 +312,8 @@ Toggling **Show Speed** on the left replaces each vehicle's flat color with a pe
 ![Time-space plot with Show Speed enabled and a selection active](images/13-plot-speed-gradient-selection.png)
 *Speed gradient toggle on: plotted points colored along the legend by instantaneous speed, with several vehicles selected and the rest dimmed gray.*
 
+*Figure 13 Time-space plot with Show Speed enabled and a selection active*
+
 ---
 
 ## 7. Right-Click Menu on the Plot
@@ -265,6 +330,8 @@ The context name appears as a non-clickable heading at the top of the menu, so y
 
 ![Right-click menu in the "All" context](images/14-context-menu-all.png)
 *Context menu opened on empty plot space with nothing selected: "All" heading at top, Statistics enabled, Plots submenu items grayed out (not available outside Selected/Series), Filter and Noise Analysis available.*
+
+*Figure 14 Right-click menu in the "All" context*
 
 ### Statistics
 
@@ -284,6 +351,8 @@ Opens a preview-only spline fitting window for a single trajectory, letting you 
 
 ![Noise Analysis submenu expanded](images/15-context-menu-noise-analysis.png)
 *Noise Analysis submenu open in a "Selected" context, showing Jerk Analysis, Missing Data, and Internal Consistency enabled and Platoon Consistency grayed out.*
+
+*Figure 15 Noise Analysis submenu expanded*
 
 ---
 
@@ -307,6 +376,8 @@ Gap Headway mode overlays spacing information for individual points instead of s
 ![Gap Headway mode with a locked overlay](images/16-gap-headway-overlay.png)
 *Gap Headway mode showing a locked point's gap and headway lines and labels relative to neighboring trajectories.*
 
+*Figure 16 Gap Headway mode with a locked overlay*
+
 ### 8.3 Shockwave
 
 Shockwave mode identifies traffic shockwaves — lines of constant speed drawn through the points where vehicles change speed together — by having you select a chain of matching inflection points across adjacent trajectories. **Only the Semi-Automatic method is currently implemented**; Manual and Automatic appear in the configuration dialog but are disabled, reserved for future phases.
@@ -321,6 +392,8 @@ Shockwave mode identifies traffic shockwaves — lines of constant speed drawn t
 ![Shockwave configuration dialog](images/17-shockwave-config-dialog.png)
 *Configuration dialog on entering Shockwave mode: Semi-Automatic selected (Manual/Automatic disabled), Min Slope Change at its default, Vicinity grayed out, and Data Selection showing "Original data."*
 
+*Figure 17 Shockwave configuration dialog*
+
 **Building a chain.** Once active, colored X markers appear on every trajectory at its detected candidate inflection points — green for a **release** point (speed increasing) and red for a **compression** point (speed decreasing). Click a marker to start a chain:
 
 - Your first click locks the chain to that marker's color — only markers of the same type are selectable for the rest of the chain.
@@ -330,10 +403,14 @@ Shockwave mode identifies traffic shockwaves — lines of constant speed drawn t
 ![Shockwave chain under construction](images/18-shockwave-chain-building.png)
 *Mid-construction: three connected points selected on adjacent trajectories, matching-color markers on the next valid trajectory shown at full size, and all other markers dimmed.*
 
+*Figure 18 Shockwave chain under construction*
+
 **Committing.** Press **Enter** to fit a line through the chain (at least 2 points are required). The fit is drawn as a dashed line through the full set of trajectories with a "SW N" label, and a floating results panel appears in the plot's upper-right corner showing that shockwave's ID, equation, fitted speed, and R². Press **Escape** instead to abandon an in-progress chain without committing it.
 
 ![Committed shockwave with the floating results panel](images/19-shockwave-committed-result.png)
 *A committed shockwave drawn through its trajectories with its "SW 1" label, and the floating result panel in the top-right corner showing its equation, speed, and R².*
+
+*Figure 19 Committed shockwave with the floating results panel*
 
 **Reviewing, editing, and deleting.** Click the result panel's title to open the full results table for every shockwave committed this session, without ending the session. To revise a committed shockwave, **Ctrl+Left-click** it to reopen its points as an active chain — add or remove points and press Enter to re-fit, or Escape to revert to the original. **Ctrl+Right-click** deletes a chain point while building, or a committed shockwave while idle.
 
@@ -341,6 +418,8 @@ Shockwave mode identifies traffic shockwaves — lines of constant speed drawn t
 
 ![Shockwave results table](images/20-shockwave-results-table.png)
 *Results table listing every shockwave committed during the session, with the Save button for exporting to CSV.*
+
+*Figure 20 Shockwave results table*
 
 ---
 
@@ -365,6 +444,8 @@ This is the entry point that actually modifies your database. It has two steps:
 ![Event selection checklist](images/21-event-selection-dialog.png)
 *Event Selection dialog listing every event in the database with checkboxes, Select All / Clear buttons, and OK / Cancel.*
 
+*Figure 21 Event selection checklist*
+
 **Step 2 — set parameters.** The Spline Fitting dialog offers:
 
 - **Fitting base** — Position (Distance Traveled), Speed, Acceleration, or Jerk. Only bases whose source column (`veh_dist_trav`, `veh_speed`, `veh_accel`, `veh_jerk`) exists in your dataset are selectable; Position is always available since `veh_dist_trav` is required for every import.
@@ -374,6 +455,8 @@ This is the entry point that actually modifies your database. It has two steps:
 
 ![Spline Fitting parameter dialog](images/22-spline-fitting-parameters.png)
 *Spline Fitting dialog: Fitting base set to Position, default smoothness and degree, and the Fill missing rows checkbox unchecked.*
+*
+Figure 22 Spline Fitting parameter dialog*
 
 Clicking **OK** runs the fit across every selected event on a background thread, with a progress bar. When it finishes, it writes four new columns to the events table — `calc_position`, `calc_speed`, `calc_acceleration`, `calc_jerk` — along with an `is_spline_imputed` flag distinguishing existing rows that received a calculated value from wholly new gap-fill rows. These columns are added automatically the first time you run Spline Fitting and are then available everywhere else in the application (other analyses, plots, and exports) like any other column.
 
@@ -381,6 +464,8 @@ A **Spline Fit Statistics** dialog then opens automatically: a per-trajectory ta
 
 ![Spline Fit Statistics results table](images/23-spline-stats-dialog.png)
 *Goodness-of-fit statistics table, one row per vehicle, with the Save button for CSV export.*
+
+*Figure 23 Spline Fit Statistics results table*
 
 ### 9.2 Right-Click → Filter → Spline Fitting
 
@@ -392,6 +477,8 @@ Choose a fitting base, smoothness, and degree, then click **Update Plot** — no
 
 ![Right-click Spline Fitting preview dialog](images/24-spline-preview-dialog.png)
 *Preview dialog with four kinematic tabs, the fitting base/smoothness/degree controls and Update Plot / Save Plots / Close buttons across the top, and the fit overlaid on the currently viewed tab.*
+
+*Figure 24 Right-click Spline Fitting preview dialog*
 
 ---
 
@@ -420,6 +507,8 @@ All three run their computation on a background thread so the dialog stays respo
 ![Jerk Analysis parameter dialog](images/25-jerk-analysis-dialog.png)
 *Jerk Analysis dialog with the threshold, gap, and calculation-method fields, progress bar, and OK / Cancel buttons.*
 
+*Figure 25 Jerk Analysis parameter dialog*
+
 **Output per vehicle:** minimum, mean, and maximum jerk; the percentage of samples exceeding the jerk threshold; and a sign-inversion excess percentage (how often jerk oscillates in sign more than once within a one-second window — a rough smoothness/noise indicator).
 
 - **Top-level:** box plots of all five metrics across every vehicle in the event, with a count of vehicles dropped for having no jerk data available under the chosen method.
@@ -427,6 +516,8 @@ All three run their computation on a background thread so the dialog stays respo
 
 ![Jerk Analysis box plot results](images/26-jerk-box-plot-results.png)
 *Box plot summary from the top-level Jerk Analysis menu item, showing the distribution of each metric across all vehicles in the event.*
+
+*Figure 26 Jerk Analysis box plot results*
 
 ### 10.3 Missing Data
 
@@ -437,6 +528,8 @@ All three run their computation on a background thread so the dialog stays respo
 
 ![Missing Data parameter dialog](images/27-missing-data-dialog.png)
 *Missing Data dialog with the gap threshold, the Auto-calculate checkbox checked, and the manual time-increment field grayed out.*
+
+*Figure 27 Missing Data parameter dialog*
 
 **Output per vehicle:** the percentage of missing records, the number of gaps at or above the threshold, and the length of every individual gap.
 
@@ -461,6 +554,8 @@ Requires the `veh_dist_trav` column, which is always present since it's required
 
 ![Internal Consistency combined results dialog](images/28-internal-consistency-results.png)
 *Right-click Internal Consistency result: three synced plots (speed, acceleration, jerk) with measured vs. calculated traces, a stats table, and a raw data table below, with Previous/Next vehicle navigation.*
+
+*Figure 28 Internal Consistency combined results dialog*
 
 ---
 
@@ -491,6 +586,8 @@ A note in the dialog reminds you that the resulting file only contains the selec
 ![Export Selected dialog](images/29-export-selected-dialog.png)
 *Export Selected dialog: multi-select column list with Select All / Select None, the event dropdown, progress bar, and Export / Interrupt buttons.*
 
+*Figure 29 Export Selected dialog*
+
 ### 11.3 Export Analysis
 
 Runs Jerk Analysis, Missing Data, or Internal Consistency ([§10](#10-analysis-menu--jerk-missing-data-internal-consistency)) purely to produce a CSV — no results dialog is shown, and (for Jerk and Missing Data) nothing is written to the database. Internal Consistency's export path is the exception among the three export paths in one respect worth knowing: unlike its top-level and right-click paths, exporting Internal Consistency does **not** write its calculated columns to the database either — it streams straight to CSV.
@@ -500,12 +597,16 @@ Choosing an Export Analysis item first opens the [Event Selection checklist](#9-
 ![Export Analysis submenu](images/30-export-analysis-submenu.png)
 *File → Export → Export Analysis submenu: Jerk Analysis, Missing Data, and Internal Consistency enabled, Platoon Consistency grayed out as not yet implemented.*
 
+*Figure 30 Export Analysis submenu*
+
 ### Completion
 
 Every export path — All, Selected, or Analysis — ends with a confirmation dialog reporting success (including the number of records written, for Export All/Selected) or an error message if something went wrong.
 
 ![Export completion dialog](images/31-export-complete-dialog.png)
 *"Export Complete" confirmation shown after a successful export, reporting the destination file.*
+
+*Figure 31 Export completion dialog*
 
 ---
 
@@ -525,6 +626,8 @@ Because it's modeless, it stays open alongside the plot rather than blocking int
 ![Vehicle Search dialog with a filtered result list](images/32-vehicle-search-dialog.png)
 *Search Vehicle tool window positioned near the top-left of the plot, showing a partial digit filter, the matching vehicle IDs below, and the match-count label.*
 
+*Figure 32 Vehicle Search dialog with a filtered result list*
+
 ---
 
 ## 13. System Log Viewer
@@ -537,6 +640,8 @@ If the log file is cleared out from under it — for instance, the Import dialog
 
 ![System Log Viewer window](images/33-log-viewer.png)
 *System Log Viewer showing a scrollback of timestamped Info, Warning, and Error entries from recent application activity.*
+
+*Figure 33 System Log Viewer window*
 
 ---
 
