@@ -70,7 +70,6 @@ Once data is imported, Trajectory Tools centers on an interactive **time-space p
 This guide walks through the application in the order you're likely to use it: getting data in, exploring it on the plot, running analyses, and exporting results. For details on writing a JSON configuration file for a new CSV format, see the separate [Configuration Guide](trajectory-tools-config-guide.md).
 
 ![Trajectory Tools main window showing a populated time-space plot](images/01-main-window-overview.png)
-*The main window with a database open and an event plotted: the time-space plot in the center, the speed gradient bar and "Show Speed" toggle on the left, time/distance range sliders and lane selector on the right, and the full menu bar (File, View, Data, Analysis, Mode) visible across the top.*
 
 *Figure 1 Trajectory Tools main window showing a populated time-space plot*
 
@@ -91,12 +90,10 @@ Trajectory Tools opens to a start screen with two options and a recent-files lis
 - **Recent Trajectories** — up to seven previously opened databases, most recent first, shown by filename and full path. Click any entry to open it directly. If none exist yet, this section reads "No recent files."
 
 ![Start screen with no recent files](images/02-start-screen-empty.png)
-*Start screen on first launch: the two-card layout (Open Trajectories / Import Data) and an empty "No recent files" state below.*
 
 *Figure 2 Start screen with no recent files*
 
 ![Start screen with recent files populated](images/03-start-screen-recent-files.png)
-*Start screen after several databases have been opened, showing the Recent Trajectories list with multiple entries.*
 
 *Figure 3 Start screen with recent files populated*
 
@@ -114,7 +111,6 @@ Trajectory Tools works with two kinds of files:
 You'll typically import a CSV once, then reopen the resulting database directly on future sessions.
 
 ![File menu showing Open, Recent, and Import](images/04-file-menu-open-import.png)
-*File menu expanded, with the Recent submenu showing several previously opened databases.*
 
 *Figure 4 File menu showing Open, Recent, and Import*
 
@@ -139,7 +135,6 @@ Use **File → Import** or click **Import Data** on the start screen to open the
 **Configuration files.** Before anything can be imported, Trajectory Tools needs at least one JSON configuration file describing a CSV layout, kept in the application's `config` folder. On opening, the dialog scans that folder, validates each `.json` file it finds, and lists the valid ones as available file types (by filename). Configurations that fail validation are excluded and reported in the log. Writing these configuration files is covered in the separate **[Configuration Guide](trajectory-tools-config-guide.md)** — this guide only covers using the Import dialog itself.
 
 ![Import dialog with input file selected, ready to import](images/05-import-dialog-ready.png)
-*Import dialog after selecting an input CSV: the log area shows the available file types and the selected input/output paths, with the Output and Import buttons enabled.*
 
 *Figure 5 Import dialog with input file selected, ready to import*
 
@@ -150,7 +145,6 @@ Use **File → Import** or click **Import Data** on the start screen to open the
 3. The log area streams timestamped progress, warnings, and errors; the progress bar advances as records are processed. **Interrupt** stops the import after a confirmation prompt — an interrupted or failed import removes the partial output file rather than leaving a corrupt database behind.
 
 ![Import dialog mid-import with progress](images/06-import-dialog-progress.png)
-*Import dialog partway through an import: progress bar around 60%, log area scrolled to recent messages, Interrupt button enabled.*
 
 *Figure 6 Import dialog mid-import with progress*
 
@@ -160,7 +154,6 @@ Use **File → Import** or click **Import Data** on the start screen to open the
 - **Failure** — only "Back" is offered, so you can review the log to see what went wrong before trying again.
 
 ![Import completion popup on success](images/07-import-complete-popup.png)
-*The "Import Complete" popup with its message text and the Continue / Back buttons.*
 
 *Figure 7 Import completion popup on success*
 
@@ -173,7 +166,6 @@ Duplicate records (identical `event_id`, `veh_id`, and `veh_time`) are silently 
 Whenever a database is opened — via File → Open, a Recent entry, or right after a successful import — Trajectory Tools shows the **Time Space Plot Settings** dialog before displaying anything. This dialog is where you choose *which* event to look at and *how much* of it to plot. It reappears any time you click the **event button** at the top of the plot itself, so you can change events or narrow your range later without starting over.
 
 ![Time Space Plot Settings dialog for a newly opened database](images/08-plot-settings-dialog-initial.png)
-*Settings dialog immediately after opening a database: event name centered at top, the Event dropdown with Lanes and Total Vehicles counts beside it, the Time and Distance range sliders below (each spanning the event's full extent), and the record-count readout and Apply button at the bottom.*
 
 *Figure 8 Time Space Plot Settings dialog for a newly opened database*
 
@@ -197,7 +189,6 @@ Below the sliders, a label reads **"N of 500 vehicle limit"** and updates every 
 If you click **Apply** while over the limit, a warning dialog tells you how many vehicles are selected and asks whether to continue anyway (**OK**) or go back and narrow the range further (**Cancel**, the default).
 
 ![Vehicle Limit Exceeded warning dialog](images/09-vehicle-limit-exceeded.png)
-*Warning shown on Apply when the selected time/distance window contains more than 500 vehicles, with the count filled in and Cancel as the highlighted default.*
 
 *Figure 9 Vehicle Limit Exceeded warning dialog*
 
@@ -255,7 +246,6 @@ A single item, **Spline Fitting**, which first asks you to select one or more ev
 **Jerk Analysis**, **Missing Data**, and **Internal Consistency** each run against whichever event is currently plotted when launched from this menu (running them against other events requires the right-click plot menu or Export Analysis — see [§7](#7-right-click-menu-on-the-plot) and [§11](#11-exporting-data)). **Platoon Consistency** and **Spectral Analysis** are visible but disabled — they're reserved placeholders for analysis modules that haven't been implemented yet. Full details in [§10](#10-analysis-menu--jerk-missing-data-internal-consistency).
 
 ![Analysis menu open, showing two disabled placeholder items](images/10-analysis-menu.png)
-*Analysis menu with Jerk Analysis, Missing Data, and Internal Consistency enabled, and Platoon Consistency / Spectral Analysis grayed out as not-yet-implemented placeholders.*
 
 *Figure 10 Analysis menu open, showing two disabled placeholder items*
 
@@ -264,7 +254,6 @@ A single item, **Spline Fitting**, which first asks you to select one or more ev
 Populated only once a plot exists, with three mutually exclusive, checkable actions: **Select Trajectory** (the default), **Gap Headway**, and **Shockwave**. Selecting Shockwave first prompts for configuration; only its **Semi-Automatic** method is currently implemented — Manual and Automatic appear in that configuration dialog but are disabled for now. Full behavior in [§8](#8-interaction-modes).
 
 ![Mode menu open with Select Trajectory checked](images/11-mode-menu.png)
-*Mode menu showing the three checkable interaction modes, with Select Trajectory active (checked) by default.*
 
 *Figure 11 Mode menu open with Select Trajectory checked*
 
@@ -275,7 +264,6 @@ Populated only once a plot exists, with three mutually exclusive, checkable acti
 The time-space plot is the application's central view: vehicle position (distance traveled) plotted against time, one point per recorded observation, one lane at a time.
 
 ![Time-space plot with data loaded, no selection](images/12-time-space-plot-layout.png)
-*Full plot widget layout: the vertical speed-gradient legend and "Show Speed" toggle on the left, the plot canvas with the horizontal time range slider beneath it in the center, and the event button, vertical distance range slider, and lane dropdown on the right.*
 
 *Figure 12 Time-space plot with data loaded, no selection*
 
@@ -310,7 +298,6 @@ Your selection determines what several right-click menu items act on — one veh
 Toggling **Show Speed** on the left replaces each vehicle's flat color with a per-point color drawn from the gradient legend, based on that point's recorded speed (points without a speed value, or where the dataset has no `veh_speed` column, are shown at the low end of the gradient). Dimming from an active selection still applies on top of the gradient — dimmed points stay flat gray regardless of speed.
 
 ![Time-space plot with Show Speed enabled and a selection active](images/13-plot-speed-gradient-selection.png)
-*Speed gradient toggle on: plotted points colored along the legend by instantaneous speed, with several vehicles selected and the rest dimmed gray.*
 
 *Figure 13 Time-space plot with Show Speed enabled and a selection active*
 
