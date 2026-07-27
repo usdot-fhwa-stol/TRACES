@@ -65,9 +65,9 @@ Trajectory Tools is a desktop application for importing, visualizing, and analyz
 
 As trajectory data has become more widely available, so has the need for a tool that can bring data from different sources into one consistent format and make it usable without custom scripting for every dataset. Trajectory Tools addresses that need with a modular, configuration-driven approach: any CSV file whose columns are described in a JSON configuration file can be imported into a common SQLite database structure, then explored and analyzed the same way regardless of where the data originated.
 
-Once data is imported, Trajectory Tools centers on an interactive **time-space plot** — vehicle position plotted against time — that supports panning, zooming, trajectory selection, and a set of interaction modes for tasks like measuring gaps and headways or identifying shockwaves. A set of built-in analyses (jerk, missing data, internal consistency, spline-based smoothing) can be run against one or more events, with results shown as tables, statistics, and plots, and exported to CSV for use elsewhere.
+Once data is imported, Trajectory Tools centers on an interactive **time-space plot** — vehicle position plotted against time — that supports panning, zooming, trajectory selection, and a set of interaction modes for tasks like measuring gaps and headways or identifying shockwaves. A set of built-in analyses (jerk, missing data, internal consistency, spline-based smoothing) can be run against one or more events, with results shown as tables, statistics, and plots that can exported to HTML and CSV files for use elsewhere.
 
-This guide walks through the application in the order you're likely to use it: getting data in, exploring it on the plot, running analyses, and exporting results. For details on writing a JSON configuration file for a new CSV format, see the separate [Configuration Guide](trajectory-tools-config-guide.md).
+This guide is intended for those with a background in vehicle kinematic probe data and related statistical analysis methods. It walks through the application in the order you're likely to use it: importing data, visualizing data plots, running analyses, and exporting results. For details on writing a JSON configuration file for a new CSV format, see the separate [Configuration Guide](trajectory-tools-config-guide.md).
 
 ![Trajectory Tools main window showing a populated time-space plot](images/01-main-window-overview.png)
 
@@ -208,7 +208,7 @@ Click the event button at the top of the time-space plot at any time to bring th
 
 ## 5. Main Window Tour
 
-Before diving into each feature in depth, here's the shape of the main window: what's on the menu bar, when each menu appears, and where to find the full details later in this guide.
+Before diving into each feature in depth, here's the layout of the main window: what's on the menu bar, when each menu appears, and where to find the full details later in this guide.
 
 ### Window Title and Database State
 
@@ -316,7 +316,6 @@ Right-clicking anywhere on the plot canvas opens a context menu. Its title and t
 The context name appears as a non-clickable heading at the top of the menu, so you always know which of the three you're in before choosing an item.
 
 ![Right-click menu in the "All" context](images/14-context-menu-all.png)
-*Context menu opened on empty plot space with nothing selected: "All" heading at top, Statistics enabled, Plots submenu items grayed out (not available outside Selected/Series), Filter and Noise Analysis available.*
 
 *Figure 14 Right-click menu in the "All" context*
 
@@ -337,7 +336,6 @@ Opens a preview-only spline fitting window for a single trajectory, letting you 
 **Jerk Analysis**, **Missing Data**, and **Internal Consistency** run the same analyses available from the top-level Analysis menu ([§10](#10-analysis-menu--jerk-missing-data-internal-consistency)), but scoped to whatever the right-click context implies — the clicked vehicle, your current selection, or every vehicle in the visible lane for "All." This is an important distinction from the Analysis menu: launching an analysis from there always runs against **every vehicle in the entire event**, regardless of lane or selection, while launching it here always runs against the **current context's vehicles in the current lane only**. **Platoon Consistency** is present but disabled — reserved for a not-yet-implemented module.
 
 ![Noise Analysis submenu expanded](images/15-context-menu-noise-analysis.png)
-*Noise Analysis submenu open in a "Selected" context, showing Jerk Analysis, Missing Data, and Internal Consistency enabled and Platoon Consistency grayed out.*
 
 *Figure 15 Noise Analysis submenu expanded*
 
@@ -361,7 +359,6 @@ Gap Headway mode overlays spacing information for individual points instead of s
 - Press **Escape** to clear every locked point at once.
 
 ![Gap Headway mode with a locked overlay](images/16-gap-headway-overlay.png)
-*Gap Headway mode showing a locked point's gap and headway lines and labels relative to neighboring trajectories.*
 
 *Figure 16 Gap Headway mode with a locked overlay*
 
@@ -377,7 +374,6 @@ Shockwave mode identifies traffic shockwaves — lines of constant speed drawn t
 - **Data selection** — plot against the original measured position data, or against spline-fitted position data if [Spline Fitting](#9-data-menu--spline-fitting) has already been run for this event (otherwise disabled with an explanatory tooltip).
 
 ![Shockwave configuration dialog](images/17-shockwave-config-dialog.png)
-*Configuration dialog on entering Shockwave mode: Semi-Automatic selected (Manual/Automatic disabled), Min Slope Change at its default, Vicinity grayed out, and Data Selection showing "Original data."*
 
 *Figure 17 Shockwave configuration dialog*
 
@@ -388,14 +384,12 @@ Shockwave mode identifies traffic shockwaves — lines of constant speed drawn t
 - Selected points are connected by a line as you build the chain.
 
 ![Shockwave chain under construction](images/18-shockwave-chain-building.png)
-*Mid-construction: three connected points selected on adjacent trajectories, matching-color markers on the next valid trajectory shown at full size, and all other markers dimmed.*
 
 *Figure 18 Shockwave chain under construction*
 
 **Committing.** Press **Enter** to fit a line through the chain (at least 2 points are required). The fit is drawn as a dashed line through the full set of trajectories with a "SW N" label, and a floating results panel appears in the plot's upper-right corner showing that shockwave's ID, equation, fitted speed, and R². Press **Escape** instead to abandon an in-progress chain without committing it.
 
 ![Committed shockwave with the floating results panel](images/19-shockwave-committed-result.png)
-*A committed shockwave drawn through its trajectories with its "SW 1" label, and the floating result panel in the top-right corner showing its equation, speed, and R².*
 
 *Figure 19 Committed shockwave with the floating results panel*
 
@@ -404,7 +398,6 @@ Shockwave mode identifies traffic shockwaves — lines of constant speed drawn t
 **Saving your results.** Switching out of Shockwave mode (or closing the plot) with uncommitted results prompts you to save first. Choosing to save opens the results table with a **Save** button that writes every committed shockwave's ID, mode, equation, speed, R², and point count to a CSV file.
 
 ![Shockwave results table](images/20-shockwave-results-table.png)
-*Results table listing every shockwave committed during the session, with the Save button for exporting to CSV.*
 
 *Figure 20 Shockwave results table*
 
@@ -429,7 +422,6 @@ This is the entry point that actually modifies your database. It has two steps:
 **Step 1 — choose events.** A multi-select checklist (also used by File → Export → Export Analysis, [§11](#11-exporting-data)) lists every event in the database by ID and name, with **Select All** / **Clear** helpers. At least one event must be selected to continue.
 
 ![Event selection checklist](images/21-event-selection-dialog.png)
-*Event Selection dialog listing every event in the database with checkboxes, Select All / Clear buttons, and OK / Cancel.*
 
 *Figure 21 Event selection checklist*
 
@@ -441,16 +433,14 @@ This is the entry point that actually modifies your database. It has two steps:
 - **Fill missing rows** — when checked, also inserts new rows at a uniform timestep to fill timing gaps in the data, populated only with calculated values (measured columns are left blank on these synthetic rows, since there's no actual measurement).
 
 ![Spline Fitting parameter dialog](images/22-spline-fitting-parameters.png)
-*Spline Fitting dialog: Fitting base set to Position, default smoothness and degree, and the Fill missing rows checkbox unchecked.*
-*
-Figure 22 Spline Fitting parameter dialog*
+
+*Figure 22 Spline Fitting parameter dialog*
 
 Clicking **OK** runs the fit across every selected event on a background thread, with a progress bar. When it finishes, it writes four new columns to the events table — `calc_position`, `calc_speed`, `calc_acceleration`, `calc_jerk` — along with an `is_spline_imputed` flag distinguishing existing rows that received a calculated value from wholly new gap-fill rows. These columns are added automatically the first time you run Spline Fitting and are then available everywhere else in the application (other analyses, plots, and exports) like any other column.
 
 A **Spline Fit Statistics** dialog then opens automatically: a per-trajectory table of goodness-of-fit metrics (RMSE, MAE, max/min/mean error for each of the four kinematics, plus point and imputed-row counts) with its own **Save** button to export the table to CSV. This is the only CSV export path specific to Spline Fitting — there's no separate Export Analysis entry for it, since the `calc_*` columns themselves are already available through the ordinary [Export All / Export Selected](#11-exporting-data) paths once they exist.
 
 ![Spline Fit Statistics results table](images/23-spline-stats-dialog.png)
-*Goodness-of-fit statistics table, one row per vehicle, with the Save button for CSV export.*
 
 *Figure 23 Spline Fit Statistics results table*
 
@@ -471,7 +461,7 @@ Choose a fitting base, smoothness, and degree, then click **Update Plot** — no
 
 ## 10. Analysis Menu — Jerk, Missing Data, Internal Consistency
 
-Jerk Analysis, Missing Data, and Internal Consistency share a common structure: a parameter dialog, a background computation with a progress bar, and a results view whose shape depends on how you launched it.
+Jerk Analysis, Missing Data, and Internal Consistency share a common structure: a parameter dialog, a background computation with a progress bar, and a results view whose contents and arrangement depends on how you launched it.
 
 ### 10.1 The Shared Pattern
 
