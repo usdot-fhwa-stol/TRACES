@@ -220,8 +220,8 @@ The title bar reads **"Trajectory Tools"** at the start screen and becomes **"Tr
 |------|------------------|--------------------------|------------|
 | **File** | Yes, always | — | §3, §11, §14 |
 | **View** | Yes, always (Search Vehicle item stays disabled until an event is confirmed) | — | §6, §12, §13 |
-| **Data** | Hidden | the Time Space Plot Settings dialog is accepted | §9 |
-| **Analysis** | Hidden | same as Data | §10 |
+| **Data** | Hidden | Time Space Plot Settings dialog is accepted | §9 |
+| **Analysis** | Hidden | Time Space Plot Settings dialog is accepted | §10 |
 | **Mode** | Hidden | a plot has actually been created (first event confirmed) | §8 |
 
 Canceling out of a database entirely (see §4) hides Data, Analysis, and Mode again and returns the window to this starting state.
@@ -307,11 +307,11 @@ Toggling **Show Speed** on the left replaces each vehicle's flat color with a pe
 
 Right-clicking anywhere on the plot canvas opens a context menu. Its title and the vehicles it acts on depend on where you clicked and what's currently selected:
 
-| Context | When it applies | Title shown | Vehicles acted on |
+| Context | When it applies | Vehicles acted on |
 |---------|------------------|-------------|--------------------|
-| **Series** | You right-click directly on a trajectory | "Series" | Just that one vehicle, regardless of any existing selection |
-| **Selected** | You right-click empty space while one or more vehicles are selected | "Selected" | Every currently selected vehicle |
-| **All** | You right-click empty space with nothing selected | "All" | Every vehicle currently plotted in the visible lane |
+| **Series** | You right-click directly on a trajectory | Just that one vehicle, regardless of any existing selection |
+| **Selected** | You right-click empty space while one or more vehicles are selected | Every currently selected vehicle |
+| **All** | You right-click empty space with nothing selected | Every vehicle currently plotted in the visible lane |
 
 The context name appears as a non-clickable heading at the top of the menu, so you always know which of the three you're in before choosing an item.
 
@@ -453,7 +453,6 @@ Choose a fitting base, smoothness, and degree, then click **Update Plot** — no
 **Save Plots** exports all four plots to a self-contained interactive HTML file you can pan and zoom in a browser — the same export mechanism used by the Jerk box plot and Internal Consistency results dialogs in [§10](#10-analysis-menu--jerk-missing-data-internal-consistency).
 
 ![Right-click Spline Fitting preview dialog](images/24-spline-preview-dialog.png)
-*Preview dialog with four kinematic tabs, the fitting base/smoothness/degree controls and Update Plot / Save Plots / Close buttons across the top, and the fit overlaid on the currently viewed tab.*
 
 *Figure 24 Right-click Spline Fitting preview dialog*
 
@@ -482,7 +481,6 @@ All three run their computation on a background thread so the dialog stays respo
 - **Jerk calculation method** — use the `veh_jerk` column directly, calculate jerk from acceleration, calculate acceleration and jerk from speed, or use jerk from spline-fit results. Only methods whose source column exists in your dataset are selectable.
 
 ![Jerk Analysis parameter dialog](images/25-jerk-analysis-dialog.png)
-*Jerk Analysis dialog with the threshold, gap, and calculation-method fields, progress bar, and OK / Cancel buttons.*
 
 *Figure 25 Jerk Analysis parameter dialog*
 
@@ -492,7 +490,6 @@ All three run their computation on a background thread so the dialog stays respo
 - **Right-click:** a plain table of the same metrics for just the target vehicle(s).
 
 ![Jerk Analysis box plot results](images/26-jerk-box-plot-results.png)
-*Box plot summary from the top-level Jerk Analysis menu item, showing the distribution of each metric across all vehicles in the event.*
 
 *Figure 26 Jerk Analysis box plot results*
 
@@ -504,7 +501,6 @@ All three run their computation on a background thread so the dialog stays respo
 - **Time step** — leave **Auto-calculate Dataset Time Increment** checked to let Trajectory Tools infer the expected sampling interval from the data itself (the most common time step across the dataset), or uncheck it to enter a manual increment.
 
 ![Missing Data parameter dialog](images/27-missing-data-dialog.png)
-*Missing Data dialog with the gap threshold, the Auto-calculate checkbox checked, and the manual time-increment field grayed out.*
 
 *Figure 27 Missing Data parameter dialog*
 
@@ -530,7 +526,6 @@ Requires the `veh_dist_trav` column, which is always present since it's required
 - **Export** (File → Export → Export Analysis): streams results straight to CSV across every selected event without writing anything to the database.
 
 ![Internal Consistency combined results dialog](images/28-internal-consistency-results.png)
-*Right-click Internal Consistency result: three synced plots (speed, acceleration, jerk) with measured vs. calculated traces, a stats table, and a raw data table below, with Previous/Next vehicle navigation.*
 
 *Figure 28 Internal Consistency combined results dialog*
 
@@ -561,18 +556,16 @@ Lets you export a subset of columns for a single event:
 A note in the dialog reminds you that the resulting file only contains the selected columns for one event and **cannot be re-imported** back into Trajectory Tools — this path is for taking a slice of data out to another tool, not for round-tripping.
 
 ![Export Selected dialog](images/29-export-selected-dialog.png)
-*Export Selected dialog: multi-select column list with Select All / Select None, the event dropdown, progress bar, and Export / Interrupt buttons.*
 
 *Figure 29 Export Selected dialog*
 
 ### 11.3 Export Analysis
 
-Runs Jerk Analysis, Missing Data, or Internal Consistency ([§10](#10-analysis-menu--jerk-missing-data-internal-consistency)) purely to produce a CSV — no results dialog is shown, and (for Jerk and Missing Data) nothing is written to the database. Internal Consistency's export path is the exception among the three export paths in one respect worth knowing: unlike its top-level and right-click paths, exporting Internal Consistency does **not** write its calculated columns to the database either — it streams straight to CSV.
+Runs Jerk Analysis, Missing Data, or Internal Consistency ([§10](#10-analysis-menu--jerk-missing-data-internal-consistency)) purely to produce a CSV — no results dialog is shown, and nothing is written to the database.
 
 Choosing an Export Analysis item first opens the [Event Selection checklist](#9-data-menu--spline-fitting) so you can pick one or more events, then opens that module's parameter dialog with a **Save** button in place of OK. The analysis runs across every vehicle in each selected event.
 
 ![Export Analysis submenu](images/30-export-analysis-submenu.png)
-*File → Export → Export Analysis submenu: Jerk Analysis, Missing Data, and Internal Consistency enabled, Platoon Consistency grayed out as not yet implemented.*
 
 *Figure 30 Export Analysis submenu*
 
@@ -581,7 +574,6 @@ Choosing an Export Analysis item first opens the [Event Selection checklist](#9-
 Every export path — All, Selected, or Analysis — ends with a confirmation dialog reporting success (including the number of records written, for Export All/Selected) or an error message if something went wrong.
 
 ![Export completion dialog](images/31-export-complete-dialog.png)
-*"Export Complete" confirmation shown after a successful export, reporting the destination file.*
 
 *Figure 31 Export completion dialog*
 
@@ -601,7 +593,6 @@ Because it's modeless, it stays open alongside the plot rather than blocking int
 **What happens on selection:** if the vehicle already has loaded data in the currently displayed lane, it's selected and framed immediately. If it's on a different lane, Trajectory Tools finds the lane where that vehicle first appears, switches to it, then selects and frames the vehicle there. Framing snaps the time and distance sliders to the vehicle's exact trajectory extent (no padding) — the slider *ranges* only expand if the trajectory falls completely outside the current view, so you don't lose your broader context unnecessarily. The found vehicle becomes the sole selection, dimming every other trajectory.
 
 ![Vehicle Search dialog with a filtered result list](images/32-vehicle-search-dialog.png)
-*Search Vehicle tool window positioned near the top-left of the plot, showing a partial digit filter, the matching vehicle IDs below, and the match-count label.*
 
 *Figure 32 Vehicle Search dialog with a filtered result list*
 
@@ -616,7 +607,6 @@ The viewer displays `trajectory_tools.log`, the same file the [Import dialog](#3
 If the log file is cleared out from under it — for instance, the Import dialog clears it at the start of each new import — the viewer detects the file shrinking and clears its own display to match, then continues appending from there.
 
 ![System Log Viewer window](images/33-log-viewer.png)
-*System Log Viewer showing a scrollback of timestamped Info, Warning, and Error entries from recent application activity.*
 
 *Figure 33 System Log Viewer window*
 
