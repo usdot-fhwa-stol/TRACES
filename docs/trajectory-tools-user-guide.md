@@ -308,7 +308,7 @@ Toggling **Show Speed** on the left replaces each vehicle's flat color with a pe
 Right-clicking anywhere on the plot canvas opens a context menu. Its title and the vehicles it acts on depend on where you clicked and what's currently selected:
 
 | Context | When it applies | Vehicles acted on |
-|---------|------------------|-------------|--------------------|
+|---------|------------------|--------------------|
 | **Series** | You right-click directly on a trajectory | Just that one vehicle, regardless of any existing selection |
 | **Selected** | You right-click empty space while one or more vehicles are selected | Every currently selected vehicle |
 | **All** | You right-click empty space with nothing selected | Every vehicle currently plotted in the visible lane |
