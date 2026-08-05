@@ -23,16 +23,20 @@ def process_postgres_csv(parent_widget, file_path: str) -> str:
             
         catalog_df = pd.read_sql("SELECT release_key, local_datetime, trip_duration_sec, total_leaders FROM catalog_table;", engine)
 
-        # 3. Create the custom display string
+        # 3. Create the custom display string (made to handle nana
         # Example output: "2026-07-19 08:15:30 | Duration: 452.5s | Leaders: 3"
-        catalog_df['display_name'] = (
-            catalog_df['local_datetime'].astype(str) + " | " +
-            "Duration: " + catalog_df['trip_duration_sec'].astype(str) + "s | " +
-            "Leaders: " + catalog_df['total_leaders'].astype(str)
-        )
-        
-        options = catalog_df['display_name'].tolist()
+        catalog_df['release_key'] = catalog_df['release_key'].fillna("Error")
+        catalog_df['local_datetime'] = catalog_df['local_datetime'].fillna("Unknown Date")
+        catalog_df['trip_duration_sec'] = catalog_df['trip_duration_sec'].fillna(0.0)
+        catalog_df['total_leaders'] = catalog_df['total_leaders'].fillna(0)
 
+        catalog_df['display_name'] = catalog_df.apply(
+            lambda row: f"ID: {row['release_key']} | Date: {row['local_datetime']} | Duration: {row['trip_duration_sec']}s | Leaders: {row['total_leaders']}",
+            axis=1
+        )
+
+        options = catalog_df['display_name'].astype(str).tolist()
+                
         # 4. Produce the Catalog Drop Box
         item, ok = QInputDialog.getItem(
             parent_widget, 
@@ -52,11 +56,11 @@ def process_postgres_csv(parent_widget, file_path: str) -> str:
             # Note: Update the SELECT columns to match your tgsim-L1.json requirements            
             print(f"Querying C6 table for trip {trip_key}...")
             query = """
-            WITH BaseData AS (
-                SELECT
+            WITH TimeDiffData AS (
+                SELECT 
                     driver_id,
                     t_rel_sec,
-                    speed_net_mps,
+                    speed_used_mps,
                     accel_long_ms2,
                     has_lead,
                     lead_target_id,
@@ -64,15 +68,33 @@ def process_postgres_csv(parent_widget, file_path: str) -> str:
                     lead_vx_mps,
                     lead_ax_mps2,
                     lead_headway_s,
-                    SUM(speed_net_mps * 0.1) OVER (ORDER BY t_rel_sec) AS ego_dist_trav
-                FROM c6_mock_table
+                    jerk_ms3,
+                    COALESCE(t_rel_sec - LAG(t_rel_sec) OVER (PARTITION BY driver_id ORDER BY t_rel_sec), 0) AS dt
+                FROM c6_ego_wfleet_radartargets
                 WHERE release_key = %(key)s
+            ),
+            BaseData AS (
+                SELECT
+                    driver_id,
+                    t_rel_sec,
+                    speed_used_mps,
+                    accel_long_ms2,
+                    has_lead,
+                    lead_target_id,
+                    lead_x_m,
+                    lead_vx_mps,
+                    lead_ax_mps2,
+                    lead_headway_s,
+                    jerk_ms3,
+                    SUM(speed_used_mps * dt) OVER (PARTITION BY driver_id ORDER BY t_rel_sec) AS ego_dist_trav
+                FROM TimeDiffData
             )
+
             -- EXTRACT EGO ROWS
             SELECT
                 driver_id AS veh_id,                
                 t_rel_sec AS veh_time,              
-                speed_net_mps AS veh_speed,          
+                speed_used_mps AS veh_speed,          
                 accel_long_ms2 AS veh_accel,        
                 ego_dist_trav AS veh_dist_trav      
             FROM BaseData
@@ -83,11 +105,11 @@ def process_postgres_csv(parent_widget, file_path: str) -> str:
             SELECT
                 lead_target_id AS veh_id,                    
                 t_rel_sec AS veh_time,                        
-                (speed_net_mps + lead_vx_mps) AS veh_speed,  
+                (speed_used_mps + lead_vx_mps) AS veh_speed,  
                 (accel_long_ms2 + lead_ax_mps2) AS veh_accel,
-                (ego_dist_trav + (speed_net_mps * lead_headway_s)) AS veh_dist_trav  
+                (ego_dist_trav + (speed_used_mps * lead_headway_s)) AS veh_dist_trav  
             FROM BaseData
-            WHERE has_lead = 1
+            WHERE has_lead
 
             ORDER BY veh_time, veh_id;
             """
