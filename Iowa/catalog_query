@@ -1,0 +1,12 @@
+DROP TABLE IF EXISTS catalog_table;
+
+CREATE TABLE catalog_table AS
+SELECT
+    release_key,
+    MAX(driver_id) as driver_id,
+    MAX(local_datetime) as local_datetime,
+    ROUND((MAX(t_rel_sec) - MIN(t_rel_sec))::numeric, 1) AS trip_duration_sec,
+    COUNT(DISTINCT lead_target_id) FILTER (WHERE has_lead) AS total_leaders
+
+FROM c6_ego_wfleet_radartargets
+GROUP BY release_key;
