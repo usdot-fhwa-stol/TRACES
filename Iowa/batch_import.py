@@ -3,11 +3,12 @@ import os
 import pyarrow.parquet as pq
 from adbc_driver_postgresql import dbapi
 
-uri = 'postgresql://postgres:MadridKnight205!?!@localhost:5432/C6_S'
+uri = '--------------------'
 
-product_level = ['C6_Ego_wFleet_RadarTargets']
+product_level = ['C6', 'C5', 'C4']
 
-base_path = 'C:/Users/zefer/Projects/DOTSI/VTTI/Data Samples Package/Data Subsets'
+base_path = '/mnt/padlock/VTTI_Truck_processed_Data_Package_1/'
+
 
 with dbapi.connect(uri) as conn:
     with conn.cursor() as cur:
@@ -16,7 +17,7 @@ with dbapi.connect(uri) as conn:
             print(f"\n--- Starting import for {level} ---")
 
             folder_path = os.path.join(base_path, level, '*.parquet')
-            file_list = glob.glob(folder_path)
+            file_list =  glob.glob(folder_path)
 
             if not file_list:
                 print(f"No files found in {level} folder. Skipping...")
@@ -31,13 +32,13 @@ with dbapi.connect(uri) as conn:
             for i, file in enumerate(file_list):
                 try:
                     table = pq.read_table(file)
-
+                    
                     mode = "create" if successful_uploads == 0 else "append"
 
                     cur.adbc_ingest(level.lower(), table, mode=mode)
-
+            
                     successful_uploads += 1
-                    print(f" -> Uploaded file {i+1} of {len(file_list)} ({os.path.basename(file)})")
+                    print(f" -> Uploaded file {i+1} of {len(file_list)} ({os.path.basename(file)}")
 
                 except Exception as e:
                     print(f"WARNING: Skipping corrupted file {i+1} ({os.path.basename(file)})")
