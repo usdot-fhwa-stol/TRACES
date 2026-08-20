@@ -1,9 +1,13 @@
+import logging
 from pathlib import Path
 from PyQt6.QtWidgets import QMainWindow, QMenuBar, QMenu, QApplication, QFileDialog, QMessageBox, QDialog
 from PyQt6.QtGui import QAction
 from PyQt6.QtCore import QTimer
 from .home_widget import HomeWidget
-from utils import get_user_data_path
+from utils import get_user_data_path, last_dialog_dir, remember_dialog_path
+
+# Set up logger
+logger = logging.getLogger(__name__)
 
 class MainWindow(QMainWindow):
     """Main window for the Trajectory Tools application.
@@ -16,9 +20,13 @@ class MainWindow(QMainWindow):
         _recent_menu (QMenu): Submenu for recent files.
         _export_menu (QMenu): Submenu for export options.
         _mode_menu (QMenu): Top-level menu used by plots to set interaction mode.
+        _data_menu (QMenu): Top-level menu used by plots to perform data manipulation.
         _db_connection (sqlite3.Connection): Current database connection.
         _plot_widget (TimeSpacePlotWidget): Plot widget for displaying trajectory data.
         _selected_export_columns (list): List of selected column names for export.
+        _search_vehicle_action (QAction): View > Search Vehicle menu action;
+            enabled/disabled by TimeSpacePlotSettingsDialog.
+        _search_dialog (VehicleSearchDialog): Modeless vehicle search dialog, or None.
     """
 
     def __init__(self):
@@ -28,10 +36,13 @@ class MainWindow(QMainWindow):
         self._recent_menu = None
         self._export_menu = None
         self._mode_menu = None
+        self._data_menu = None
         self._db_connection = None
         self._plot_widget = None
         self._import_dialog = None
         self._selected_export_columns = []  # Initially empty list of selected export columns
+        self._search_vehicle_action = None
+        self._search_dialog = None
         self._home_widget = None
         self._log_viewer_dialog = None
         
@@ -119,11 +130,27 @@ class MainWindow(QMainWindow):
         # View menu
         view_menu = QMenu("&View", self)
         menu_bar.addMenu(view_menu)
-        
+
+        self._search_vehicle_action = QAction("&Search Vehicle", self)
+        self._search_vehicle_action.setEnabled(False)
+        self._search_vehicle_action.triggered.connect(self._open_vehicle_search_dialog)
+        self._search_vehicle_action.changed.connect(self._on_search_action_changed)
+        view_menu.addAction(self._search_vehicle_action)
+
         log_action = QAction("&Log", self)
         log_action.triggered.connect(self._show_log_viewer)
         view_menu.addAction(log_action)
 
+        # Data menu
+        self._data_menu = QMenu("&Data", self)
+        menu_bar.addMenu(self._data_menu)
+        self._data_menu.menuAction().setVisible(False)  # hidden until DB is open
+
+        spline_fitting_action = QAction("&Spline Fitting", self)
+        spline_fitting_action.triggered.connect(self._run_spline_fitting)
+        self._data_menu.addAction(spline_fitting_action)
+
+        # Analysis menu
         self._analysis_menu = QMenu("&Analysis", self)
         menu_bar.addMenu(self._analysis_menu)
         self._analysis_menu.menuAction().setVisible(False)  # hidden until DB is open
@@ -251,17 +278,31 @@ class MainWindow(QMainWindow):
             if self._home_widget and self.centralWidget() == self._home_widget:
                 self._home_widget.refresh(self._recent_files)
 
+    # Columns that every valid trajectory database must provide in the
+    # events table. Matches the required set enforced by the import
+    # configuration check (BaseProcess.check_configuration implementations).
+    _REQUIRED_EVENTS_COLUMNS = ("event_id", "veh_id", "veh_time",
+                                "lane_id", "veh_dist_trav")
+
     def _check_database(self, file_path: str) -> bool:
-        """Check if the file is a valid SQLite database with correct events table.
+        """Check if the file is a valid trajectory database.
+
+        With the config-driven import schema, databases no longer share a
+        fixed column layout. A valid database is one that:
+            * contains an ``events`` table with the required columns
+              (event_id, veh_id, veh_time, lane_id, veh_dist_trav),
+            * contains a ``ranges`` table (created last by the import
+              worker, so its presence also marks a completed import),
+            * has at least one record in ``events``.
+
+        All other columns are optional; consumers must check for them via
+        ``PRAGMA table_info(events)`` before use.
 
         Args:
             file_path (str): Path to the SQLite database file.
 
         Returns:
-            bool: True if database is valid and contains data, False otherwise.
-
-        Raises:
-            sqlite3.Error: If SQLite operations fail.
+            bool: True if the database is valid and contains data, False otherwise.
         """
         import sqlite3
         try:
@@ -269,49 +310,40 @@ class MainWindow(QMainWindow):
             conn = sqlite3.connect(file_path)
             cursor = conn.cursor()
 
-            # Check if events table exists
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='events'")
-            if not cursor.fetchone():
+            # Check that both required tables exist
+            cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' "
+                "AND name IN ('events', 'ranges')"
+            )
+            found_tables = {row[0] for row in cursor.fetchall()}
+
+            if "events" not in found_tables:
                 conn.close()
-                QMessageBox.critical(self, "Error", "Database does not contain an 'events' table.")
+                QMessageBox.critical(self, "Error",
+                                     "Database does not contain an 'events' table.")
                 return False
 
-            # Check table schema
-            expected_columns = {
-                "event_id": "INTEGER",
-                "veh_id": "INTEGER",
-                "veh_time": "REAL",
-                "lane_id": "INTEGER",
-                "orig_lane_id": "INTEGER",
-                "x_map_loc": "REAL",
-                "y_map_loc": "REAL",
-                "x_frenet_loc": "REAL",
-                "y_frenet_loc": "REAL",
-                "x_map_origin": "REAL",
-                "y_map_origin": "REAL",
-                "veh_lat": "REAL",
-                "veh_lon": "REAL",
-                "veh_speed": "REAL",
-                "veh_accel": "REAL",
-                "veh_length": "REAL",
-                "veh_width": "REAL",
-                "veh_automation": "INTEGER",
-                "osm_way_id": "INTEGER",
-                "osm_speed_limit": "INTEGER",
-                "osm_traffic_control": "INTEGER",
-                "preceding_veh_id": "INTEGER",
-                "veh_dist_trav": "REAL",
-                "event_name": "TEXT"
-            }
+            if "ranges" not in found_tables:
+                conn.close()
+                QMessageBox.critical(
+                    self, "Error",
+                    "Database does not contain a 'ranges' table. The import "
+                    "may not have completed successfully — re-import the "
+                    "source file.")
+                return False
 
+            # Check that the events table has the required columns
             cursor.execute("PRAGMA table_info(events)")
-#            columns = {row[1]: row[2] for row in cursor.fetchall()}
-            
-#            if columns != expected_columns:
-#                conn.close()
-#                QMessageBox.critical(self, "Error", 
-#                                   "Events table schema does not match expected format.")
-#                return False
+            existing_columns = {row[1] for row in cursor.fetchall()}
+            missing = [c for c in self._REQUIRED_EVENTS_COLUMNS
+                       if c not in existing_columns]
+            if missing:
+                conn.close()
+                QMessageBox.critical(
+                    self, "Error",
+                    "Events table is missing required column(s): "
+                    f"{', '.join(missing)}.")
+                return False
 
             # Check for at least one record
             cursor.execute("SELECT COUNT(*) FROM events")
@@ -335,23 +367,29 @@ class MainWindow(QMainWindow):
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Open SQLite Database",
-            "",
+            last_dialog_dir(),
             "SQLite Database (*.sqlite);;SQLite Database (*.db);;SQLite Database (*)"
         )
-        
-        if file_path and self._check_database(file_path):
+
+        if not file_path:
+            return
+        remember_dialog_path(file_path)
+
+        if self._check_database(file_path):
             self.add_recent_file(file_path)
             self.setWindowTitle(f"Trajectory Tools - {file_path}")
             
             # Show settings dialog before creating plot widget
             from plot.time_space_plot_settings_dialog import TimeSpacePlotSettingsDialog
-            settings_dialog = TimeSpacePlotSettingsDialog(parent=self, db_connection=self._db_connection)
+            settings_dialog = TimeSpacePlotSettingsDialog(parent=self, 
+                db_connection=self._db_connection, search_action=self._search_vehicle_action)
             settings_dialog.settings_applied.connect(self._create_plot_widget)
             
             result = settings_dialog.exec()
             if result == QDialog.DialogCode.Accepted:
                 # Plot widget will be created in _create_plot_widget callback
                 self._export_menu.setEnabled(True)
+                self._data_menu.menuAction().setVisible(True)
                 self._analysis_menu.menuAction().setVisible(True)
             else:
                 # User cancelled settings dialog, close database and reset window
@@ -375,13 +413,15 @@ class MainWindow(QMainWindow):
             
             # Show settings dialog before creating plot widget
             from plot.time_space_plot_settings_dialog import TimeSpacePlotSettingsDialog
-            settings_dialog = TimeSpacePlotSettingsDialog(parent=self, db_connection=self._db_connection)
+            settings_dialog = TimeSpacePlotSettingsDialog(parent=self, 
+                db_connection=self._db_connection, search_action=self._search_vehicle_action)
             settings_dialog.settings_applied.connect(self._create_plot_widget)
             
             result = settings_dialog.exec()
             if result == QDialog.DialogCode.Accepted:
                 # Plot widget will be created in _create_plot_widget callback
                 self._export_menu.setEnabled(True)
+                self._data_menu.menuAction().setVisible(True)
                 self._analysis_menu.menuAction().setVisible(True)
             else:
                 # User cancelled settings dialog, close database and reset window
@@ -418,13 +458,15 @@ class MainWindow(QMainWindow):
         if self._db_connection:
             # Show settings dialog before creating plot widget
             from plot.time_space_plot_settings_dialog import TimeSpacePlotSettingsDialog
-            settings_dialog = TimeSpacePlotSettingsDialog(parent=self, db_connection=self._db_connection)
+            settings_dialog = TimeSpacePlotSettingsDialog(parent=self, 
+                db_connection=self._db_connection, search_action=self._search_vehicle_action)
             settings_dialog.settings_applied.connect(self._create_plot_widget)
             
             result = settings_dialog.exec()
             if result == QDialog.DialogCode.Accepted:
                 # Plot widget will be created in _create_plot_widget callback
                 self._export_menu.setEnabled(True)
+                self._data_menu.menuAction().setVisible(True)
                 self._analysis_menu.menuAction().setVisible(True)
             else:
                 # User cancelled settings dialog, close database and reset window
@@ -432,6 +474,10 @@ class MainWindow(QMainWindow):
 
     def _close_database_and_reset(self):
         """Close the current database connection and reset the window state."""
+        if self._search_dialog:
+            self._search_dialog.close()
+        self._search_vehicle_action.setEnabled(False)
+
         # Close database connection
         if self._db_connection:
             self._db_connection.close()
@@ -452,6 +498,7 @@ class MainWindow(QMainWindow):
         
         # Disable export menu
         self._export_menu.setEnabled(False)
+        self._data_menu.menuAction().setVisible(False)
         self._analysis_menu.menuAction().setVisible(False)
         
         # Reset plot mode menu
@@ -473,6 +520,7 @@ class MainWindow(QMainWindow):
         from plot.time_space_plot_widget import TimeSpacePlotWidget
         if not self._plot_widget:
             self._plot_widget = TimeSpacePlotWidget(mode_menu=self._mode_menu)
+            self._plot_widget.set_search_action(self._search_vehicle_action)
         
         # Set database connection and apply settings with all parameters
         self._plot_widget.set_database(self._db_connection)
@@ -597,6 +645,31 @@ class MainWindow(QMainWindow):
         self._recent_files = self._recent_files[:7]  # Keep only 7 recent files
         self._update_recent_menu()
 
+    def _open_vehicle_search_dialog(self):
+        """Open (or bring forward) the modeless VehicleSearchDialog."""
+        if not self._plot_widget:
+            logger.warning("No plot widget available for vehicle search")
+            return
+
+        if self._search_dialog is None:
+            from plot.vehicle_search_dialog import VehicleSearchDialog
+            self._search_dialog = VehicleSearchDialog(
+                parent=self, veh_ids=self._plot_widget.get_vehicle_ids())
+            self._search_dialog.vehicle_selected.connect(self._plot_widget.select_searched_vehicle)
+        else:
+            self._search_dialog.set_vehicle_ids(self._plot_widget.get_vehicle_ids())
+
+        self._search_dialog.show()
+        self._search_dialog.raise_()
+        self._search_dialog.activateWindow()
+
+    def _on_search_action_changed(self):
+        """React to the Search Vehicle action's enabled state, which is owned
+        by TimeSpacePlotSettingsDialog. Close the modeless search dialog
+        whenever the action becomes disabled (event no longer confirmed)."""
+        if not self._search_vehicle_action.isEnabled() and self._search_dialog is not None:
+            self._search_dialog.close()
+
     def _show_log_viewer(self) -> None:
         """Show the modeless System Log Viewer dialog.
     
@@ -624,11 +697,32 @@ class MainWindow(QMainWindow):
         if self._log_viewer_dialog is not None:
             self._log_viewer_dialog.close()
 
+        if self._search_dialog is not None:
+            self._search_dialog.close()
+
         if self._db_connection:
             self._db_connection.close()
 
         self._save_settings()
         super().closeEvent(event)
+
+    def _run_spline_fitting(self):
+        """Handle the Data > Spline Fitting menu action."""
+        if not self._db_connection:
+            QMessageBox.warning(self, "Warning", "No database is currently open.")
+            return
+    
+        from .event_selection_dialog import EventSelectionDialog
+        sel_dlg = EventSelectionDialog(self, self._db_connection)
+        if sel_dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        event_ids = sel_dlg.selected_event_ids
+        if not event_ids:
+            return
+    
+        from comp.spline import SplineCompDialog
+        dlg = SplineCompDialog(self, self._db_connection, event_ids=event_ids)
+        dlg.exec()
 
     def _run_jerk_analysis(self):
         from comp.jerk import JerkCompDialog

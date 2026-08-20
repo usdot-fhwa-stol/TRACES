@@ -14,6 +14,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QComboBox, QDialog, QHBoxLayout, QVBoxLayout, QLabel
 import pyqtgraph as pg
 from superqt import QLabeledRangeSlider, QLabeledDoubleRangeSlider
+from utils import events_columns
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -76,10 +77,18 @@ class TimeSpeedDialog(QDialog):
         
         # Size dialog to 80% of parent size and center it
         self._size_and_center_dialog()
-        
+
+        # Guard: the Y column is optional under the config-driven import
+        # schema. The context menu disables the opening action when it is
+        # absent, but this protects any other entry point.
+        self._events_cols = events_columns(db_connection)
+        if self.Y_COLUMN not in self._events_cols:
+            self._setup_unavailable_ui()
+            return
+
         self._setup_ui(lane_ids, time_min, time_max)
         self._load_and_plot_data()
-    
+
     def _size_and_center_dialog(self):
         """Size the dialog to 80% of parent size and center it within the parent."""
         parent = self.parent().parent()
@@ -100,6 +109,17 @@ class TimeSpeedDialog(QDialog):
             # Fallback
             self.resize(900, 600)
 
+    def _setup_unavailable_ui(self):
+        """Show an explanation instead of the plot when the Y column is
+        absent from this dataset."""
+        layout = QVBoxLayout(self)
+        message = QLabel(
+            f"This dataset does not contain the {self.Y_COLUMN} column, "
+            f"so the {self.PLOT_TITLE_SUFFIX} plot is not available."
+        )
+        message.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        message.setWordWrap(True)
+        layout.addWidget(message)
     
     def _setup_ui(self, lane_ids, time_min, time_max):
         """Set up the dialog UI components."""
@@ -208,15 +228,23 @@ class TimeSpeedDialog(QDialog):
             AND {self.Y_COLUMN} IS NOT NULL
             ORDER BY veh_id, veh_time
         """
-    
+
     def _get_tooltip_query(self):
         """Get the SQL query for tooltip data.
-        
+
+        The Y column is guaranteed present (guarded in __init__), but the
+        other optional tooltip columns may be absent; they are selected as
+        NULL so the row shape stays constant for the unpacking code.
+
         Returns:
             str: SQL query string
         """
+        optional = ", ".join(
+            col if col in self._events_cols else f"NULL AS {col}"
+            for col in ("veh_speed", "veh_accel", "veh_automation", "veh_length")
+        )
         return f"""
-            SELECT veh_id, veh_time, lane_id, {self.Y_COLUMN}, veh_dist_trav, veh_speed, veh_accel, veh_automation, veh_length
+            SELECT veh_id, veh_time, lane_id, {self.Y_COLUMN}, veh_dist_trav, {optional}
             FROM events
             WHERE event_id = ? AND veh_id = ? 
             AND veh_time BETWEEN ? AND ?

@@ -5,8 +5,9 @@ from pathlib import Path
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget,
-    QTableWidgetItem, QHeaderView, QFileDialog, QMessageBox, QLabel,
+    QTableWidgetItem, QHeaderView, QFileDialog, QMessageBox,
 )
+from utils import last_dialog_dir, remember_dialog_path
 
 logger = logging.getLogger(__name__)
 
@@ -125,12 +126,14 @@ class MissingDataResultsTableDialog(QDialog):
                 self._table.setItem(row_idx, col_idx, item)
 
     def _on_save(self):
+        default = str(Path(last_dialog_dir()) / "missing_data_results.csv")
         path, _ = QFileDialog.getSaveFileName(
-            self, "Save Missing Data Results", "missing_data_results.csv",
+            self, "Save Missing Data Results", default,
             "CSV Files (*.csv);;All Files (*)"
         )
         if not path:
             return
+        remember_dialog_path(path)
             
         try:
             with Path(path).open("w", newline="", encoding="utf-8") as f:

@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QPushButton, QProgressBar, QFileDialog, QMessageBox,
 )
+from utils import last_dialog_dir, remember_dialog_path
 
 logger = logging.getLogger(__name__)
 
@@ -141,9 +142,20 @@ class BaseAnalysisDialog(QDialog):
 
     # ── Thread lifecycle ──────────────────────────────────────────────────
 
+    def _progress_maximum(self, event_ids: list, veh_ids, params: dict) -> int:
+        """Return the progress bar's maximum — the total number of
+        progress_callback ticks _run_for_event is expected to make.
+
+        Default: one tick per event (matches the default _run_for_event
+        pattern of ticking once after each event finishes). Override this
+        when a module ticks more granularly, e.g. once per vehicle as well
+        (see SplineCompDialog).
+        """
+        return len(event_ids)
+
     def _start_worker(self, event_ids: list, veh_ids,
                       params: dict, dest_path):
-        self._progress_bar.setMaximum(len(event_ids))
+        self._progress_bar.setMaximum(self._progress_maximum(event_ids, veh_ids, params))
         self._progress_bar.setValue(0)
         self._set_controls_enabled(False)
 
@@ -181,7 +193,7 @@ class BaseAnalysisDialog(QDialog):
         return default_save_stem(label)
     
     def _on_save(self):
-        default = str(Path.home() / f"{self._default_export_stem()}.csv")
+        default = str(Path(last_dialog_dir()) / f"{self._default_export_stem()}.csv")
         dest, _ = QFileDialog.getSaveFileName(
             self,
             f"Save {self._csv_export_label()} Export",
@@ -190,6 +202,7 @@ class BaseAnalysisDialog(QDialog):
         )
         if not dest:
             return
+        remember_dialog_path(dest)
         self._dest_path = dest
         self._start_worker(
             self._export_event_ids, None,

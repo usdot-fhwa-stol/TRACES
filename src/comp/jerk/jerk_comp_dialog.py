@@ -96,13 +96,17 @@ class JerkCompDialog(BaseAnalysisDialog):
             run_for_event=self._run_for_event,
             write_csv=self._write_csv,          # module-level function, unchanged
         )
-    
-    def _run_for_event(self, conn, event_id, veh_ids, params):
+
+    def _run_for_event(self, conn, event_id, veh_ids, params, progress_callback=None):
         from .jerk_comp import JerkComp
         comp = JerkComp()
         if veh_ids is not None:
-            return comp.comp_series(conn, event_id, veh_ids, options=params)
-        return comp.comp_event(conn, event_id, options=params)
+            results = comp.comp_series(conn, event_id, veh_ids, options=params)
+        else:
+            results = comp.comp_event(conn, event_id, options=params)
+        if progress_callback is not None:
+            progress_callback()
+        return results
 
     def _set_controls_enabled(self, enabled: bool):
         super()._set_controls_enabled(enabled)          # handles buttons

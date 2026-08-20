@@ -112,9 +112,12 @@ class TimeSpacePlotWidget(QWidget):
         self._active_handler   = InteractionModeHandler()
         self._min_time_span = self._BASE_MIN_SPAN
         self._min_dist_span = self._BASE_MIN_SPAN
+        self._search_action = None  # View > Search Vehicle QAction, owned by MainWindow
         self._mode_actions       = {}    # InteractionMode → QAction
         self._shockwave_action   = None  # stored for cancel-restore
         self._shockwave_slider_widget = None  # created in _setup_ui
+        self._tooltip_select = ("lane_id, veh_speed, veh_accel, "
+                                "veh_automation, veh_length")
 
         logger.debug("TimeSpacePlotWidget initialized")
         
@@ -261,10 +264,17 @@ class TimeSpacePlotWidget(QWidget):
             logger.warning("No database connection available for settings dialog")
             return
 
+        # Only hand control of the action to the dialog if we're currently
+        # in Select mode -- otherwise it's already (correctly) disabled by
+        # the active non-Select mode and must stay that way regardless of
+        # whether the dialog is accepted or cancelled.
+        search_action = self._search_action if self._interaction_mode == InteractionMode.SELECT else None
+
         settings_dialog = TimeSpacePlotSettingsDialog(parent=self, db_connection=self._db_connection, 
             defaults = {"event_id": self._current_event_id, 
                 "dist_range": self._dist_range, 
-                "time_range": self._time_range})
+                "time_range": self._time_range},
+            search_action=search_action)
         settings_dialog.settings_applied.connect(self._apply_settings)
 
         # Show dialog modally
@@ -328,6 +338,7 @@ class TimeSpacePlotWidget(QWidget):
         )
         
         self._setup_mode_menu()
+        self._update_search_action_for_mode(InteractionMode.SELECT)
         
     def _initialize_series_from_ids(self):
         """Initialize the _series dictionary using the provided vehicle IDs."""
@@ -483,11 +494,48 @@ class TimeSpacePlotWidget(QWidget):
             time_min, time_max = self._time_slider.value()
             dist_min, dist_max = self._dist_slider.value()
 
+            from utils import events_columns
+            cols = events_columns(self._db_connection)
+
+            # Gate speed-dependent features on column presence. veh_speed is
+            # optional under the config-driven import schema.
+            has_speed = "veh_speed" in cols
+            self._speed_toggle.setEnabled(has_speed)
+            self._vertical_gradient.setEnabled(has_speed)
+            if not has_speed and self._speed_gradient_enabled:
+                self._speed_toggle.setChecked(False)
+                self._speed_gradient_enabled = False
+            speed_expr = "veh_speed" if has_speed else "NULL AS veh_speed"
+
+            # Cache the optional-column SELECT expressions for the hover
+            # tooltip query. These columns are import-time only (never added
+            # by analysis modules), so caching per data reload is safe.
+            self._tooltip_select = ", ".join(
+                col if col in cols else f"NULL AS {col}"
+                for col in ("lane_id", "veh_speed", "veh_accel",
+                            "veh_automation", "veh_length")
+            )
+
+            want_spline = self._active_handler.wants_spline_position_data(self)
+            if want_spline and "calc_position" in cols:
+                position_col = "calc_position"
+                # Include spline-imputed fill rows too -- that's the point of
+                # this mode -- but skip rows the spline never fit at all.
+                where_extra = " AND calc_position IS NOT NULL"
+            else:
+                position_col = "veh_dist_trav"
+                # Outside spline mode, never plot synthetic fill rows as if
+                # they were measured trajectory points.
+                where_extra = (
+                    " AND (is_spline_imputed = 0 OR is_spline_imputed IS NULL)"
+                    if "is_spline_imputed" in cols else ""
+                )
+
             cursor = self._db_connection.cursor()
-            cursor.execute("""
-                SELECT veh_id, veh_time, veh_dist_trav, veh_speed
+            cursor.execute(f"""
+                SELECT veh_id, veh_time, {position_col}, {speed_expr}
                 FROM events
-                WHERE event_id = ? AND lane_id = ?
+                WHERE event_id = ? AND lane_id = ?{where_extra}
                 ORDER BY veh_id, veh_time
             """, (self._current_event_id, self._lane_combobox.currentData()['lane_id']))
 
@@ -656,8 +704,12 @@ class TimeSpacePlotWidget(QWidget):
 
             if self._last_queried_point != current_point:
                 cursor = self._db_connection.cursor()
-                cursor.execute("""
-                    SELECT lane_id, veh_speed, veh_accel, veh_automation, veh_length
+                tooltip_select = getattr(
+                    self, "_tooltip_select",
+                    "lane_id, veh_speed, veh_accel, veh_automation, veh_length"
+                )
+                cursor.execute(f"""
+                    SELECT {tooltip_select}
                     FROM   events
                     WHERE  event_id = ? AND veh_id = ? AND veh_time = ?
                 """, (self._current_event_id, veh_id, veh_time))
@@ -881,6 +933,24 @@ class TimeSpacePlotWidget(QWidget):
         self._mode_menu.menuAction().setVisible(True)
         logger.debug("Mode menu populated and enabled")
 
+    def _update_search_action_for_mode(self, mode: InteractionMode):
+        """Vehicle search only makes sense in Select mode, since it relies on
+        the default lasso/click selection to highlight the found trajectory.
+        Enable the Search Vehicle action only when returning to Select (and
+        only if an event is active); disable it for every other mode.
+        MainWindow reactively closes an open search dialog whenever this
+        action becomes disabled (see MainWindow._on_search_action_changed),
+        so no separate close call is needed here.
+
+        Args:
+            mode (InteractionMode): The mode just switched to.
+        """
+        if self._search_action is None:
+            return
+        self._search_action.setEnabled(
+            mode == InteractionMode.SELECT and self._current_event_id is not None
+        )
+
     def _on_mode_changed(self, mode: InteractionMode, handler=None):
         """Handle interaction mode changes driven by the Mode menu.
 
@@ -893,6 +963,9 @@ class TimeSpacePlotWidget(QWidget):
         )()
         self._interaction_mode = mode
         self._active_handler.on_enter(self)
+        self._update_search_action_for_mode(mode)
+        self._active_handler.on_enter(self)
+        self._update_plot_data()   # position column may depend on the new handler
         logger.debug(f"Mode changed to: {mode.value}")
 
     def _compute_min_spans(self):
@@ -929,12 +1002,13 @@ class TimeSpacePlotWidget(QWidget):
     def _on_shockwave_action_triggered(self):
         """Show ShockwaveConfigDialog; activate mode on OK, restore previous on Cancel."""
         from comp.shockwave import ShockwaveConfigDialog
-        dlg = ShockwaveConfigDialog(self)
+        dlg = ShockwaveConfigDialog(self, self._db_connection, self._current_event_id)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             mode    = dlg.selected_interaction_mode()
             handler = ShockwaveSemiAutoModeHandler(
                 slope_percentile=dlg.selected_slope_percentile(),
                 vicinity=dlg.selected_vicinity(),
+                use_spline_data=(dlg.selected_data_mode() == "spline"),
             )
             # Also sync the slope slider to the config dialog's chosen value.
             self._slope_slider.setValue(int(dlg.selected_slope_percentile()))
@@ -944,3 +1018,151 @@ class TimeSpacePlotWidget(QWidget):
             prev = self._mode_actions.get(self._interaction_mode)
             if prev:
                 prev.setChecked(True)
+
+    def set_search_action(self, search_action):
+        """Store the View > Search Vehicle QAction so it can be handed to
+        TimeSpacePlotSettingsDialog, which owns enabling/disabling it.
+
+        Args:
+            search_action (QAction): The Search Vehicle menu action.
+        """
+        self._search_action = search_action
+        logger.debug("Search action registered")
+
+    def get_vehicle_ids(self) -> list:
+        """Return the full list of vehicle ids for the current event.
+
+        Returns:
+            list[int]: Vehicle ids, independent of lane.
+        """
+        return list(self._veh_ids)
+
+    def select_searched_vehicle(self, veh_id: int):
+        """Locate and select a vehicle trajectory found via the vehicle
+        search dialog.
+
+        If the vehicle already has loaded data on the current lane, it is
+        selected in place. Otherwise the lane of its first temporal
+        occurrence is found and loaded first. Either way, once the series
+        data is available the time and distance sliders are snapped to the
+        vehicle's exact trajectory extent.
+
+        Args:
+            veh_id (int): Vehicle id chosen in the VehicleSearchDialog.
+        """
+        if not self._db_connection or self._current_event_id is None or veh_id not in self._series:
+            logger.warning(f"Cannot search for vehicle {veh_id}: no active event")
+            return
+
+        series = self._series.get(veh_id)
+        if series is not None and len(series['veh_time']) > 0:
+            self._clear_selection_box()
+            self._frame_and_select_vehicle(veh_id, series)
+            return
+
+        lane_id = self._find_first_lane_for_vehicle(veh_id)
+        if lane_id is None:
+            logger.warning(f"Vehicle {veh_id} not found in event {self._current_event_id}")
+            return
+
+        self._switch_lane_and_select_vehicle(lane_id, veh_id)
+
+    def _find_first_lane_for_vehicle(self, veh_id: int):
+        """Find the lane where the vehicle first appears temporally.
+
+        Args:
+            veh_id (int): Vehicle id to locate.
+
+        Returns:
+            int or None: lane_id of first temporal occurrence, or None if not found.
+        """
+        try:
+            cursor = self._db_connection.cursor()
+            cursor.execute("""
+                SELECT lane_id FROM events
+                WHERE event_id = ? AND veh_id = ?
+                ORDER BY veh_time
+                LIMIT 1
+            """, (self._current_event_id, veh_id))
+            result = cursor.fetchone()
+            return result[0] if result else None
+        except sqlite3.Error as e:
+            logger.error(f"Error finding first lane for vehicle {veh_id}: {e}")
+            return None
+
+    def _switch_lane_and_select_vehicle(self, lane_id: int, veh_id: int):
+        """Switch the lane combobox to `lane_id`, synchronously reload plot
+        data, then select and frame `veh_id` using its freshly loaded series.
+
+        Args:
+            lane_id (int): Lane to switch to.
+            veh_id (int): Vehicle id to select once data is loaded.
+        """
+        index = -1
+        for i in range(self._lane_combobox.count()):
+            if self._lane_combobox.itemData(i)['lane_id'] == lane_id:
+                index = i
+                break
+
+        if index < 0:
+            logger.warning(f"Lane {lane_id} not found in lane combobox")
+            return
+
+        # Change lane without letting _on_lane_changed's deferred
+        # QTimer.singleShot reload race with the synchronous one below.
+        self._lane_combobox.blockSignals(True)
+        self._lane_combobox.setCurrentIndex(index)
+        self._lane_combobox.blockSignals(False)
+        data = self._lane_combobox.currentData()
+        self._lane_combobox.setToolTip(f"Orig: {data['orig_lane_id']}")
+
+        self._clear_selection_box()
+        self._update_plot_data()
+
+        series = self._series.get(veh_id)
+        if series is None or len(series['veh_time']) == 0:
+            logger.warning(f"Vehicle {veh_id} has no data on lane {lane_id}")
+            return
+
+        self._frame_and_select_vehicle(veh_id, series)
+
+    def _frame_and_select_vehicle(self, veh_id: int, series: dict):
+        """Snap the time/distance sliders to a vehicle's exact trajectory
+        extent and select it, dimming all other trajectories.
+
+        Slider *ranges* are only expanded if the trajectory falls completely
+        outside them; slider *values* are always set to the trajectory's
+        exact extent (no padding).
+
+        Args:
+            veh_id (int): Vehicle id being selected.
+            series (dict): The vehicle's series dictionary with loaded data.
+        """
+        t_min, t_max = float(series['veh_time'].min()), float(series['veh_time'].max())
+        d_min, d_max = float(series['veh_dist_trav'].min()), float(series['veh_dist_trav'].max())
+
+        self._expand_slider_range_if_needed(self._time_slider, t_min, t_max)
+        self._expand_slider_range_if_needed(self._dist_slider, d_min, d_max)
+
+        self._time_slider.setValue((t_min, t_max))
+        self._dist_slider.setValue((d_min, d_max))
+
+        self._selected_series = {veh_id}
+        self._update_plot_colors()
+
+        logger.debug(f"Framed and selected vehicle {veh_id}: "
+                     f"time=[{t_min}, {t_max}], dist=[{d_min}, {d_max}]")
+
+    @staticmethod
+    def _expand_slider_range_if_needed(slider, val_min: float, val_max: float):
+        """Expand a slider's min/max range only if the given span falls
+        completely outside its current range; otherwise leave it untouched.
+
+        Args:
+            slider (QLabeledRangeSlider): Slider to adjust.
+            val_min (float): Minimum of the span that must be reachable.
+            val_max (float): Maximum of the span that must be reachable.
+        """
+        range_min, range_max = slider.minimum(), slider.maximum()
+        if val_max < range_min or val_min > range_max:
+            slider.setRange(min(range_min, val_min), max(range_max, val_max))

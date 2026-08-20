@@ -1,8 +1,12 @@
 import sys
 import os
 import shutil
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
+from typing import Optional
+
+
+_last_dialog_dir: Optional[str] = None   # process-wide, not persisted across app restarts
 
 
 def get_resource_path(relative_path: str) -> str:
@@ -58,3 +62,53 @@ def default_save_stem(prefix: str, suffix: str = "") -> str:
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     parts = [p for p in (prefix, suffix, ts) if p]
     return "_".join(parts)
+
+def last_dialog_dir() -> str:
+    """Starting directory for file/directory dialogs: the most recently
+    used location across the app this session, or the user's home
+    directory if none has been used yet."""
+    return _last_dialog_dir or str(Path.home())
+
+def remember_dialog_path(path: str) -> None:
+    """Record the directory containing *path* as the most recently used
+    file-dialog location. *path* may be a file or a directory.
+
+    Call this only after a dialog returns a non-empty/accepted result --
+    never on cancel, so a rejected dialog can't clobber a previously good
+    location.
+    """
+    global _last_dialog_dir
+    if not path:
+        return
+    p = Path(path)
+    _last_dialog_dir = str(p if p.is_dir() else p.parent)
+
+def events_columns(db_connection) -> set:
+    """Return the set of column names present in the events table.
+
+    With the config-driven import schema, databases only guarantee the
+    required columns (event_id, veh_id, veh_time, lane_id, veh_dist_trav).
+    Every consumer of an optional column — veh_speed, veh_accel,
+    orig_lane_id, veh_length, and so on — must check for its presence
+    before referencing it in SQL. This helper is the single shared way
+    to do that check.
+
+    Note: analysis modules may ALTER TABLE to add computed columns
+    (veh_speed_cal, calc_*, is_spline_imputed, ...) during a session, so
+    the result reflects the table at call time and should be re-queried
+    per operation rather than cached for the lifetime of a connection.
+
+    Args:
+        db_connection: Open connection to a trajectory database.
+
+    Returns:
+        set: Column names currently present in the events table. Empty
+            set if the table does not exist.
+    """
+    import sqlite3
+    try:
+        cursor = db_connection.cursor()
+        cursor.execute("PRAGMA table_info(events)")
+        return {row[1] for row in cursor.fetchall()}
+    except sqlite3.Error:
+        return set()

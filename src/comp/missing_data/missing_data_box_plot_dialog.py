@@ -104,6 +104,7 @@ class MissingDataBoxPlotDialog(QDialog):
                            whisker_low=whisker_low, whisker_high=whisker_high,
                            outliers=outliers)
         plot.addItem(item)
+        item.sigHovered.connect(lambda stats, pw=plot: self._on_box_hovered(stats, pw))
 
         # Outlier hover logic
         outlier_mask = (arr < whisker_low) | (arr > whisker_high)
@@ -142,15 +143,34 @@ class MissingDataBoxPlotDialog(QDialog):
         else:
             QToolTip.hideText()
 
+    def _on_box_hovered(self, stats, plot_widget):
+        """Show a QToolTip with the five-number summary on box hover, hide on leave."""
+        if stats is None:
+            QToolTip.hideText()
+            return
+        whisker_low, q1, median, q3, whisker_high = stats
+        text = (
+            f"Upper: {whisker_high:.4g}\n"
+            f"Q3:            {q3:.4g}\n"
+            f"Median:        {median:.4g}\n"
+            f"Q1:            {q1:.4g}\n"
+            f"Lower: {whisker_low:.4g}"
+        )
+        screen_pos = plot_widget.mapToGlobal(plot_widget.rect().center())
+        QToolTip.showText(screen_pos, text)
+
     # ── Save: HTML with embedded SVG and pan/zoom JS ──────────────────────
     
     def _on_save(self):
+        from utils import last_dialog_dir, remember_dialog_path
+        default = str(Path(last_dialog_dir()) / "missing_data_box_plots.html")
         path, _ = QFileDialog.getSaveFileName(
-            self, "Save Box Plots", "missing_data_box_plots.html",
+            self, "Save Box Plots", default,
             "HTML Files (*.html);;All Files (*)"
         )
         if not path:
             return
+        remember_dialog_path(path)
 
         try:
             svg_blocks = [

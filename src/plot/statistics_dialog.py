@@ -61,16 +61,37 @@ class StatisticsDialog(QDialog):
         layout.addWidget(self.table)
     
     def _populate_statistics(self):
-        """Populate the table with vehicle statistics using streaming approach."""
+        """Populate the table with vehicle statistics using streaming approach.
+
+        veh_speed and veh_accel are optional under the config-driven import
+        schema. Absent columns are selected as NULL so the row shape stays
+        constant; if neither exists there is nothing to compute, so the
+        dialog explains why instead of showing an empty table.
+        """
+        from utils import events_columns
         try:
+            cols = events_columns(self.db_connection)
+            has_speed = "veh_speed" in cols
+            has_accel = "veh_accel" in cols
+
+            if not has_speed and not has_accel:
+                self._show_no_data_message(
+                    "This dataset contains neither veh_speed nor veh_accel, "
+                    "so no vehicle statistics can be computed."
+                )
+                return
+
+            speed_expr = "veh_speed" if has_speed else "NULL AS veh_speed"
+            accel_expr = "veh_accel" if has_accel else "NULL AS veh_accel"
+
             # Prepare data structures for streaming
             vehicle_data = {veh_id: {'speed': [], 'accel': []} for veh_id in self.veh_ids}
-            
+
             # Build SQL query with veh_id IN clause for efficient filtering
             placeholders = ','.join('?' for _ in self.veh_ids)
             cursor = self.db_connection.cursor()
             cursor.execute(f"""
-                SELECT veh_id, veh_time, veh_speed, veh_accel
+                SELECT veh_id, veh_time, {speed_expr}, {accel_expr}
                 FROM events
                 WHERE event_id = ? AND veh_id IN ({placeholders})
                 ORDER BY veh_id, veh_time
@@ -138,6 +159,18 @@ class StatisticsDialog(QDialog):
             'max': np.max(np_data),
             'std': np.std(np_data)
         }
+
+    def _show_no_data_message(self, message: str):
+        """Replace the empty table with a single spanning message row.
+
+        Args:
+            message (str): Explanation shown to the user.
+        """
+        self.table.setRowCount(1)
+        item = QTableWidgetItem(message)
+        item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+        self.table.setItem(0, 0, item)
+        self.table.setSpan(0, 0, 1, self.table.columnCount())
     
     def _populate_table_row(self, row, veh_id, speed_stats, accel_stats):
         """Populate a single table row with statistics.

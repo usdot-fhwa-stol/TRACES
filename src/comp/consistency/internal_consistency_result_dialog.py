@@ -351,15 +351,17 @@ class InternalConsistencyResultDialog(QDialog):
             # Original — solid line
             if not np.all(np.isnan(orig)):
                 c = pw.plot(t, orig,
-                            pen=pg.mkPen(color=color, width=1.5),
+                            pen=pg.mkPen(color=color, width=4),
                             name=orig_attr.replace("_", " "))
                 curves.append(c)
 
             # Reconstructed — dashed, same colour
             if not np.all(np.isnan(cal)):
+                pen = pg.mkPen(color=color, width=4)
+                pen.setStyle(Qt.PenStyle.CustomDashLine)
+                pen.setDashPattern([4, 4])   # longer dash, longer gap than the old DashLine default
                 c = pw.plot(t, cal,
-                            pen=pg.mkPen(color=color, width=1.5,
-                                         style=Qt.PenStyle.DashLine),
+                            pen=pen,
                             name=cal_attr.replace("_", " "))
                 curves.append(c)
 
@@ -560,16 +562,17 @@ class InternalConsistencyResultDialog(QDialog):
     # ── Save plots ────────────────────────────────────────────────────────
 
     def _on_save_plots(self):
-        from utils import default_save_stem
+        from utils import default_save_stem, last_dialog_dir, remember_dialog_path
         key     = self._traj_keys[self._current_idx]
         stem    = default_save_stem(f"internal_consistency_e{key[0]}_v{key[1]}")
-        default = str(Path.home() / f"{stem}.html")
+        default = str(Path(last_dialog_dir()) / f"{stem}.html")
         path, _ = QFileDialog.getSaveFileName(
             self, "Save Plots", default,
             "HTML Files (*.html);;All Files (*)",
         )
         if not path:
             return
+        remember_dialog_path(path)
         try:
             svg_blocks = [
                 (title, export_plot_to_svg(pw))

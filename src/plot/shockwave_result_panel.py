@@ -137,7 +137,7 @@ class ShockwaveResultPanel(QFrame):
         """
         self._title_label.setText(f"Shockwave {result.id}")
         self._eq_label.setText(result.equation)
-        self._speed_label.setText(f"Speed: {result.slope:.4f} dist/time")
+        self._speed_label.setText(f"Speed: {result.slope:.4f} m/s")
         self._r2_label.setText(f"R\u00b2 = {result.r_squared:.4f}")
         self.adjustSize()
         self._reposition()

@@ -35,9 +35,11 @@ class ShockwaveModeHandler(InteractionModeHandler):
 
     _CLICK_RADIUS = 15   # pixels/data-units (same scale as CustomViewBox tolerances)
 
-    def __init__(self, slope_percentile: float = 80.0, vicinity: float = 0.05):
+    def __init__(self, slope_percentile: float = 80.0, vicinity: float = 0.05,
+                 use_spline_data: bool = False):
         self._slope_percentile = slope_percentile
         self._vicinity         = vicinity
+        self._use_spline_data  = use_spline_data
         self._inflection_cache: dict = {}   # veh_id → list[InflectionPoint]
         self._fitted_results:   list = []   # list[ShockwaveResult]
         self._inflection_items: dict = {}   # veh_id → pg.ScatterPlotItem
@@ -470,7 +472,7 @@ class ShockwaveModeHandler(InteractionModeHandler):
     
         pen = pg.mkPen(color=color, width=3)
         pen.setStyle(Qt.PenStyle.CustomDashLine)
-        pen.setDashPattern([10, 8])   # longer dash, longer gap than the old DashLine default
+        pen.setDashPattern([4, 4])   # longer dash, longer gap than the old DashLine default
         line = pg.PlotDataItem(t_range, d_range, pen=pen)
         widget._scatter_plot.addItem(line)
     
@@ -495,7 +497,7 @@ class ShockwaveModeHandler(InteractionModeHandler):
         from PyQt6.QtWidgets import QMessageBox
         reply = QMessageBox.question(
             widget, "Shockwave Mode",
-            "Shockwave data will be lost, save progress?",
+            "Shockwave data will be lost, save shockwaves?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.Yes,
         )
@@ -634,10 +636,12 @@ class ShockwaveSemiAutoModeHandler(ShockwaveModeHandler):
             self._ordered_sequence = ShockwaveComp.build_trajectory_order(
                 pt.distance, widget._series
             )
+
         self._active_chain.append(pt)
         used = {p.veh_id for p in self._active_chain}
-        adjacent = ShockwaveComp.get_adjacent_trajectories(pt.veh_id, self._ordered_sequence)
-        self._valid_next_traj_ids = adjacent - used
+        self._valid_next_traj_ids = ShockwaveComp.get_chain_boundary_trajectories(
+            used, self._ordered_sequence
+        )
         self._refresh_highlights(widget)
         self._redraw_chain(widget)
         logger.debug(f"SW semi-auto: selected veh {pt.veh_id} at t={pt.time:.2f}")
@@ -650,23 +654,23 @@ class ShockwaveSemiAutoModeHandler(ShockwaveModeHandler):
         self._valid_next_traj_ids = None
 
     def _sync_derived_state(self):
-        last = self._active_chain[-1]
         used = {p.veh_id for p in self._active_chain}
-        adjacent = ShockwaveComp.get_adjacent_trajectories(last.veh_id, self._ordered_sequence)
-        self._valid_next_traj_ids = adjacent - used
-    
+        self._valid_next_traj_ids = ShockwaveComp.get_chain_boundary_trajectories(
+            used, self._ordered_sequence
+        )
+
     def _seed_mode_state_from_chain(self, widget):
         if not self._active_chain:
             return
         first = self._active_chain[0]
-        last  = self._active_chain[-1]
         self._locked_color     = first.type
         self._ordered_sequence = ShockwaveComp.build_trajectory_order(
             first.distance, widget._series
         )
         used = {p.veh_id for p in self._active_chain}
-        adjacent = ShockwaveComp.get_adjacent_trajectories(last.veh_id, self._ordered_sequence)
-        self._valid_next_traj_ids = adjacent - used
+        self._valid_next_traj_ids = ShockwaveComp.get_chain_boundary_trajectories(
+            used, self._ordered_sequence
+        )
 
     def _chain_point_type(self):
         return self._locked_color
@@ -688,3 +692,6 @@ class ShockwaveSemiAutoModeHandler(ShockwaveModeHandler):
             locked_color=self._locked_color,
             extra_filter=self._passes_time_separation,
         )
+
+    def wants_spline_position_data(self, widget) -> bool:
+        return self._use_spline_data

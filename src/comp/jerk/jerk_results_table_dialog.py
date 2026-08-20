@@ -101,18 +101,19 @@ class JerkResultsTableDialog(QDialog):
                 self._table.setItem(row_idx, col_idx, item)
 
     def _on_save(self):
-        from utils import default_save_stem
+        from utils import default_save_stem, last_dialog_dir, remember_dialog_path
         event_ids = sorted({r.event_id for r in self._results})
         veh_ids   = sorted({r.veh_id   for r in self._results})
         eids = "_".join(str(e) for e in event_ids)  if event_ids else "e?"
         vids = f"v{veh_ids[0]}-v{veh_ids[-1]}" if len(veh_ids) > 1 else f"v{veh_ids[0]}" if veh_ids else "vall"
-        default = str(Path.home() / f"{default_save_stem(f'jerk_results_e{eids}', vids)}.csv")
+        default = str(Path(last_dialog_dir()) / f"{default_save_stem(f'jerk_results_e{eids}', vids)}.csv")
         path, _ = QFileDialog.getSaveFileName(
             self, "Save Jerk Results", default,
             "CSV Files (*.csv);;All Files (*)"
         )
         if not path:
             return
+        remember_dialog_path(path)
         try:
             with Path(path).open("w", newline="", encoding="utf-8") as f:
                 writer = csv.writer(f)

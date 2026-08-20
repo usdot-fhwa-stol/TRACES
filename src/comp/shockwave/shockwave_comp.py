@@ -22,7 +22,7 @@ class InflectionPoint:
 class ShockwaveResult:
     id:         int
     mode:       str            # "semi_auto" | "manual" | "automatic"
-    slope:      float          # shockwave speed (distance unit / time unit)
+    slope:      float          # shockwave speed (m/s)
     intercept:  float
     r_squared:  float
     equation:   str            # "distance = {slope} * time + {intercept}"
@@ -69,7 +69,6 @@ class ShockwaveComp:
 
         Falls back to (0, mean(y)) when the x-range is degenerate.
         """
-        n    = len(x)
         xbar = x.mean()
         ybar = y.mean()
         denom = np.sum((x - xbar) ** 2)
@@ -408,25 +407,35 @@ class ShockwaveComp:
     # ── Adjacency ─────────────────────────────────────────────────────────
 
     @staticmethod
-    def get_adjacent_trajectories(
-        last_veh_id:      int,
+    def get_chain_boundary_trajectories(
+        used_veh_ids:     set,
         ordered_sequence: List[int],
     ) -> set:
-        """Return the set of veh_ids immediately before and after
-        last_veh_id in ordered_sequence.
+        """Return the set of veh_ids immediately before and after the
+        contiguous block of already-selected trajectories in
+        ordered_sequence.
 
-        Implements pseudocode GetAdjacentTrajectories.
+        Because each selection is only ever accepted when it is adjacent
+        to the chain's current front or back, `used_veh_ids` always forms
+        a contiguous span within ordered_sequence. The valid next
+        selections are therefore the single neighbor just before the
+        span's minimum index and the single neighbor just after its
+        maximum index -- not just the neighbors of the most recently
+        added point.
+
         Returns a set with 0, 1, or 2 elements.
         """
-        if last_veh_id not in ordered_sequence:
+        indices = [ordered_sequence.index(v) for v in used_veh_ids
+                   if v in ordered_sequence]
+        if not indices:
             return set()
 
-        idx   = ordered_sequence.index(last_veh_id)
+        min_idx, max_idx = min(indices), max(indices)
         valid = set()
-        if idx > 0:
-            valid.add(ordered_sequence[idx - 1])
-        if idx < len(ordered_sequence) - 1:
-            valid.add(ordered_sequence[idx + 1])
+        if min_idx > 0:
+            valid.add(ordered_sequence[min_idx - 1])
+        if max_idx < len(ordered_sequence) - 1:
+            valid.add(ordered_sequence[max_idx + 1])
         return valid
 
     # ── Regression and reporting ──────────────────────────────────────────
