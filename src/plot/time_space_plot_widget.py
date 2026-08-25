@@ -80,6 +80,13 @@ class TimeSpacePlotWidget(QWidget):
 
     _SERIES_SEG_THRESHOLD = 0.3   # seconds; max intra-segment time gap
     _BASE_MIN_SPAN = 10.0          # absolute floor for the smaller axis
+    _RANGE_VALUE_STYLE = (
+        "background-color: #c8c8c8; "
+        "color: #000000; "
+        "border: 1px solid #000000; "
+        "border-radius: 2px; "
+        "padding: 0px 0px;"
+    )
 
     def __init__(self, parent=None, mode_menu=None):
         """Initialize the TimeSpacePlotWidget.
@@ -177,6 +184,7 @@ class TimeSpacePlotWidget(QWidget):
         # Time slider
         self._time_slider = QLabeledRangeSlider()
         self._time_slider.setOrientation(Qt.Orientation.Horizontal)
+        self._style_editable_range_slider(self._time_slider)
         self._time_slider.valueChanged.connect(self._on_slider_changed)
         time_layout.addWidget(self._time_slider, stretch=1)
         
@@ -235,6 +243,7 @@ class TimeSpacePlotWidget(QWidget):
         
         self._dist_slider = QLabeledRangeSlider()
         self._dist_slider.setOrientation(Qt.Orientation.Vertical)
+        self._style_editable_range_slider(self._dist_slider)
         self._dist_slider.valueChanged.connect(self._on_slider_changed)
         right_layout.addWidget(self._dist_slider, stretch=1)
         
@@ -248,6 +257,15 @@ class TimeSpacePlotWidget(QWidget):
         # Create tooltip
         self._tooltip = QLabel(self._scatter_plot)
         self._tooltip.setStyleSheet("QLabel { padding: 5px; }")
+
+    def _style_editable_range_slider(self, slider):
+        """Style only the editable min/max edge values as visible input boxes."""
+        for label_name in ("_min_label", "_max_label"):
+            label = getattr(slider, label_name, None)
+            if label is not None:
+                label.setStyleSheet(self._RANGE_VALUE_STYLE)
+                label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        slider.setToolTip("Edit the minimum or maximum range value.")
         
     def set_database(self, db_connection: sqlite3.Connection):
         """Set the database connection for the widget.
@@ -323,10 +341,12 @@ class TimeSpacePlotWidget(QWidget):
         # Set distance slider range and values
         self._dist_slider.setRange(dist_min, dist_max)
         self._dist_slider.setValue(self._dist_range)
+        self._style_editable_range_slider(self._dist_slider)
     
         # Set time slider range and values
         self._time_slider.setRange(time_min, time_max)
         self._time_slider.setValue(self._time_range)
+        self._style_editable_range_slider(self._time_slider)
 
         self._compute_min_spans()
 
@@ -876,7 +896,7 @@ class TimeSpacePlotWidget(QWidget):
         rebuilt each time to ensure a clean state when a new dataset is opened.
 
         The two mutually exclusive modes are:
-            - Select Trajectory (default): normal lasso / click selection.
+            - Time-Space Diagram (default): normal lasso / click selection.
             - Gap Headway: hover / click gap and headway overlay.
 
         A QActionGroup enforces that exactly one action is checked at all times.
@@ -891,7 +911,7 @@ class TimeSpacePlotWidget(QWidget):
         action_group = QActionGroup(self._mode_menu)
         action_group.setExclusive(True)
 
-        select_action = QAction("Select Trajectory", self._mode_menu)
+        select_action = QAction("Time-Space Diagram", self._mode_menu)
         select_action.setCheckable(True)
         select_action.setChecked(True)
         select_action.triggered.connect(

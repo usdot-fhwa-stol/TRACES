@@ -6,4 +6,5 @@ PyQt6-sip==13.10.2
 pyqtgraph==0.13.7
 superqt==0.7.3
 numpy==2.2.5
+scipy==1.15.2
 utm==0.8.1

@@ -65,6 +65,7 @@ class TimeSpeedDialog(QDialog):
         self._last_queried_point = None
         self._last_mouse_move_time = 0.0
         self._vehicle_data = {}
+        self._lane_label_items = []
         
         # Create title based on number of vehicles
         if len(veh_ids) == 1:
@@ -220,7 +221,7 @@ class TimeSpeedDialog(QDialog):
         veh_ids = ','.join(str(x) for x in self.veh_ids)
         lane_ids = ','.join(str(x) for x in all_lane_ids)
         return f"""
-            SELECT veh_id, veh_time, {self.Y_COLUMN}
+            SELECT veh_id, veh_time, {self.Y_COLUMN}, lane_id
             FROM events
             WHERE event_id = ? 
             AND veh_id IN ({veh_ids}) 
@@ -267,8 +268,9 @@ class TimeSpeedDialog(QDialog):
             current_veh_id = None
             current_times = []
             current_y_values = []
+            current_lane_ids = []
             
-            def plot_vehicle_data(veh_id, times, y_values):
+            def plot_vehicle_data(veh_id, times, y_values, lane_ids_for_vehicle):
                 """Helper function to plot data for a single vehicle."""
                 if not times:
                     return
@@ -283,11 +285,13 @@ class TimeSpeedDialog(QDialog):
                 # Convert to numpy arrays
                 times_array = np.array(times, dtype=np.float64)
                 y_array = np.array(y_values, dtype=np.float64)
+                lane_array = np.array(lane_ids_for_vehicle)
                 
                 # Store data for tooltip queries
                 self._vehicle_data[veh_id] = {
                     'times': times_array,
                     'y_values': y_array,
+                    'lane_ids': lane_array,
                     'color': color
                 }
                 
@@ -296,7 +300,10 @@ class TimeSpeedDialog(QDialog):
                     x=times_array,
                     y=y_array,
                     pen=pg.mkPen(color=color, width=4),
-                    symbol=None
+                    symbol='o',
+                    symbolSize=7,
+                    symbolPen=pg.mkPen(color=color, width=1),
+                    symbolBrush=pg.mkBrush(color)
                 )
                 line_item.veh_id = veh_id  # Store vehicle ID on plot item
                 self._plot.addItem(line_item)
@@ -305,26 +312,38 @@ class TimeSpeedDialog(QDialog):
             
             # Stream through database results
             for row in cursor:
-                veh_id, veh_time, y_value = row
+                veh_id, veh_time, y_value, lane_id = row
                 
                 # Check if we've moved to a new vehicle
                 if veh_id != current_veh_id:
                     # Plot previous vehicle if we have data
                     if current_veh_id is not None and current_times:
-                        plot_vehicle_data(current_veh_id, current_times, current_y_values)
+                        plot_vehicle_data(
+                            current_veh_id,
+                            current_times,
+                            current_y_values,
+                            current_lane_ids,
+                        )
                     
                     # Start collecting data for new vehicle
                     current_veh_id = veh_id
                     current_times = []
                     current_y_values = []
+                    current_lane_ids = []
                 
                 # Add current record to collections
                 current_times.append(veh_time)
                 current_y_values.append(y_value)
+                current_lane_ids.append(lane_id)
             
             # Handle the last vehicle after loop ends
             if current_veh_id is not None and current_times:
-                plot_vehicle_data(current_veh_id, current_times, current_y_values)
+                plot_vehicle_data(
+                    current_veh_id,
+                    current_times,
+                    current_y_values,
+                    current_lane_ids,
+                )
             
             # Initialize y-axis slider range based on loaded data
             if reset_view and self._vehicle_data:
@@ -337,6 +356,8 @@ class TimeSpeedDialog(QDialog):
                     y_max = math.ceil(float(np.max(all_y_values)))
                     self._y_slider.setRange(y_min, y_max)
                     self._y_slider.setValue((y_min, y_max))
+
+            self._add_lane_annotations()
             
             logger.debug(f"Loaded {self.Y_COLUMN} data for {len(self._vehicle_data)} vehicles")
             
@@ -355,8 +376,70 @@ class TimeSpeedDialog(QDialog):
             yRange=[y_min, y_max],
             padding=0
         )
+        self._update_lane_label_positions(y_max)
         
         logger.debug(f"Applied slider filters: time=[{time_min}, {time_max}], y=[{y_min}, {y_max}]")
+
+    def _add_lane_annotations(self):
+        """Add dashed vertical lane-boundary markers and lane labels."""
+        self._lane_label_items.clear()
+        if len(self._vehicle_data) != 1:
+            return
+
+        y_min, y_max = self._y_slider.value()
+        label_y = self._lane_label_y_position(y_min, y_max)
+        line_pen = pg.mkPen(color=(0, 0, 0, 170), width=1, style=Qt.PenStyle.DashLine)
+
+        for veh_id, data in self._vehicle_data.items():
+            times = data["times"]
+            lanes = data["lane_ids"]
+            if len(times) == 0 or len(lanes) == 0:
+                continue
+
+            boundary_times = [float(times[0])]
+            segment_lanes = [lanes[0]]
+            for idx in range(1, len(lanes)):
+                if lanes[idx] != lanes[idx - 1]:
+                    boundary_times.append(float(times[idx]))
+                    segment_lanes.append(lanes[idx])
+            boundary_times.append(float(times[-1]))
+
+            for boundary_time in boundary_times:
+                marker = pg.InfiniteLine(
+                    pos=boundary_time,
+                    angle=90,
+                    movable=False,
+                    pen=line_pen,
+                )
+                marker.setZValue(5)
+                self._plot.addItem(marker)
+
+            for idx, lane_id in enumerate(segment_lanes):
+                start_time = boundary_times[idx]
+                end_time = boundary_times[idx + 1]
+                label = pg.TextItem(
+                    text=f"Lane {lane_id}",
+                    color=(0, 0, 0),
+                    anchor=(0.5, 0),
+                )
+                label.setPos((start_time + end_time) / 2.0, label_y)
+                label.setZValue(10)
+                self._plot.addItem(label)
+                self._lane_label_items.append(label)
+
+        self._update_lane_label_positions(y_max)
+
+    def _update_lane_label_positions(self, y_max):
+        """Keep lane labels at the top of the current y-axis range."""
+        y_min, _ = self._y_slider.value()
+        label_y = self._lane_label_y_position(y_min, y_max)
+        for label in self._lane_label_items:
+            label.setY(label_y)
+
+    @staticmethod
+    def _lane_label_y_position(y_min, y_max):
+        """Place lane labels just inside the top of the current y range."""
+        return y_max - (y_max - y_min) * 0.03
     
     def _handle_mouse_moved(self, pos):
         """Handle mouse movement for showing tooltips with hysteresis.

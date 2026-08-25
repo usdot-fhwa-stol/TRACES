@@ -15,3 +15,8 @@ By contributing to the Federal Highway Administration (FHWA) Connected Automated
 
 ## Contact
 Please click on the CARMA logo below to visit the Federal Highway Adminstration(FHWA) CARMA website. For more information, contact CAVSupportServices@dot.gov.
+
+%## run command
+cd "/home/carma-weiz/chenlu_ws/Traj tool/trajectory-tools/src"
+source ../.venv/bin/activate
+QT_QPA_PLATFORM=xcb python trajectory_tools.py
