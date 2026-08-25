@@ -729,7 +729,17 @@ class MainWindow(QMainWindow):
         if not event_ids:
             return
 
-        from analysis.spline import SplineCompDialog
+        try:
+            from analysis.spline import SplineCompDialog
+        except ModuleNotFoundError as exc:
+            if exc.name != "scipy":
+                raise
+            QMessageBox.warning(
+                self,
+                "Missing dependency",
+                "Spline Fitting requires SciPy. Install project requirements and restart the app.",
+            )
+            return
         dlg = SplineCompDialog(self, self._db_connection, event_ids=event_ids)
         dlg.exec()
 
