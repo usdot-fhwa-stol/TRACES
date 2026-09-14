@@ -6,6 +6,7 @@ import pyqtgraph as pg
 from PyQt6.QtCore import Qt
 
 from .interaction_mode import InteractionModeHandler
+from .point_edit_utils import is_click
 from comp.shockwave import InflectionType, InflectionPoint, ShockwaveResult, ShockwaveComp
 
 logger = logging.getLogger(__name__)
@@ -555,10 +556,12 @@ class ShockwaveSemiAutoModeHandler(ShockwaveModeHandler):
         to re-open a committed shockwave for editing; on a miss it falls
         back to normal point selection."""
         widget = view_box.parent_widget
-        move_distance  = (ev.scenePos() - view_box._press_pos).manhattanLength()
-        press_duration = time.time() - view_box._press_time
 
-        if move_distance < 5 and press_duration < 0.5:
+        # time.time(), not point_edit_utils.now() -- view_box._press_time is
+        # recorded by CustomViewBox with time.time(), and is_click() just
+        # subtracts whatever two timestamps it's given, so mixing in a
+        # monotonic clock here would produce a meaningless duration.
+        if is_click(view_box._press_pos, ev.scenePos(), view_box._press_time, time.time()):
             mouse_pt  = view_box.mapSceneToView(ev.scenePos())
             mx, my    = mouse_pt.x(), mouse_pt.y()
             ctrl_held = bool(ev.modifiers() & Qt.KeyboardModifier.ControlModifier)

@@ -7,9 +7,9 @@ three kinematic quantities from that one spline via differentiation /
 integration (see Table 1 of the report). Two write-back columns sets:
 
     calc_position, calc_speed, calc_acceleration, calc_jerk   (REAL)
-    is_spline_imputed                                          (INTEGER)
+    imputed_status                                            (CHAR)
 
-are added to the events table. ``is_spline_imputed`` distinguishes rows
+are added to the events table. ``imputed_status`` distinguishes rows
 that already existed (measured data, calc_* sits alongside it) from rows
 synthesized to fill timing gaps (calc_* is the only populated data; every
 measured column is left NULL because there is no measurement).
@@ -48,7 +48,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 import numpy as np
 from scipy.interpolate import make_splrep
 
-from ..base_comp import BaseComp
+from ..base_comp import BaseComp, IMPUTED_ORIGINAL, IMPUTED_SPLINE, ensure_imputed_status_column
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +96,6 @@ MIN_K_BY_BASE: Dict[str, int] = {
 }
 
 _COMPUTED_REAL_COLS = ["calc_position", "calc_speed", "calc_acceleration", "calc_jerk"]
-_COMPUTED_FLAG_COL = "is_spline_imputed"
 
 
 def allowed_k_options(fitting_base: str) -> Tuple[int, ...]:
@@ -116,8 +115,8 @@ def allowed_k_options(fitting_base: str) -> Tuple[int, ...]:
 class SplineRowResult:
     """One row of write-back data, per (event_id, veh_id, veh_time).
 
-    ``is_spline_imputed=False`` rows already exist in the events table —
-    only the four calc_* columns get UPDATEd. ``is_spline_imputed=True``
+    ``imputed_status=blank`` rows already exist in the events table —
+    only the four calc_* columns get UPDATEd. ``imputed_stats=S``
     rows do not exist yet and must be INSERTed; ``lane_id``
     is inherited from the temporally nearest *earlier* measured record
     (per the application's row-creation rule) so imputed rows appear
@@ -134,7 +133,7 @@ class SplineRowResult:
     event_id: int
     veh_id: int
     veh_time: float
-    is_spline_imputed: bool
+    imputed_status: str   # IMPUTED_ORIGINAL or IMPUTED_SPLINE
 
     lane_id: Optional[int] = None
 
@@ -377,7 +376,7 @@ def summarize_fit(rows: List[SplineRowResult], fitting_base: str, s: float, k: i
         calc = {k_: np.array([getattr(r, f"calc_{k_}") for r in group]) for k_ in KINEMATICS}
         metrics = {k_: compute_error_metrics(meas[k_], calc[k_]) for k_ in KINEMATICS}
 
-        n_imputed = sum(1 for r in group if r.is_spline_imputed)
+        n_imputed = sum(1 for r in group if r.imputed_status == IMPUTED_SPLINE)
         n_points = len(group) - n_imputed
 
         results.append(SplineFitResult(
@@ -426,7 +425,7 @@ class SplineComp(BaseComp):
 
     @staticmethod
     def ensure_schema(conn: sqlite3.Connection) -> None:
-        """Add the four calc_* REAL columns and is_spline_imputed to events,
+        """Add the four calc_* REAL columns and imputed_status to events,
         if not already present. Mirrors InternalConsistencyComp.ensure_schema."""
         for col in _COMPUTED_REAL_COLS:
             try:
@@ -438,8 +437,7 @@ class SplineComp(BaseComp):
                 else:
                     raise
         try:
-            conn.execute(f"ALTER TABLE events ADD COLUMN {_COMPUTED_FLAG_COL} INTEGER DEFAULT 0")
-            conn.commit()
+            ensure_imputed_status_column(conn)
         except sqlite3.OperationalError as exc:
             if "duplicate column" in str(exc).lower():
                 pass
@@ -472,7 +470,10 @@ class SplineComp(BaseComp):
 
         # Purge previously-imputed rows unconditionally since
         # fitting parameters (fitting_base/s/k) can change between runs
-        db_connection.execute("DELETE FROM events WHERE event_id = ? AND is_spline_imputed = 1", (event_id,),)
+        db_connection.execute(
+            "DELETE FROM events WHERE event_id = ? AND imputed_status = ?",
+            (event_id, IMPUTED_SPLINE),
+        )
         db_connection.commit()
 
         columns = self._events_columns(db_connection)
@@ -580,7 +581,7 @@ class SplineComp(BaseComp):
                     j = idx_nearest[i]
                     all_rows.append(SplineRowResult(
                         event_id=event_id, veh_id=veh_id, veh_time=float(tt),
-                        is_spline_imputed=False,
+                        imputed_status=IMPUTED_ORIGINAL,
                         lane_id=lane_ids[j],
                         calc_position=fit["calc_position"][i],
                         calc_speed=fit["calc_speed"][i],
@@ -593,7 +594,7 @@ class SplineComp(BaseComp):
                     j = idx_earlier[i]
                     all_rows.append(SplineRowResult(
                         event_id=event_id, veh_id=veh_id, veh_time=float(tt),
-                        is_spline_imputed=True,
+                        imputed_status=IMPUTED_SPLINE,
                         lane_id=lane_ids[j],
                         calc_position=fit["calc_position"][i],
                         calc_speed=fit["calc_speed"][i],

@@ -150,6 +150,10 @@ class MainWindow(QMainWindow):
         spline_fitting_action.triggered.connect(self._run_spline_fitting)
         self._data_menu.addAction(spline_fitting_action)
 
+        missing_data_interp_action = QAction("&Missing Data and Interpolation", self)
+        missing_data_interp_action.triggered.connect(self._run_missing_data_interpolation)
+        self._data_menu.addAction(missing_data_interp_action)
+
         # Analysis menu
         self._analysis_menu = QMenu("&Analysis", self)
         menu_bar.addMenu(self._analysis_menu)
@@ -722,6 +726,12 @@ class MainWindow(QMainWindow):
     
         from comp.spline import SplineCompDialog
         dlg = SplineCompDialog(self, self._db_connection, event_ids=event_ids)
+        dlg.exec()
+
+    def _run_missing_data_interpolation(self):
+        event_id = self._plot_widget._current_event_id
+        from comp.missing_data_interpolation import GapConfigDialog
+        dlg = GapConfigDialog(self, self._db_connection, event_ids=[event_id])
         dlg.exec()
 
     def _run_jerk_analysis(self):

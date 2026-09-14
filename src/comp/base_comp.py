@@ -5,6 +5,46 @@ from typing import Iterable, Optional, List, Any, Dict
 # Sentinel for "no options provided" — distinguishable from an explicit empty dict.
 _UNSET: Dict[str, Any] = {}
 
+# Shared row-provenance flag on events.<row>. One column, one place of
+# truth, used by both SplineComp and MissingDataInterpolationComp instead
+# of each owning a private flag.
+IMPUTED_ORIGINAL = " "   # real observation (column default)
+IMPUTED_SPLINE   = "S"   # synthetic row created solely to complete SplineComp's calc_* timing grid
+IMPUTED_AUTO     = "A"   # gap filled automatically by Missing Data Interpolation
+IMPUTED_MANUAL   = "M"   # gap filled/refined manually by Missing Data Interpolation
+
+IMPUTED_STATUS_COL = "imputed_status"
+
+
+def ensure_imputed_status_column(conn: sqlite3.Connection) -> None:
+    """Add the shared imputed_status TEXT column to events, if not already
+    present. Safe to call repeatedly (checked via PRAGMA table_info rather
+    than the try/ALTER/except-duplicate-column pattern used elsewhere,
+    since the migration step below needs that column list anyway).
+
+    Migrates any pre-existing is_spline_imputed INTEGER column (databases
+    created before this column was unified): 1 -> IMPUTED_SPLINE, 0/NULL
+    left at the new column's default (IMPUTED_ORIGINAL). The old column
+    is left in place rather than dropped — SQLite's DROP COLUMN support
+    is version-dependent and an unused column is harmless.
+    """
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA table_info(events)")
+    existing_cols = {row[1] for row in cursor.fetchall()}
+
+    if IMPUTED_STATUS_COL not in existing_cols:
+        conn.execute(
+            f"ALTER TABLE events ADD COLUMN {IMPUTED_STATUS_COL} "
+            f"TEXT NOT NULL DEFAULT '{IMPUTED_ORIGINAL}'"
+        )
+        conn.commit()
+
+    if "is_spline_imputed" in existing_cols:
+        conn.execute(
+            f"UPDATE events SET {IMPUTED_STATUS_COL} = '{IMPUTED_SPLINE}' "
+            f"WHERE is_spline_imputed = 1 AND {IMPUTED_STATUS_COL} = '{IMPUTED_ORIGINAL}'"
+        )
+        conn.commit()
 
 class BaseComp(ABC):
     """Base class for computational analyses over the events table.

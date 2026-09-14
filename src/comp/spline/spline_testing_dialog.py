@@ -143,12 +143,12 @@ class SplineTestingDialog(QDialog):
     # ── Data loading (read-only — never writes anything back) ───────────
 
     def _load_data(self):
-        from comp.base_comp import BaseComp
+        from comp.base_comp import BaseComp, IMPUTED_SPLINE
         cols = BaseComp._events_columns(self._db_connection)
         has_speed = "veh_speed" in cols
         has_accel = "veh_accel" in cols
         has_jerk  = "veh_jerk"  in cols
-        has_flag  = "is_spline_imputed" in cols
+        has_flag  = "imputed_status" in cols
 
         select_cols = ["veh_time", "veh_dist_trav"]
         if has_speed:
@@ -159,7 +159,7 @@ class SplineTestingDialog(QDialog):
             select_cols.append("veh_jerk")
 
         where_extra = (
-            " AND (is_spline_imputed = 0 OR is_spline_imputed IS NULL)"
+            f" AND (imputed_status IS NULL OR imputed_status != '{IMPUTED_SPLINE}')"
             if has_flag else ""
         )
         sql = (

@@ -2,7 +2,7 @@
 
 Always runs in "Normal" mode (export_mode is never set True by any UI entry
 point — there is intentionally no separate CSV export for Spline Fitting;
-the calc_* / is_spline_imputed columns it writes flow through the existing
+the calc_* / imputed_status columns it writes flow through the existing
 Export All / Export Selected paths once present on the events table).
 
 Invocation
@@ -31,6 +31,7 @@ from PyQt6.QtWidgets import (
     QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QMessageBox,
 )
 
+from comp.base_comp import IMPUTED_SPLINE
 from comp.base_analysis_dialog import BaseAnalysisDialog
 from .spline_comp import (
     BASE_LABELS, FITTING_BASES, SplineFitResult, SplineRowResult,
@@ -42,7 +43,7 @@ logger = logging.getLogger(__name__)
 _INSERT_COLUMNS = [
     "event_id", "veh_id", "veh_time", "lane_id",
     "calc_position", "calc_speed", "calc_acceleration", "calc_jerk",
-    "is_spline_imputed",
+    "imputed_status",
 ]
 
 _MEASURED_COL_LABEL: dict = {
@@ -70,7 +71,7 @@ class SplineCompDialog(BaseAnalysisDialog):
                 raise ValueError(
                     "SplineCompDialog does not support export mode — Spline "
                     "Fitting always writes to the database, and its calc_* / "
-                    "is_spline_imputed columns are exported via the existing "
+                    "imputed_status columns are exported via the existing "
                     "Export All / Export Selected paths, not a dedicated "
                     "Export Analysis entry.")
             super().__init__(parent, db_connection,
@@ -251,8 +252,8 @@ class SplineCompDialog(BaseAnalysisDialog):
     # ── DB write-back ─────────────────────────────────────────────────────
 
     def _persist_rows(self, rows: List[SplineRowResult]) -> None:
-        measured_rows = [r for r in rows if not r.is_spline_imputed]
-        imputed_rows  = [r for r in rows if r.is_spline_imputed]
+        measured_rows = [r for r in rows if r.imputed_status != IMPUTED_SPLINE]
+        imputed_rows  = [r for r in rows if r.imputed_status == IMPUTED_SPLINE]
 
         cursor = self._db_connection.cursor()
         try:
@@ -278,7 +279,7 @@ class SplineCompDialog(BaseAnalysisDialog):
                     [
                         (r.event_id, r.veh_id, r.veh_time, r.lane_id,
                          r.calc_position, r.calc_speed, r.calc_acceleration,
-                         r.calc_jerk, 1)
+                         r.calc_jerk, IMPUTED_SPLINE)
                         for r in imputed_rows
                     ],
                 )
