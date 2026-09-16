@@ -71,6 +71,9 @@ class GapPointEditor(QObject):
 
         self._was_mouse_enabled = list(self._view_box.state.get("mouseEnabled", [True, True]))
         self._view_box.setMouseEnabled(x=False, y=False)
+        
+        self._was_auto_range = self._view_box.autoRangeEnabled()
+        self._view_box.enableAutoRange(x=False, y=False)
 
         self._scatter = pg.ScatterPlotItem(
             size=10, brush=pg.mkBrush(255, 140, 0, 200), pen=pg.mkPen('k', width=1),
@@ -92,9 +95,14 @@ class GapPointEditor(QObject):
         if not self._active:
             return
         self._active = False
+        if self._drag_index is not None:
+            self._plot_widget.releaseMouse()
+            self._drag_index = None
         self._plot_widget.removeEventFilter(self)
         self._plot_widget.removeItem(self._scatter)
         self._view_box.setMouseEnabled(*self._was_mouse_enabled)
+        x_auto, y_auto = self._was_auto_range
+        self._view_box.enableAutoRange(x=x_auto, y=y_auto)
         self.finished.emit(commit)
 
     # ── Rendering ────────────────────────────────────────────────────────
@@ -132,16 +140,17 @@ class GapPointEditor(QObject):
         self._press_scene_pos = scene_pos
         self._press_time = now()
         self._press_had_ctrl = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
-
+    
         idx = find_nearest_point(scene_pos, self._points, self._view_box, _PIXEL_HIT_RADIUS)
         if idx is not None and self._press_had_ctrl:
             del self._points[idx]
             self._redraw_points()
             self.points_changed.emit(self.points)
-            self._press_scene_pos = None   # consumed -- nothing left to drag or click-add
+            self._press_scene_pos = None
             return True
         if idx is not None:
             self._drag_index = idx
+            self._plot_widget.grabMouse()          # force all moves/release to this widget
         return True
 
     def _on_move(self, event) -> bool:
@@ -156,6 +165,7 @@ class GapPointEditor(QObject):
 
     def _on_release(self, event) -> bool:
         if self._drag_index is not None:
+            self._plot_widget.releaseMouse()
             self._drag_index = None
             return True
 

@@ -42,7 +42,7 @@ import numpy as np
 import pyqtgraph as pg
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
-    QComboBox, QDoubleSpinBox, QFormLayout, QHBoxLayout, QLabel, QMessageBox,
+    QComboBox, QDoubleSpinBox, QHBoxLayout, QLabel, QMessageBox,
     QPushButton, QSplitter, QVBoxLayout, QDialog,
 )
 
@@ -69,6 +69,12 @@ _STATUS_COLORS: Dict[str, tuple] = {
                                                # scheme; flags a gap with no events row yet.
 }
 
+_PLOT_TITLES: Dict[str, str] = {
+    "dist":  "Distance Traveled (m)",
+    "speed": "Speed (m/s)",
+    "accel": "Acceleration (m/s²)",
+}
+
 
 class GapReviewDialog(QDialog):
     """Per-gap review/refinement window -- top-level only, opened from
@@ -77,8 +83,8 @@ class GapReviewDialog(QDialog):
     def __init__(self, parent, db_connection: sqlite3.Connection, event_id: int):
         super().__init__(parent)
         self.setWindowTitle("Missing Data and Interpolation — Gap Review")
-        self.setModal(False)
-        self.resize(900, 700)
+        self.setModal(True)
+        self._size_and_center_dialog()
 
         self._db_connection = db_connection
         self._event_id = event_id
@@ -126,72 +132,119 @@ class GapReviewDialog(QDialog):
     # ── UI construction ─────────────────────────────────────────────────
 
     def _build_ui(self):
-        layout = QVBoxLayout(self)
-
-        gap_row = QHBoxLayout()
-        gap_row.addWidget(QLabel("Selected Gap:"))
-        self._gap_combo = QComboBox()
-        self._gap_combo.currentIndexChanged.connect(self._on_gap_combo_changed)
-        gap_row.addWidget(self._gap_combo, stretch=1)
-        layout.addLayout(gap_row)
-        self._populate_gap_combo()
-
+        main_layout = QHBoxLayout(self)
+    
+        # ── Left side: three stacked plots, filling all available
+        # horizontal space ────────────────────────────────────────────────
+        left_layout = QVBoxLayout()
+    
         self._plot_splitter = QSplitter(Qt.Orientation.Vertical)
-        self._dist_plot = pg.PlotWidget(title="Distance Traveled (veh_dist_trav)")
-        self._speed_plot = pg.PlotWidget(title="Speed (veh_speed)")
-        self._accel_plot = pg.PlotWidget(title="Acceleration (veh_accel)")
+        self._dist_plot = pg.PlotWidget(title=_PLOT_TITLES["dist"])
+        self._speed_plot = pg.PlotWidget(title=_PLOT_TITLES["speed"])
+        self._accel_plot = pg.PlotWidget(title=_PLOT_TITLES["accel"])
         for plot in (self._dist_plot, self._speed_plot, self._accel_plot):
             plot.setBackground('w')
             self._plot_splitter.addWidget(plot)
         self._speed_plot.setXLink(self._dist_plot)
         self._accel_plot.setXLink(self._dist_plot)
-        layout.addWidget(self._plot_splitter, stretch=1)
 
+        for i in range(1, self._plot_splitter.count()):
+            self._plot_splitter.handle(i).setEnabled(False)
+
+        left_layout.addWidget(self._plot_splitter, stretch=1)
+    
         self._dist_curve = self._dist_plot.plot(pen=pg.mkPen('b', width=1.5))
         self._speed_curve = self._speed_plot.plot(pen=pg.mkPen('b', width=1.5))
         self._accel_curve = self._accel_plot.plot(pen=pg.mkPen('b', width=1.5))
-
-        controls = QHBoxLayout()
-        controls.addLayout(self._build_param_controls())
-
-        btn_col = QVBoxLayout()
+    
+        main_layout.addLayout(left_layout, stretch=1)
+    
+        # ── Right side: control panel, sized to its own contents ───────────
+        right_layout = QVBoxLayout()
+    
+        right_layout.addWidget(QLabel("Selected Gap:"))
+        self._gap_combo = QComboBox()
+        self._gap_combo.currentIndexChanged.connect(self._on_gap_combo_changed)
+        right_layout.addWidget(self._gap_combo)
+        self._populate_gap_combo()
+    
+        right_layout.addLayout(self._build_param_controls())
+    
+        prev_next_row = QHBoxLayout()
         self._prev_btn = QPushButton("< Prev Gap")
         self._prev_btn.clicked.connect(self._on_prev)
         self._next_btn = QPushButton("Next Gap >")
         self._next_btn.clicked.connect(self._on_next)
+        prev_next_row.addWidget(self._prev_btn, stretch=1)
+        prev_next_row.addWidget(self._next_btn, stretch=1)
+        right_layout.addLayout(prev_next_row)
+    
+        add_view_row = QHBoxLayout()
         self._add_points_btn = QPushButton("Add Points...")
         self._add_points_btn.clicked.connect(self._on_add_points)
         self._view_btn = QPushButton("View")
         self._view_btn.clicked.connect(self._on_view)
+        add_view_row.addWidget(self._add_points_btn, stretch=1)
+        add_view_row.addWidget(self._view_btn, stretch=1)
+        right_layout.addLayout(add_view_row)
+    
+        apply_close_row = QHBoxLayout()
         self._apply_btn = QPushButton("Apply")
         self._apply_btn.clicked.connect(self._on_apply)
         close_btn = QPushButton("Close")
         close_btn.clicked.connect(self.close)
-        for w in (self._prev_btn, self._next_btn, self._add_points_btn,
-                  self._view_btn, self._apply_btn, close_btn):
-            btn_col.addWidget(w)
-        controls.addLayout(btn_col)
+        apply_close_row.addWidget(self._apply_btn, stretch=1)
+        apply_close_row.addWidget(close_btn, stretch=1)
+        right_layout.addLayout(apply_close_row)
+    
+        right_layout.addStretch(1)
+        main_layout.addLayout(right_layout)
 
-        layout.addLayout(controls)
-
-    def _build_param_controls(self) -> QFormLayout:
-        form = QFormLayout()
-
+    def _build_param_controls(self) -> QVBoxLayout:
+        col = QVBoxLayout()
+    
+        col.addWidget(QLabel("Fitting base:"))
         self._gap_base_combo = QComboBox()
         for key in FITTING_BASES:
             self._gap_base_combo.addItem(BASE_LABELS[key], key)
+            if key == "jerk":
+                item = self._gap_base_combo.model().item(self._gap_base_combo.count() - 1)
+                item.setEnabled(False)
+                item.setToolTip(
+                    "Jerk has no corresponding plot in this dialog and can't "
+                    "be used as a fitting base here.")
         self._gap_base_combo.currentIndexChanged.connect(self._on_gap_base_changed)
-        form.addRow("Fitting base:", self._gap_base_combo)
-
+        col.addWidget(self._gap_base_combo)
+    
+        col.addWidget(QLabel("Smoothness (s):"))
         self._gap_s_spin = QDoubleSpinBox()
         self._gap_s_spin.setRange(0.0, 1_000_000.0)
         self._gap_s_spin.setDecimals(4)
-        form.addRow("Smoothness (s):", self._gap_s_spin)
-
+        col.addWidget(self._gap_s_spin)
+    
+        col.addWidget(QLabel("Degree (k):"))
         self._gap_k_combo = QComboBox()
-        form.addRow("Degree (k):", self._gap_k_combo)
+        col.addWidget(self._gap_k_combo)
+    
+        return col
 
-        return form
+    def _size_and_center_dialog(self):
+        """Size the dialog to 80% of the parent's width/height and center it
+        over the parent, matching TimeSpeedDialog's sizing convention."""
+        parent = self.parent()
+        if parent:
+            parent_geom = parent.frameGeometry()
+            dialog_width = int(parent_geom.width() * 0.8)
+            dialog_height = int(parent_geom.height() * 0.8)
+    
+            self.resize(dialog_width, dialog_height)
+    
+            parent_center = parent_geom.center()
+            self_geom = self.frameGeometry()
+            self_geom.moveCenter(parent_center)
+            self.move(self_geom.topLeft())
+        else:
+            self.resize(900, 700)  # fallback, same as the old fixed default
 
     def _on_gap_base_changed(self):
         key = self._gap_base_combo.currentData()
@@ -357,21 +410,21 @@ class GapReviewDialog(QDialog):
                 plot.removeItem(item["region"])
                 plot.removeItem(item["label"])
             region_list.clear()
-
+    
         veh_gaps = [g for g in self._gaps if g.veh_id == self._current_veh_id]
         if not veh_gaps:
             return
         current_gap = self._gaps[self._gap_index]
-
+    
         plots_and_data = [(self._dist_plot, self._dist_regions, self._traj_dist_raw)]
         if self._has_speed:
             plots_and_data.append((self._speed_plot, self._speed_regions, self._traj_speed_raw))
         if self._has_accel:
             plots_and_data.append((self._accel_plot, self._accel_regions, self._traj_accel_raw))
-
+    
         for plot, region_list, y_data in plots_and_data:
             finite = y_data[np.isfinite(y_data)]
-            y_top = float(np.max(finite)) if finite.size else 0.0
+            y_fallback = float(np.max(finite)) if finite.size else 0.0
             for gap in veh_gaps:
                 is_selected = gap.gap_id == current_gap.gap_id
                 region = pg.LinearRegionItem(
@@ -382,6 +435,14 @@ class GapReviewDialog(QDialog):
                 )
                 region.setZValue(-10)
                 plot.addItem(region)
+    
+                # Local max within this gap's own time span, not the whole
+                # trajectory -- falls back to the plot-wide max only if the
+                # gap has no finite samples in its span at all.
+                gap_mask = (self._traj_time >= gap.start_time) & (self._traj_time <= gap.end_time)
+                gap_finite = y_data[gap_mask & np.isfinite(y_data)]
+                y_top = float(np.max(gap_finite)) if gap_finite.size else y_fallback
+    
                 label = pg.TextItem(str(gap.gap_id), anchor=(0.5, 1.0), color='k')
                 label.setPos((gap.start_time + gap.end_time) / 2, y_top)
                 plot.addItem(label)
@@ -471,17 +532,18 @@ class GapReviewDialog(QDialog):
             self._preview_accel_curve = self._accel_plot.plot(
                 [p[0] for p in accel_pts], [p[1] for p in accel_pts], pen=dashed_pen)
 
-    def _compute_preview(self) -> Optional[List[FillRow]]:
+    def _compute_preview(self, added_points: Optional[list] = None) -> Optional[List[FillRow]]:
         gap = self._gaps[self._gap_index]
         fitting_base = self._gap_base_combo.currentData()
         s = self._gap_s_spin.value()
         k = self._gap_k_combo.currentData()
-
+        points = self._added_points if added_points is None else added_points
+    
         comp = MissingDataInterpolationComp()
         fill_rows = comp.compute_fill(
             self._db_connection, gap.event_id, gap.veh_id, [gap],
             fitting_base=fitting_base, s=s, k=k,
-            added_points={gap.gap_id: self._added_points} if self._added_points else None,
+            added_points={gap.gap_id: points} if points else None,
         )
         return fill_rows or None
 
@@ -575,7 +637,8 @@ class GapReviewDialog(QDialog):
             return
 
         self._expand_plot_for_editing(plot_attr)
-
+        self._pre_edit_added_points = list(self._added_points)   # snapshot for Escape
+    
         from plot.gap_point_editor import GapPointEditor
         target_plot = getattr(self, plot_attr)
         self._point_editor = GapPointEditor(
@@ -587,14 +650,15 @@ class GapReviewDialog(QDialog):
         self._set_editing_enabled(False)
 
     def _on_editor_points_changed(self, points: list):
-        self._added_points = points
-        fill_rows = self._compute_preview()
+        """Live preview only -- never writes self._added_points, so Escape
+        can still roll back to the pre-session snapshot."""
+        fill_rows = self._compute_preview(added_points=points)
         if fill_rows:
             self._draw_preview(fill_rows)
-
+    
     def _on_editor_finished(self, committed: bool):
-        if committed:
-            self._added_points = self._point_editor.points
+        self._added_points = self._point_editor.points if committed else self._pre_edit_added_points
+        self._pre_edit_added_points = None
         self._point_editor.deleteLater()
         self._point_editor = None
         self._set_editing_enabled(True)
