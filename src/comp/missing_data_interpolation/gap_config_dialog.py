@@ -13,9 +13,6 @@ timestamp (MissingDataInterpolationComp.compute_fill), then writes both
 the gaps table (one row per detected gap) and the events table (one row
 per missing timestamp, imputed_status=IMPUTED_AUTO).
 
-_show_results currently shows a completion summary in place of opening
-the second window -- gap_review_dialog.py isn't implemented yet.
-
 No CSV export path -- same reasoning as SplineCompDialog: output flows
 into the events table and out through Export All / Export Selected.
 """
@@ -26,7 +23,7 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Dict, List
 
-from PyQt6.QtWidgets import QComboBox, QDoubleSpinBox, QFormLayout, QLabel, QMessageBox
+from PyQt6.QtWidgets import QComboBox, QDoubleSpinBox, QFormLayout, QLabel, QMessageBox, QPushButton
 
 from comp.base_analysis_dialog import BaseAnalysisDialog
 from comp.base_comp import IMPUTED_AUTO
@@ -34,6 +31,7 @@ from comp.spline.spline_comp import BASE_LABELS, FITTING_BASES, allowed_k_option
 from .missing_data_interpolation_comp import (
     MissingDataInterpolationComp, GapResult, FillRow,
     GAP_STATUS_UNFILLED, count_valid_points_by_vehicle,
+    event_has_gap_records, delete_gap_records,
 )
 
 logger = logging.getLogger(__name__)
@@ -70,8 +68,8 @@ class GapFillSummary:
 class GapConfigDialog(BaseAnalysisDialog):
     """Missing Data and Interpolation parameter dialog -- top-level only.
 
-    No right-click counterpart -- per-gap refinement lives in
-    gap_review_dialog.py (opened from _show_results once implemented),
+    No right-click counterpart — per-gap refinement lives in 
+    gap_review_dialog.py, opened from _show_results (and from Skip), 
     not behind a context-menu entry.
     """
 
@@ -101,6 +99,56 @@ class GapConfigDialog(BaseAnalysisDialog):
         self._gapped_veh_ids = sorted({g.veh_id for g in self._detected_gaps})
 
         self._update_viability_label()
+        self._update_viability_label()
+        self._update_skip_enabled()
+
+    def _setup_ui(self):
+        super()._setup_ui()
+        self._primary_btn.setText("Apply")   # matches the spec's/docstrings' naming
+
+        self._skip_btn = QPushButton("Skip")
+        self._skip_btn.setEnabled(False)   # updated in __init__ once self._event_id exists
+        self._skip_btn.setToolTip(
+            "Continue reviewing gaps already recorded for this event "
+            "without re-running automatic detection and fill.")
+        self._skip_btn.clicked.connect(self._on_skip)
+
+        # btn_row is the QHBoxLayout BaseAnalysisDialog._setup_ui built as
+        # this dialog's 3rd top-level layout item (form, progress bar, buttons).
+        btn_row = self.layout().itemAt(2).layout()
+        btn_row.insertWidget(btn_row.indexOf(self._primary_btn), self._skip_btn)
+
+    def _update_skip_enabled(self):
+        self._skip_btn.setEnabled(
+            event_has_gap_records(self._db_connection, self._event_id))
+
+    def _on_skip(self):
+        self._open_review_dialog(self._event_id)
+        self.accept()
+
+    def _open_review_dialog(self, event_id: int) -> None:
+        from .gap_review_dialog import GapReviewDialog
+        dlg = GapReviewDialog(self.parent(), self._db_connection, event_id)
+        dlg.show()
+
+    def _on_ok(self):
+        if event_has_gap_records(self._db_connection, self._event_id):
+            reply = QMessageBox.question(
+                self, "Start Over?",
+                "This event already has gaps recorded from a previous run "
+                "(automatically and/or manually filled).\n\n"
+                "Clicking \u201cYes\u201d will delete those records and "
+                "detect gaps from scratch using the parameters set above.\n\n"
+                "Click \u201cCancel\u201d and use \u201cSkip\u201d instead "
+                "to continue reviewing the existing gaps without starting "
+                "over.\n\nDo you want to start over?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+            delete_gap_records(self._db_connection, self._event_id)
+        super()._on_ok()
 
     # ── Hook overrides ──────────────────────────────────────────────────
 
@@ -314,10 +362,6 @@ class GapConfigDialog(BaseAnalysisDialog):
                 f"(fewer than k+1 valid points for the chosen spline degree) "
                 f"and will need manual attention in the review window."
             )
-
         QMessageBox.information(self, "Missing Data and Interpolation", msg)
 
-        all_gaps = [g for s in results for g in s.gaps]
-        from .gap_review_dialog import GapReviewDialog
-        dlg = GapReviewDialog(self.parent(), self._db_connection, self._event_id, all_gaps)
-        dlg.show()
+        self._open_review_dialog(self._event_id)

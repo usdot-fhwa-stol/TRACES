@@ -16,10 +16,10 @@ from .missing_data_interpolation_comp import GapResult
 
 
 def default_gap_sort_key(gap: GapResult) -> tuple:
-    """Largest gap (by duration) first. missing_rows, then
-    (veh_id, gap_id), break ties so the order is fully deterministic --
-    two gaps of equal duration always land in the same relative order."""
-    return (-gap.duration, -gap.missing_rows, gap.veh_id, gap.gap_id)
+    """Largest gap (by duration, rounded to collapse floating-point
+    noise from timestamp subtraction) first. missing_rows, then
+    (veh_id, gap_id) break remaining ties deterministically."""
+    return (-round(gap.duration, 3), -gap.missing_rows, gap.veh_id, gap.gap_id)
 
 
 def sort_gaps(

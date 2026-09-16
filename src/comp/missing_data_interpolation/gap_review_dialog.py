@@ -42,7 +42,7 @@ import numpy as np
 import pyqtgraph as pg
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
-    QComboBox, QDoubleSpinBox, QFormLayout, QHBoxLayout, QMessageBox,
+    QComboBox, QDoubleSpinBox, QFormLayout, QHBoxLayout, QLabel, QMessageBox,
     QPushButton, QSplitter, QVBoxLayout, QDialog,
 )
 
@@ -51,7 +51,7 @@ from comp.spline.spline_comp import BASE_LABELS, FITTING_BASES, allowed_k_option
 from .gap_sort import sort_gaps
 from .missing_data_interpolation_comp import (
     MissingDataInterpolationComp, GapResult, FillRow,
-    GAP_STATUS_UNFILLED, write_fill_rows, write_gap_rows,
+    GAP_STATUS_UNFILLED, write_fill_rows, write_gap_rows, read_gap_rows,
 )
 
 logger = logging.getLogger(__name__)
@@ -74,8 +74,7 @@ class GapReviewDialog(QDialog):
     """Per-gap review/refinement window -- top-level only, opened from
     GapConfigDialog._show_results."""
 
-    def __init__(self, parent, db_connection: sqlite3.Connection, event_id: int,
-                 gaps: List[GapResult]):
+    def __init__(self, parent, db_connection: sqlite3.Connection, event_id: int):
         super().__init__(parent)
         self.setWindowTitle("Missing Data and Interpolation — Gap Review")
         self.setModal(False)
@@ -83,7 +82,7 @@ class GapReviewDialog(QDialog):
 
         self._db_connection = db_connection
         self._event_id = event_id
-        self._gaps: List[GapResult] = sort_gaps(gaps)
+        self._gaps: List[GapResult] = sort_gaps(read_gap_rows(db_connection, event_id))
         self._gap_index = 0
         self._current_veh_id: Optional[int] = None
         self._has_speed = False
@@ -94,6 +93,12 @@ class GapReviewDialog(QDialog):
         self._traj_speed: Optional[np.ndarray] = None
         self._traj_accel: Optional[np.ndarray] = None
 
+        # Raw (unmasked) values -- source data for the per-gap dashed
+        # "auto fill" overlay drawn by _redraw_auto_segments.
+        self._traj_dist_raw = np.array([])
+        self._traj_speed_raw: Optional[np.ndarray] = None
+        self._traj_accel_raw: Optional[np.ndarray] = None
+
         self._dist_regions: List[dict] = []
         self._speed_regions: List[dict] = []
         self._accel_regions: List[dict] = []
@@ -102,8 +107,11 @@ class GapReviewDialog(QDialog):
         self._preview_speed_curve = None
         self._preview_accel_curve = None
 
+        self._auto_segment_items: Dict[int, dict] = {}   # gap_id -> {"dist":item, ...}
+
         self._added_points: List[tuple] = []
-        self._point_editor = None   # GapPointEditor instance while "Add Points" is active
+        self._point_editor = None
+        self._pre_edit_splitter_sizes: Optional[List[int]] = None
 
         self._build_ui()
 
@@ -120,21 +128,24 @@ class GapReviewDialog(QDialog):
     def _build_ui(self):
         layout = QVBoxLayout(self)
 
+        gap_row = QHBoxLayout()
+        gap_row.addWidget(QLabel("Selected Gap:"))
         self._gap_combo = QComboBox()
         self._gap_combo.currentIndexChanged.connect(self._on_gap_combo_changed)
-        layout.addWidget(self._gap_combo)
+        gap_row.addWidget(self._gap_combo, stretch=1)
+        layout.addLayout(gap_row)
         self._populate_gap_combo()
 
-        splitter = QSplitter(Qt.Orientation.Vertical)
+        self._plot_splitter = QSplitter(Qt.Orientation.Vertical)
         self._dist_plot = pg.PlotWidget(title="Distance Traveled (veh_dist_trav)")
         self._speed_plot = pg.PlotWidget(title="Speed (veh_speed)")
         self._accel_plot = pg.PlotWidget(title="Acceleration (veh_accel)")
         for plot in (self._dist_plot, self._speed_plot, self._accel_plot):
             plot.setBackground('w')
-            splitter.addWidget(plot)
+            self._plot_splitter.addWidget(plot)
         self._speed_plot.setXLink(self._dist_plot)
         self._accel_plot.setXLink(self._dist_plot)
-        layout.addWidget(splitter, stretch=1)
+        layout.addWidget(self._plot_splitter, stretch=1)
 
         self._dist_curve = self._dist_plot.plot(pen=pg.mkPen('b', width=1.5))
         self._speed_curve = self._speed_plot.plot(pen=pg.mkPen('b', width=1.5))
@@ -244,6 +255,7 @@ class GapReviewDialog(QDialog):
         self._added_points = self._decode_added_points(gap.added_points_json)
         self._clear_preview()
         self._redraw_regions()
+        self._redraw_auto_segments()
         self._update_nav_buttons()
 
     @staticmethod
@@ -282,7 +294,7 @@ class GapReviewDialog(QDialog):
         self._has_speed = "veh_speed" in cols
         self._has_accel = "veh_accel" in cols
 
-        select_cols = ["veh_time", "veh_dist_trav"]
+        select_cols = ["veh_time", "veh_dist_trav", "imputed_status"]
         if self._has_speed:
             select_cols.append("veh_speed")
         if self._has_accel:
@@ -304,14 +316,23 @@ class GapReviewDialog(QDialog):
             )
 
         self._traj_time = col("veh_time")
-        self._traj_dist = col("veh_dist_trav")
-        self._traj_speed = col("veh_speed") if self._has_speed else None
-        self._traj_accel = col("veh_accel") if self._has_accel else None
+        statuses = [r[idx["imputed_status"]] for r in rows]
+        auto_mask = np.array([s == IMPUTED_AUTO for s in statuses], dtype=bool)
 
-        # connect="finite" breaks the line at NaNs -- the only remaining
-        # NaNs after a fill are GAP_STATUS_UNFILLED gaps (real gaps);
-        # IMPUTED_AUTO/IMPUTED_MANUAL rows have real values now, so they
-        # already render as a continuous line through those spans.
+        self._traj_dist_raw = col("veh_dist_trav")
+        self._traj_speed_raw = col("veh_speed") if self._has_speed else None
+        self._traj_accel_raw = col("veh_accel") if self._has_accel else None
+
+        # IMPUTED_AUTO rows are masked to NaN so the solid trace breaks
+        # through them -- they render only via the dashed overlay
+        # (_redraw_auto_segments) until a manual Apply makes them
+        # IMPUTED_MANUAL, at which point this mask no longer hides them.
+        self._traj_dist = np.where(auto_mask, np.nan, self._traj_dist_raw)
+        self._traj_speed = (np.where(auto_mask, np.nan, self._traj_speed_raw)
+                             if self._traj_speed_raw is not None else None)
+        self._traj_accel = (np.where(auto_mask, np.nan, self._traj_accel_raw)
+                             if self._traj_accel_raw is not None else None)
+
         self._dist_curve.setData(self._traj_time, self._traj_dist, connect="finite")
         if self._has_speed:
             self._speed_curve.setData(self._traj_time, self._traj_speed, connect="finite")
@@ -342,11 +363,11 @@ class GapReviewDialog(QDialog):
             return
         current_gap = self._gaps[self._gap_index]
 
-        plots_and_data = [(self._dist_plot, self._dist_regions, self._traj_dist)]
+        plots_and_data = [(self._dist_plot, self._dist_regions, self._traj_dist_raw)]
         if self._has_speed:
-            plots_and_data.append((self._speed_plot, self._speed_regions, self._traj_speed))
+            plots_and_data.append((self._speed_plot, self._speed_regions, self._traj_speed_raw))
         if self._has_accel:
-            plots_and_data.append((self._accel_plot, self._accel_regions, self._traj_accel))
+            plots_and_data.append((self._accel_plot, self._accel_regions, self._traj_accel_raw))
 
         for plot, region_list, y_data in plots_and_data:
             finite = y_data[np.isfinite(y_data)]
@@ -366,6 +387,40 @@ class GapReviewDialog(QDialog):
                 plot.addItem(label)
                 region_list.append({"region": region, "label": label})
 
+    def _clear_auto_segments(self):
+        for items in self._auto_segment_items.values():
+            for attr, plot in (("dist", self._dist_plot),
+                                ("speed", self._speed_plot),
+                                ("accel", self._accel_plot)):
+                item = items.get(attr)
+                if item is not None:
+                    plot.removeItem(item)
+        self._auto_segment_items = {}
+
+    def _redraw_auto_segments(self):
+        """Draw a dashed curve through every IMPUTED_AUTO gap on the
+        current vehicle. Auto-filled spans are provisional by definition
+        -- Task9.1_v2.1's N.B. ties dashed/yellow to 'interpolated
+        automatically' and solid/green to a confirmed manual Apply -- so
+        they render this way until the user reviews and applies them."""
+        self._clear_auto_segments()
+        if self._current_veh_id is None:
+            return
+        dashed_pen = pg.mkPen('b', width=2, style=Qt.PenStyle.DashLine)
+        for gap in self._gaps:
+            if gap.veh_id != self._current_veh_id or gap.status != IMPUTED_AUTO:
+                continue
+            mask = (self._traj_time >= gap.start_time) & (self._traj_time <= gap.end_time)
+            if not np.any(mask):
+                continue
+            times = self._traj_time[mask]
+            items = {"dist": self._dist_plot.plot(times, self._traj_dist_raw[mask], pen=dashed_pen)}
+            if self._has_speed:
+                items["speed"] = self._speed_plot.plot(times, self._traj_speed_raw[mask], pen=dashed_pen)
+            if self._has_accel:
+                items["accel"] = self._accel_plot.plot(times, self._traj_accel_raw[mask], pen=dashed_pen)
+            self._auto_segment_items[gap.gap_id] = items
+
     # ── Preview (dashed line) ───────────────────────────────────────────
 
     def _clear_preview(self):
@@ -379,19 +434,42 @@ class GapReviewDialog(QDialog):
                 plot.removeItem(item)
                 setattr(self, attr, None)
 
+    def _boundary_value(self, raw_array: np.ndarray, t: float) -> Optional[float]:
+        """Value of raw_array at the real trajectory timestamp t (a gap's
+        start_time or end_time), or None if t isn't found (shouldn't happen
+        for a valid gap)."""
+        idx = np.searchsorted(self._traj_time, t)
+        if idx < len(self._traj_time) and self._traj_time[idx] == t:
+            return float(raw_array[idx])
+        return None
+    
     def _draw_preview(self, fill_rows: List[FillRow]):
         self._clear_preview()
-        times = [r.veh_time for r in fill_rows]
-        dashed_pen = pg.mkPen('b', width=2, style=Qt.PenStyle.DashLine)
-
+        gap = self._gaps[self._gap_index]
+        dashed_pen = pg.mkPen('r', width=2, style=Qt.PenStyle.DashLine)
+    
+        def build_series(fill_attr, raw_array):
+            pts = [(r.veh_time, getattr(r, fill_attr)) for r in fill_rows]
+            start_v = self._boundary_value(raw_array, gap.start_time)
+            end_v = self._boundary_value(raw_array, gap.end_time)
+            if start_v is not None:
+                pts.insert(0, (gap.start_time, start_v))
+            if end_v is not None:
+                pts.append((gap.end_time, end_v))
+            pts.sort(key=lambda p: p[0])
+            return pts
+    
+        dist_pts = build_series("veh_dist_trav", self._traj_dist_raw)
         self._preview_dist_curve = self._dist_plot.plot(
-            times, [r.veh_dist_trav for r in fill_rows], pen=dashed_pen)
+            [p[0] for p in dist_pts], [p[1] for p in dist_pts], pen=dashed_pen)
         if self._has_speed:
+            speed_pts = build_series("veh_speed", self._traj_speed_raw)
             self._preview_speed_curve = self._speed_plot.plot(
-                times, [r.veh_speed for r in fill_rows], pen=dashed_pen)
+                [p[0] for p in speed_pts], [p[1] for p in speed_pts], pen=dashed_pen)
         if self._has_accel:
+            accel_pts = build_series("veh_accel", self._traj_accel_raw)
             self._preview_accel_curve = self._accel_plot.plot(
-                times, [r.veh_accel for r in fill_rows], pen=dashed_pen)
+                [p[0] for p in accel_pts], [p[1] for p in accel_pts], pen=dashed_pen)
 
     def _compute_preview(self) -> Optional[List[FillRow]]:
         gap = self._gaps[self._gap_index]
@@ -453,14 +531,31 @@ class GapReviewDialog(QDialog):
         self._load_trajectory(gap.veh_id, force=True)   # solid line now includes the new values
         self._populate_gap_combo()                       # refresh this gap's status label
         self._redraw_regions()                            # region turns green
+        self._redraw_auto_segments()
 
-    # ── Add Points (stub) ───────────────────────────────────────────────
+    # ── Add Points ───────────────────────────────────────────────
 
     _FITTING_BASE_PLOT_ATTR = {
         "position":     "_dist_plot",
         "speed":        "_speed_plot",
         "acceleration": "_accel_plot",
     }
+
+    def _expand_plot_for_editing(self, plot_attr: str):
+        """Give the plot being edited most of the splitter's space and
+        collapse the other two -- the spec's 'the graphs should be
+        enlarged' when Add Points is active. Undone by _restore_plot_layout."""
+        self._pre_edit_splitter_sizes = self._plot_splitter.sizes()
+        order = ["_dist_plot", "_speed_plot", "_accel_plot"]
+        total = sum(self._pre_edit_splitter_sizes) or 1
+        self._plot_splitter.setSizes(
+            [total if attr == plot_attr else 0 for attr in order])
+
+    def _restore_plot_layout(self):
+        """Undo _expand_plot_for_editing, restoring the normal three-plot view."""
+        if self._pre_edit_splitter_sizes is not None:
+            self._plot_splitter.setSizes(self._pre_edit_splitter_sizes)
+            self._pre_edit_splitter_sizes = None
 
     def _on_add_points(self):
         if self._point_editor is not None:
@@ -478,6 +573,8 @@ class GapReviewDialog(QDialog):
                 f"window only plots distance, speed, and acceleration. "
                 f"Choose one of those as the fitting base to add points.")
             return
+
+        self._expand_plot_for_editing(plot_attr)
 
         from plot.gap_point_editor import GapPointEditor
         target_plot = getattr(self, plot_attr)
@@ -498,11 +595,11 @@ class GapReviewDialog(QDialog):
     def _on_editor_finished(self, committed: bool):
         if committed:
             self._added_points = self._point_editor.points
-        # else: leave self._added_points as it was before this session started
         self._point_editor.deleteLater()
         self._point_editor = None
         self._set_editing_enabled(True)
-        self._on_editor_points_changed(self._added_points)   # redraw preview with final state
+        self._restore_plot_layout()
+        self._on_editor_points_changed(self._added_points)
 
     def _set_editing_enabled(self, enabled: bool):
         for w in (self._gap_combo, self._prev_btn, self._next_btn, self._add_points_btn,

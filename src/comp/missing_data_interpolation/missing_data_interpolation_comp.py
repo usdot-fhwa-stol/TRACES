@@ -10,12 +10,12 @@ does -- gap reporting is useful on its own (Task9.1's "detect...
 automatically" objective is distinct from "generate corrected trajectory
 values").
 
-The actual fill, when it's implemented, will call
-comp.spline.spline_comp.apply_spline_fit() directly per gap (imported,
-not reimplemented -- see module-level import below) and persist through
-comp/missing_data_interpolation/gap_config_dialog.py, following the same
-comp-computes / dialog-persists split used by every other analysis module
-in this codebase.
+The fill itself is compute_fill(), below: it calls 
+comp.spline.spline_comp.apply_spline_fit() directly per gap 
+(imported, not reimplemented) and is persisted through 
+comp/missing_data_interpolation/gap_config_dialog.py and gap_review_dialog.py, 
+following the same comp-computes / dialog-persists split used by every other 
+analysis module in this codebase.
 """
 
 import sqlite3
@@ -27,7 +27,9 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
 
-from ..base_comp import BaseComp, ensure_imputed_status_column
+from ..base_comp import (
+    BaseComp, ensure_imputed_status_column, IMPUTED_AUTO, IMPUTED_MANUAL,
+)
 from comp.spline.spline_comp import (
     generate_complete_timestamps, apply_spline_fit, nearest_valid_ic,
 )
@@ -523,3 +525,53 @@ def write_gap_rows(db_connection: sqlite3.Connection, gaps: List[GapResult]) -> 
             for g in gaps
         ],
     )
+
+def event_has_gap_records(db_connection: sqlite3.Connection, event_id: int) -> bool:
+    """True if the gaps table already has at least one row for *event_id*
+    -- i.e. a previous GapConfigDialog Apply (or GapReviewDialog Apply)
+    has run for this event. Drives GapConfigDialog's Skip button and its
+    Apply-button start-over confirmation.
+    """
+    cursor = db_connection.cursor()
+    cursor.execute("SELECT 1 FROM gaps WHERE event_id = ? LIMIT 1", (event_id,))
+    return cursor.fetchone() is not None
+
+
+def read_gap_rows(db_connection: sqlite3.Connection, event_id: int) -> List[GapResult]:
+    """Reconstruct GapResult objects from the persisted gaps table for
+    *event_id*. This is the single source of truth GapReviewDialog reads
+    from -- opened via GapConfigDialog's Apply or via Skip, it sees
+    exactly the gaps, spline parameters, and statuses a previous run
+    left behind, since neither path hands it an in-memory list anymore.
+    """
+    cursor = db_connection.cursor()
+    cursor.execute(
+        f"SELECT {', '.join(GAPS_INSERT_COLUMNS)} FROM gaps "
+        f"WHERE event_id = ? ORDER BY veh_id, gap_id",
+        (event_id,),
+    )
+    return [
+        GapResult(
+            event_id=row[0], veh_id=row[1], gap_id=row[2],
+            start_time=row[3], end_time=row[4], missing_rows=row[5],
+            spline_fitting_base=row[6], spline_s=row[7], spline_k=row[8],
+            added_points_json=row[9], status=row[10],
+        )
+        for row in cursor.fetchall()
+    ]
+
+
+def delete_gap_records(db_connection: sqlite3.Connection, event_id: int) -> None:
+    """Delete *event_id*'s gaps-table rows and any events rows this
+    module previously filled (IMPUTED_AUTO/IMPUTED_MANUAL), restoring
+    the pre-fill state so a fresh GapConfigDialog Apply starts over
+    cleanly. Rows with IMPUTED_ORIGINAL or IMPUTED_SPLINE (SplineComp's
+    own synthetic rows) are untouched -- this module only ever owns rows
+    it tagged itself.
+    """
+    db_connection.execute(
+        "DELETE FROM events WHERE event_id = ? AND imputed_status IN (?, ?)",
+        (event_id, IMPUTED_AUTO, IMPUTED_MANUAL),
+    )
+    db_connection.execute("DELETE FROM gaps WHERE event_id = ?", (event_id,))
+    db_connection.commit()
