@@ -120,6 +120,13 @@ class TimeSpeedDialog(QDialog):
     MIN_SPAN_FRACTION = 0.02
     MIN_TIME_SPAN = 0.5   # s
     MIN_Y_SPAN = 0.5      # Y units (m/s here)
+    _RANGE_VALUE_STYLE = (
+        "background-color: #c8c8c8; "
+        "color: #000000; "
+        "border: 1px solid #000000; "
+        "border-radius: 2px; "
+        "padding: 0px 0px;"
+    )
 
     def __init__(self, parent, db_connection, event_id, veh_ids, lane_ids, time_min, time_max, series_colors, text_colors):
         """Initialize the TimeSpeedDialog.
@@ -243,6 +250,7 @@ class TimeSpeedDialog(QDialog):
         self._time_slider = QLabeledDoubleRangeSlider()
         self._time_slider.setOrientation(Qt.Orientation.Horizontal)
         self._time_slider.setDecimals(1)
+        self._style_editable_range_slider(self._time_slider)
         time_layout.addWidget(self._time_slider, stretch=1)
 
         # Provisional: the limits become the data's extent once loaded
@@ -264,6 +272,7 @@ class TimeSpeedDialog(QDialog):
         self._y_slider = QLabeledDoubleRangeSlider()
         self._y_slider.setOrientation(Qt.Orientation.Vertical)
         self._y_slider.setDecimals(1)
+        self._style_editable_range_slider(self._y_slider)
         control_layout.addWidget(self._y_slider, stretch=1)
 
         # Lane combobox next
@@ -292,6 +301,20 @@ class TimeSpeedDialog(QDialog):
             self._lane_combobox.addItem(f"Lane {lane_id:2d}", lane_id)
 
         self._lane_combobox.currentIndexChanged.connect(self._on_lane_changed)
+    
+    def _style_editable_range_slider(self, slider):
+        """Match the time-space plot's editable minimum/maximum boxes."""
+        for label_name in ("_min_label", "_max_label"):
+            label = getattr(slider, label_name, None)
+            if label is not None:
+                style = self._RANGE_VALUE_STYLE
+                if slider.orientation() == Qt.Orientation.Vertical:
+                    # Allow room for signed decimal bounds such as -113.5.
+                    style += " min-width: 2em;"
+                label.setStyleSheet(style)
+                label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        slider.setToolTip("Edit the minimum or maximum range value.")
+
 
     def _compute_min_spans(self):
         """Set each axis' zoom floor to MIN_SPAN_FRACTION of its full slider
@@ -539,7 +562,7 @@ class TimeSpeedDialog(QDialog):
 
         y_min, y_max = self._y_slider.value()
         label_y = self._lane_label_y_position(y_min, y_max)
-        line_pen = pg.mkPen(color=(0, 0, 0, 170), width=1, style=Qt.PenStyle.DashLine)
+        line_pen = pg.mkPen(color=(0, 0, 0, 170), width=3, style=Qt.PenStyle.DashLine)
 
         for veh_id, data in self._vehicle_data.items():
             times = data["times"]

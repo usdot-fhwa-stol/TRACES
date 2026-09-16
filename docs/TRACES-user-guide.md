@@ -257,6 +257,10 @@ Populated only once a plot exists, with three mutually exclusive, checkable acti
 
 *Figure 11 Mode menu open with Select Trajectory checked*
 
+### Help Menu
+
+**Help**, immediately to the right of **Mode**, provides **Time-Space Diagram**, **Gap Headway**, and **Shockwave** entries. Each opens a separate help window listing the mouse and keyboard controls, including Shockwave's Ctrl+left-click editing and Ctrl+right-click deletion. These windows can stay open while you use the plot, and each has a **Close** button. Opening Help does not change the active mode. Help is also available before a database is opened.
+
 ---
 
 ## 6. The Time-Space Plot
@@ -288,7 +292,7 @@ Hovering near a point shows a tooltip with that vehicle's lane, speed, accelerat
 In the default **Select Trajectory** mode ([§8](#8-interaction-modes)):
 
 - **Click** near a point to toggle that vehicle's selection on or off.
-- **Shift+drag** draws a selection box; every vehicle with at least one point inside it is added to the selection (or removed, if you shift-drag over already-selected vehicles).
+- **Left-drag** draws a selection box and adds vehicles with at least one point inside it to the selection. **Shift+left-drag** removes vehicles inside the box from the selection.
 - Once anything is selected, unselected vehicles are dimmed to a flat gray so the selection stands out. Selecting *every* vehicle in the lane automatically clears the selection and returns to normal coloring, since dimming nothing is equivalent to no selection.
 
 Your selection determines what several right-click menu items act on — one vehicle, a specific selected group, or all — covered next in [§7](#7-right-click-menu-on-the-plot).
@@ -347,7 +351,7 @@ The **Mode** menu switches how clicking and hovering on the time-space plot beha
 
 ### 8.1 Select Trajectory
 
-The default mode, covered in [§6](#6-the-time-space-plot): click to toggle a vehicle's selection, shift-drag to box-select multiple vehicles. Most other features (Statistics, Plots, Filter, Noise Analysis in the right-click menu; Vehicle Search) assume you're in this mode.
+The default mode, covered in [§6](#6-the-time-space-plot): click to toggle a vehicle's selection, left-drag to box-select multiple vehicles, or Shift+left-drag to remove vehicles from the selection. Most other features (Statistics, Plots, Filter, Noise Analysis in the right-click menu; Vehicle Search) assume you're in this mode.
 
 ### 8.2 Gap Headway
 
