@@ -226,8 +226,13 @@ class ShockwaveModeHandler(InteractionModeHandler):
         self._remove_shockwave_visual(widget, result.id)
         if self._panel_result_id == result.id:
             panel = self._ensure_result_panel(widget)
-            panel.clear()
-            self._panel_result_id = None
+            if self._fitted_results:
+                remaining_result = self._fitted_results[-1]
+                panel.update_result(remaining_result)
+                self._panel_result_id = remaining_result.id
+            else:
+                panel.clear()
+                self._panel_result_id = None
         logger.debug(f"SW: deleted shockwave {result.id} via ctrl+right-click")
 
     # ── Ctrl+Left-click (while idle): re-open a committed shockwave ──────

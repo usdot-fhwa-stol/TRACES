@@ -44,6 +44,13 @@ class TimeSpeedDialog(QDialog):
     Y_LABEL = "Speed (m/s)"
     PLOT_TITLE_SUFFIX = "Speed vs Time"
     TOLERANCE = 2.0  # Tolerance for point detection
+    _RANGE_VALUE_STYLE = (
+        "background-color: #c8c8c8; "
+        "color: #000000; "
+        "border: 1px solid #000000; "
+        "border-radius: 2px; "
+        "padding: 0px 0px;"
+    )
     
     def __init__(self, parent, db_connection, event_id, veh_ids, lane_ids, time_min, time_max, series_colors, text_colors):
         """Initialize the TimeSpeedDialog.
@@ -160,6 +167,7 @@ class TimeSpeedDialog(QDialog):
         # Time slider
         self._time_slider = QLabeledRangeSlider()
         self._time_slider.setOrientation(Qt.Orientation.Horizontal)
+        self._style_editable_range_slider(self._time_slider)
         time_layout.addWidget(self._time_slider, stretch=1)
         
         # Set time slider range and values
@@ -180,6 +188,7 @@ class TimeSpeedDialog(QDialog):
         self._y_slider = QLabeledDoubleRangeSlider()
         self._y_slider.setOrientation(Qt.Orientation.Vertical)
         self._y_slider.setDecimals(1)
+        self._style_editable_range_slider(self._y_slider)
         control_layout.addWidget(self._y_slider, stretch=1)
         
         # Lane combobox next
@@ -204,6 +213,19 @@ class TimeSpeedDialog(QDialog):
 
         self._lane_combobox.currentIndexChanged.connect(self._on_lane_changed)
     
+    def _style_editable_range_slider(self, slider):
+        """Match the time-space plot's editable minimum/maximum boxes."""
+        for label_name in ("_min_label", "_max_label"):
+            label = getattr(slider, label_name, None)
+            if label is not None:
+                style = self._RANGE_VALUE_STYLE
+                if slider.orientation() == Qt.Orientation.Vertical:
+                    # Allow room for signed decimal bounds such as -113.5.
+                    style += " min-width: 2em;"
+                label.setStyleSheet(style)
+                label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        slider.setToolTip("Edit the minimum or maximum range value.")
+
     def _get_data_query(self):
         """Get the SQL query for loading plot data.
         
@@ -299,14 +321,27 @@ class TimeSpeedDialog(QDialog):
                 line_item = pg.PlotDataItem(
                     x=times_array,
                     y=y_array,
-                    pen=pg.mkPen(color=color, width=4),
+                    pen=pg.mkPen(color=color, width=2),
                     symbol='o',
-                    symbolSize=7,
-                    symbolPen=pg.mkPen(color=color, width=1),
+                    symbolSize=4,
+                    symbolPen=pg.mkPen(color=color, width=2),
                     symbolBrush=pg.mkBrush(color)
                 )
                 line_item.veh_id = veh_id  # Store vehicle ID on plot item
                 self._plot.addItem(line_item)
+
+                # Keep the vehicle-colored marker with a small black center.
+                center_item = pg.ScatterPlotItem(
+                    x=times_array,
+                    y=y_array,
+                    symbol='o',
+                    size=3,
+                    pen=None,
+                    brush=pg.mkBrush('#000000'),
+                    pxMode=True,
+                )
+                center_item.setZValue(1)
+                self._plot.addItem(center_item)
 
                 logger.debug(f"Plotted {len(times)} {self.Y_COLUMN} points for vehicle {veh_id}")
             
@@ -388,7 +423,7 @@ class TimeSpeedDialog(QDialog):
 
         y_min, y_max = self._y_slider.value()
         label_y = self._lane_label_y_position(y_min, y_max)
-        line_pen = pg.mkPen(color=(0, 0, 0, 170), width=1, style=Qt.PenStyle.DashLine)
+        line_pen = pg.mkPen(color=(0, 0, 0, 170), width=3, style=Qt.PenStyle.DashLine)
 
         for veh_id, data in self._vehicle_data.items():
             times = data["times"]

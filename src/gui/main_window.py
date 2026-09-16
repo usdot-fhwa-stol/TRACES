@@ -1,6 +1,9 @@
 import logging
 from pathlib import Path
-from PyQt6.QtWidgets import QMainWindow, QMenuBar, QMenu, QApplication, QFileDialog, QMessageBox, QDialog
+from PyQt6.QtWidgets import (
+    QMainWindow, QMenuBar, QMenu, QApplication, QFileDialog, QMessageBox,
+    QDialog, QVBoxLayout, QTextBrowser, QDialogButtonBox,
+)
 from PyQt6.QtGui import QAction
 from PyQt6.QtCore import QTimer
 from .home_widget import HomeWidget
@@ -45,6 +48,7 @@ class MainWindow(QMainWindow):
         self._search_dialog = None
         self._home_widget = None
         self._log_viewer_dialog = None
+        self._help_dialogs = {}
         
         self._setup_ui()
         self._load_settings()
@@ -179,6 +183,67 @@ class MainWindow(QMainWindow):
         self._mode_menu = QMenu("&Mode", self)
         menu_bar.addMenu(self._mode_menu)
         self._mode_menu.menuAction().setVisible(False)
+
+        help_menu = menu_bar.addMenu("&Help")
+        self._populate_mode_help(help_menu)
+
+    def _populate_mode_help(self, help_menu):
+        """Provide read-only plot controls without changing the active mode."""
+        mode_instructions = {
+            "Time-Space Diagram": (
+                "Left-click a trajectory: toggle its selection",
+                "Left-drag: add trajectories inside the box to the selection",
+                "Shift + left-drag: remove trajectories inside the box",
+                "Esc: clear the selection",
+                "Right-click: open the plot context menu",
+                "Mouse wheel: zoom around the cursor",
+            ),
+            "Gap Headway": (
+                "Hover near a point: preview gap and headway",
+                "Left-click a point: lock or unlock its overlay",
+                "Esc: clear all locked overlays",
+                "Right-click: open the plot context menu",
+                "Mouse wheel: zoom around the cursor",
+            ),
+            "Shockwave": (
+                "Semi-Automatic method (Manual and Automatic unavailable)",
+                "Left-click a marker: start or extend a chain",
+                "Choose the same marker color on adjacent trajectories",
+                "Ctrl + left-click a committed shockwave point: edit it while idle",
+                "Ctrl + right-click a chain point: remove that point",
+                "Ctrl + right-click a committed shockwave point: delete it while idle",
+                "Enter: fit or re-fit the chain (at least 2 points)",
+                "Esc: cancel a new chain or revert an edit",
+                "Left-click the results panel title: open the results table",
+                "Right-click without Ctrl: open the plot context menu",
+                "Mouse wheel: zoom around the cursor",
+            ),
+        }
+        for mode_name, instructions in mode_instructions.items():
+            action = help_menu.addAction(mode_name)
+            action.triggered.connect(
+                lambda checked=False, name=mode_name, commands=instructions:
+                    self._show_mode_help(name, commands)
+            )
+
+    def _show_mode_help(self, mode_name, instructions):
+        """Keep controls visible in a separate window while using the plot."""
+        dialog = self._help_dialogs.get(mode_name)
+        if dialog is None:
+            dialog = QDialog(self)
+            dialog.setWindowTitle(f"{mode_name} — Help")
+            dialog.resize(620, 420)
+            layout = QVBoxLayout(dialog)
+            commands = QTextBrowser(dialog)
+            commands.setPlainText("\n\n".join(instructions))
+            layout.addWidget(commands)
+            buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close, dialog)
+            buttons.rejected.connect(dialog.close)
+            layout.addWidget(buttons)
+            self._help_dialogs[mode_name] = dialog
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
 
     def _setup_home_page(self):
         self._home_widget = HomeWidget()
