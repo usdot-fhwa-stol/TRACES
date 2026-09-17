@@ -26,12 +26,12 @@ from typing import Dict, List
 from PyQt6.QtWidgets import QComboBox, QDoubleSpinBox, QFormLayout, QLabel, QMessageBox, QPushButton
 
 from comp.base_analysis_dialog import BaseAnalysisDialog
-from comp.base_comp import IMPUTED_AUTO
+from comp.base_comp import IMPUTED_AUTO, IMPUTED_MANUAL
 from comp.spline.spline_comp import BASE_LABELS, FITTING_BASES, allowed_k_options
 from .missing_data_interpolation_comp import (
     MissingDataInterpolationComp, GapResult, FillRow,
     GAP_STATUS_UNFILLED, count_valid_points_by_vehicle,
-    event_has_gap_records, delete_gap_records,
+    event_has_gap_records, delete_gap_records, read_gap_rows,
 )
 
 logger = logging.getLogger(__name__)
@@ -99,23 +99,30 @@ class GapConfigDialog(BaseAnalysisDialog):
         self._gapped_veh_ids = sorted({g.veh_id for g in self._detected_gaps})
 
         self._update_viability_label()
-        self._update_viability_label()
         self._update_skip_enabled()
 
     def _setup_ui(self):
         super()._setup_ui()
         self._primary_btn.setText("Apply")   # matches the spec's/docstrings' naming
-
+    
+        # Full-width status line -- a top-level row of its own rather than a
+        # form field, so it can wrap across the whole dialog instead of being
+        # squeezed into the form's narrow field column.
+        self._viability_label = QLabel()
+        self._viability_label.setWordWrap(True)
+        self.layout().insertWidget(1, self._viability_label)
+    
         self._skip_btn = QPushButton("Skip")
         self._skip_btn.setEnabled(False)   # updated in __init__ once self._event_id exists
         self._skip_btn.setToolTip(
             "Continue reviewing gaps already recorded for this event "
             "without re-running automatic detection and fill.")
         self._skip_btn.clicked.connect(self._on_skip)
-
-        # btn_row is the QHBoxLayout BaseAnalysisDialog._setup_ui built as
-        # this dialog's 3rd top-level layout item (form, progress bar, buttons).
-        btn_row = self.layout().itemAt(2).layout()
+    
+        # btn_row is the QHBoxLayout BaseAnalysisDialog._setup_ui built, now
+        # this dialog's 4th top-level layout item (form, viability label,
+        # progress bar, buttons) after inserting the label above.
+        btn_row = self.layout().itemAt(3).layout()
         btn_row.insertWidget(btn_row.indexOf(self._primary_btn), self._skip_btn)
 
     def _update_skip_enabled(self):
@@ -157,27 +164,23 @@ class GapConfigDialog(BaseAnalysisDialog):
 
     def _build_parameter_form(self) -> QFormLayout:
         form = QFormLayout()
-
+    
         self._base_combo = QComboBox()
         for key in FITTING_BASES:
             self._base_combo.addItem(BASE_LABELS[key], key)
         self._base_combo.currentIndexChanged.connect(self._on_base_changed)
         form.addRow("Default fitting base:", self._base_combo)
-
+    
         self._s_spin = QDoubleSpinBox()
         self._s_spin.setRange(0.0, 1_000_000.0)
         self._s_spin.setDecimals(4)
         self._s_spin.setValue(1.0)
         form.addRow("Default smoothness level (s):", self._s_spin)
-
+    
         self._k_combo = QComboBox()
         self._k_combo.currentIndexChanged.connect(self._update_viability_label)
         form.addRow("Default spline degree (k):", self._k_combo)
-
-        self._viability_label = QLabel()
-        self._viability_label.setWordWrap(True)
-        form.addRow("", self._viability_label)
-
+    
         self._on_base_changed()   # populate k options for the initial selection
         return form
 
@@ -204,28 +207,32 @@ class GapConfigDialog(BaseAnalysisDialog):
     def _update_viability_label(self):
         if not hasattr(self, "_viability_label") or not hasattr(self, "_detected_gaps"):
             return   # still inside super().__init__() -- form/detection not ready yet
-
+    
+        if event_has_gap_records(self._db_connection, self._event_id):
+            self._show_previous_run_summary()
+            return
+    
         if not self._detected_gaps:
             self._viability_label.setText("No gaps detected in this event.")
-            self._viability_label.setStyleSheet("color: #555; font-style: italic;")
+            self._viability_label.setStyleSheet("font-style: italic;")
             return
-
+    
         fitting_base = self._base_combo.currentData()
         k = self._k_combo.currentData()
         if fitting_base is None or k is None:
             return
-
+    
         counts = count_valid_points_by_vehicle(
             self._db_connection, self._event_id, self._gapped_veh_ids, fitting_base,
         )
         unviable_veh_ids = {v for v, n in counts.items() if n < k + 1}
         unfillable = [g for g in self._detected_gaps if g.veh_id in unviable_veh_ids]
-
+    
         total = len(self._detected_gaps)
         if not unfillable:
             self._viability_label.setText(
                 f"All {total} detected gap(s) can be auto-filled with these settings.")
-            self._viability_label.setStyleSheet("color: #555; font-style: italic;")
+            self._viability_label.setStyleSheet("font-style: italic;")
         else:
             self._viability_label.setText(
                 f"{len(unfillable)} of {total} gap(s), on {len(unviable_veh_ids)} "
@@ -233,6 +240,25 @@ class GapConfigDialog(BaseAnalysisDialog):
                 f"valid points) -- lower k, or leave them for manual refinement "
                 f"in the review window.")
             self._viability_label.setStyleSheet("color: #a05a00; font-style: italic;")
+    
+    def _show_previous_run_summary(self):
+        """Skip is available -- the settings above don't affect what Skip
+        does, so show what's actually recorded in the gaps table instead of
+        an auto-fill viability check for parameters that may never be applied."""
+        existing = read_gap_rows(self._db_connection, self._event_id)
+        total = len(existing)
+        n_auto = sum(1 for g in existing if g.status == IMPUTED_AUTO)
+        n_manual = sum(1 for g in existing if g.status == IMPUTED_MANUAL)
+        n_unfilled = total - n_auto - n_manual
+    
+        parts = [f"{n_auto} automatic", f"{n_manual} manual"]
+        if n_unfilled:
+            parts.append(f"{n_unfilled} unfilled")
+        self._viability_label.setText(
+            f"This event already has {total} gap(s) recorded from a previous run "
+            f"({', '.join(parts)}). Click Skip to continue reviewing them, or "
+            f"Apply to start over.")
+        self._viability_label.setStyleSheet("font-style: italic;")
 
     def _configure_fitting_base_options(self):
         """Disable bases whose required column is absent -- same pattern

@@ -28,7 +28,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 import numpy as np
 
 from ..base_comp import (
-    BaseComp, ensure_imputed_status_column, IMPUTED_AUTO, IMPUTED_MANUAL,
+    BaseComp, ensure_imputed_status_column, IMPUTED_AUTO, IMPUTED_MANUAL, IMPUTED_ORIGINAL,
 )
 from comp.spline.spline_comp import (
     generate_complete_timestamps, apply_spline_fit, nearest_valid_ic,
@@ -362,11 +362,17 @@ class MissingDataInterpolationComp(BaseComp):
             select_cols.append("veh_jerk")
 
         cursor = db_connection.cursor()
+        # imputed_status = IMPUTED_ORIGINAL restricts the fit to real
+        # measurements only -- excluding IMPUTED_SPLINE, IMPUTED_AUTO, and
+        # IMPUTED_MANUAL rows keeps each gap's fit independent of every other
+        # gap's fill state, so results don't depend on the order gaps happen
+        # to be reviewed/applied in.
         cursor.execute(
             f"SELECT {', '.join(select_cols)} FROM events "
             f"WHERE event_id = ? AND veh_id = ? AND veh_dist_trav IS NOT NULL "
+            f"AND imputed_status = ? "
             f"ORDER BY veh_time",
-            (event_id, veh_id),
+            (event_id, veh_id, IMPUTED_ORIGINAL),
         )
         rows = cursor.fetchall()
         if not rows:

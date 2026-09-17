@@ -105,9 +105,10 @@ class GapReviewDialog(QDialog):
         self._traj_speed_raw: Optional[np.ndarray] = None
         self._traj_accel_raw: Optional[np.ndarray] = None
 
-        self._dist_regions: List[dict] = []
-        self._speed_regions: List[dict] = []
-        self._accel_regions: List[dict] = []
+        self._dist_regions: Dict[int, dict] = {}
+        self._speed_regions: Dict[int, dict] = {}
+        self._accel_regions: Dict[int, dict] = {}
+        self._selected_region_gap_id: Optional[int] = None
 
         self._preview_dist_curve = None
         self._preview_speed_curve = None
@@ -293,22 +294,37 @@ class GapReviewDialog(QDialog):
         self._prev_btn.setEnabled(self._gap_index > 0)
         self._next_btn.setEnabled(self._gap_index < len(self._gaps) - 1)
 
+    def _center_view_on_gap(self, gap: GapResult):
+        """If gap isn't fully within the plot's current x-range, re-center
+        the view on it at the same zoom level. Only the dist plot needs
+        this -- speed/accel are XLinked to it (see _build_ui) and follow
+        automatically. Left alone (no range change at all) when the gap is
+        already visible, so ordinary navigation doesn't disturb a manual
+        zoom/pan the user is mid-way through."""
+        (x_min, x_max), _ = self._dist_plot.viewRange()
+        if gap.start_time >= x_min and gap.end_time <= x_max:
+            return
+    
+        half_width = (x_max - x_min) / 2
+        gap_center = (gap.start_time + gap.end_time) / 2
+        self._dist_plot.setXRange(gap_center - half_width, gap_center + half_width, padding=0)
+
     def _load_gap(self, index: int):
         self._gap_index = index
         gap = self._gaps[index]
-
-        self._close_point_editor(commit=False)   # discard any in-progress edit for the old gap
-
+    
+        self._close_point_editor(commit=False)
+    
         self._gap_combo.blockSignals(True)
         self._gap_combo.setCurrentIndex(index)
         self._gap_combo.blockSignals(False)
-
-        self._load_trajectory(gap.veh_id)
+    
+        self._load_trajectory(gap.veh_id)   # no-op if same vehicle; rebuilds internally if not
         self._populate_param_controls(gap)
         self._added_points = self._decode_added_points(gap.added_points_json)
         self._clear_preview()
-        self._redraw_regions()
-        self._redraw_auto_segments()
+        self._update_region_selection()      # cheap: just moves the highlight
+        self._center_view_on_gap(gap)        # scroll into view if the gap isn't visible
         self._update_nav_buttons()
 
     @staticmethod
@@ -398,23 +414,32 @@ class GapReviewDialog(QDialog):
             self._accel_curve.setData([], [])
             self._accel_plot.setTitle("Acceleration (veh_accel not available in this dataset)")
 
+        self._rebuild_regions()
+        self._redraw_auto_segments()
+
     # ── Gap region shading ───────────────────────────────────────────────
 
-    def _redraw_regions(self):
-        for plot, region_list in (
+    def _rebuild_regions(self):
+        """Full rebuild of every gap's shaded region + number label for the
+        current vehicle. Expensive -- removes/recreates a pg item pair per
+        gap, per plot, and re-scans the trajectory for each gap's local max
+        -- so only call this when the underlying data actually changed (a
+        new vehicle loaded, or Apply rewrote this vehicle's fill). Plain
+        gap-to-gap navigation should use the cheap _update_region_selection()
+        instead."""
+        for plot, region_map in (
             (self._dist_plot, self._dist_regions),
             (self._speed_plot, self._speed_regions),
             (self._accel_plot, self._accel_regions),
         ):
-            for item in region_list:
+            for item in region_map.values():
                 plot.removeItem(item["region"])
                 plot.removeItem(item["label"])
-            region_list.clear()
+            region_map.clear()
     
         veh_gaps = [g for g in self._gaps if g.veh_id == self._current_veh_id]
         if not veh_gaps:
             return
-        current_gap = self._gaps[self._gap_index]
     
         plots_and_data = [(self._dist_plot, self._dist_regions, self._traj_dist_raw)]
         if self._has_speed:
@@ -422,23 +447,19 @@ class GapReviewDialog(QDialog):
         if self._has_accel:
             plots_and_data.append((self._accel_plot, self._accel_regions, self._traj_accel_raw))
     
-        for plot, region_list, y_data in plots_and_data:
+        for plot, region_map, y_data in plots_and_data:
             finite = y_data[np.isfinite(y_data)]
             y_fallback = float(np.max(finite)) if finite.size else 0.0
             for gap in veh_gaps:
-                is_selected = gap.gap_id == current_gap.gap_id
                 region = pg.LinearRegionItem(
                     values=(gap.start_time, gap.end_time),
                     brush=_STATUS_COLORS.get(gap.status, (200, 200, 200, 80)),
-                    pen=pg.mkPen('k', width=2) if is_selected else pg.mkPen(None),
+                    pen=pg.mkPen(None),   # selection border applied separately below
                     movable=False,
                 )
                 region.setZValue(-10)
                 plot.addItem(region)
     
-                # Local max within this gap's own time span, not the whole
-                # trajectory -- falls back to the plot-wide max only if the
-                # gap has no finite samples in its span at all.
                 gap_mask = (self._traj_time >= gap.start_time) & (self._traj_time <= gap.end_time)
                 gap_finite = y_data[gap_mask & np.isfinite(y_data)]
                 y_top = float(np.max(gap_finite)) if gap_finite.size else y_fallback
@@ -446,7 +467,28 @@ class GapReviewDialog(QDialog):
                 label = pg.TextItem(str(gap.gap_id), anchor=(0.5, 1.0), color='k')
                 label.setPos((gap.start_time + gap.end_time) / 2, y_top)
                 plot.addItem(label)
-                region_list.append({"region": region, "label": label})
+                region_map[gap.gap_id] = {"region": region, "label": label}
+
+    def _update_region_selection(self):
+        """Move the highlighted border from the previously selected gap's
+        region to the newly selected one. O(1) per plot -- no rebuild, no
+        re-scanning the trajectory -- for use on ordinary gap navigation
+        within the same vehicle."""
+        new_gap = self._gaps[self._gap_index]
+        prev_id = self._selected_region_gap_id
+        for region_map in (self._dist_regions, self._speed_regions, self._accel_regions):
+            if prev_id is not None and prev_id in region_map:
+                self._set_region_pen(region_map[prev_id]["region"], pg.mkPen(None))
+            if new_gap.gap_id in region_map:
+                self._set_region_pen(region_map[new_gap.gap_id]["region"], pg.mkPen('k', width=2))
+        self._selected_region_gap_id = new_gap.gap_id
+    
+    @staticmethod
+    def _set_region_pen(region: pg.LinearRegionItem, pen):
+        """LinearRegionItem has no setPen() of its own -- its visible border
+        is its two boundary InfiniteLines, so the pen has to be set on each."""
+        for line in region.lines:
+            line.setPen(pen)
 
     def _clear_auto_segments(self):
         for items in self._auto_segment_items.values():
@@ -592,8 +634,7 @@ class GapReviewDialog(QDialog):
         self._clear_preview()
         self._load_trajectory(gap.veh_id, force=True)   # solid line now includes the new values
         self._populate_gap_combo()                       # refresh this gap's status label
-        self._redraw_regions()                            # region turns green
-        self._redraw_auto_segments()
+        self._update_region_selection()
 
     # ── Add Points ───────────────────────────────────────────────
 
@@ -666,10 +707,15 @@ class GapReviewDialog(QDialog):
         self._on_editor_points_changed(self._added_points)
 
     def _set_editing_enabled(self, enabled: bool):
-        for w in (self._gap_combo, self._prev_btn, self._next_btn, self._add_points_btn,
+        for w in (self._gap_combo, self._add_points_btn,
                   self._gap_base_combo, self._gap_s_spin, self._gap_k_combo,
                   self._view_btn, self._apply_btn):
             w.setEnabled(enabled)
+        if enabled:
+            self._update_nav_buttons()   # respects gap_index boundaries instead of forcing True
+        else:
+            self._prev_btn.setEnabled(False)
+            self._next_btn.setEnabled(False)
 
     def _close_point_editor(self, commit: bool):
         if self._point_editor is not None:
