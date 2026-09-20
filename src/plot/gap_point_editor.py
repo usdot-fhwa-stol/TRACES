@@ -67,11 +67,18 @@ class GapPointEditor(QObject):
         self._press_scene_pos: Optional[QPointF] = None
         self._press_time: float = 0.0
         self._press_had_ctrl: bool = False
+        self._panning: bool = False
+        self._pan_last_scene_pos: Optional[QPointF] = None
         self._active = True
+        self._mouse_grabbed = False
 
+        # setMouseEnabled stays False here -- pan/zoom are now driven manually
+        # below (see _on_move / _on_wheel) instead of through pyqtgraph's own
+        # mouse handling, so a left-click on a point stays unambiguous and no
+        # built-in gesture (rect-zoom, middle-drag, etc.) can sneak in.
         self._was_mouse_enabled = list(self._view_box.state.get("mouseEnabled", [True, True]))
         self._view_box.setMouseEnabled(x=False, y=False)
-        
+    
         self._was_auto_range = self._view_box.autoRangeEnabled()
         self._view_box.enableAutoRange(x=False, y=False)
 
@@ -84,6 +91,7 @@ class GapPointEditor(QObject):
         self._plot_widget.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._plot_widget.setFocus()
         self._plot_widget.installEventFilter(self)
+        self._plot_widget.viewport().installEventFilter(self)
 
     @property
     def points(self) -> List[Tuple[float, float]]:
@@ -95,10 +103,15 @@ class GapPointEditor(QObject):
         if not self._active:
             return
         self._active = False
-        if self._drag_index is not None:
+        if self._mouse_grabbed:
             self._plot_widget.releaseMouse()
-            self._drag_index = None
+            self._mouse_grabbed = False
+        self._drag_index = None
+        self._panning = False
+
+        self._pan_last_scene_pos = None
         self._plot_widget.removeEventFilter(self)
+        self._plot_widget.viewport().removeEventFilter(self)
         self._plot_widget.removeItem(self._scatter)
         self._view_box.setMouseEnabled(*self._was_mouse_enabled)
         x_auto, y_auto = self._was_auto_range
@@ -115,7 +128,7 @@ class GapPointEditor(QObject):
     # ── Event filter ─────────────────────────────────────────────────────
 
     def eventFilter(self, obj, event) -> bool:
-        if not self._active or obj is not self._plot_widget:
+        if not self._active or obj not in (self._plot_widget, self._plot_widget.viewport()):
             return False
 
         et = event.type()
@@ -125,6 +138,8 @@ class GapPointEditor(QObject):
             return self._on_move(event)
         elif et == QEvent.Type.MouseButtonRelease and event.button() == Qt.MouseButton.LeftButton:
             return self._on_release(event)
+        elif et == QEvent.Type.Wheel:                       # NEW
+            return self._on_wheel(event)
         elif et == QEvent.Type.KeyPress:
             return self._on_key(event)
         return False
@@ -138,6 +153,7 @@ class GapPointEditor(QObject):
     def _on_press(self, event) -> bool:
         scene_pos = self._scene_pos(event)
         self._press_scene_pos = scene_pos
+        self._pan_last_scene_pos = scene_pos
         self._press_time = now()
         self._press_had_ctrl = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
     
@@ -150,36 +166,58 @@ class GapPointEditor(QObject):
             return True
         if idx is not None:
             self._drag_index = idx
-            self._plot_widget.grabMouse()          # force all moves/release to this widget
+        self._plot_widget.grabMouse() # force all moves/release to this widget
+        self._mouse_grabbed = True    # also cover the pan case
         return True
 
     def _on_move(self, event) -> bool:
-        if self._drag_index is None:
-            return False
-        data_pos = self._data_pos(self._scene_pos(event))
-        x = min(max(data_pos.x(), self._x_min), self._x_max)
-        self._points[self._drag_index] = (x, data_pos.y())
-        self._redraw_points()
-        self.points_changed.emit(self.points)
+        if self._drag_index is not None:
+            data_pos = self._data_pos(self._scene_pos(event))
+            x = min(max(data_pos.x(), self._x_min), self._x_max)
+            self._points[self._drag_index] = (x, data_pos.y())
+            self._redraw_points()
+            self.points_changed.emit(self.points)
+            return True
+    
+        if self._press_scene_pos is None:
+            return False   # no button down (a Ctrl+click delete already resolved this press)
+    
+        scene_pos = self._scene_pos(event)
+        if not self._panning and not is_click(self._press_scene_pos, scene_pos, self._press_time, now()):
+            self._panning = True   # crossed the click threshold -- this is a drag, not a click
+    
+        if self._panning:
+            last_data = self._data_pos(self._pan_last_scene_pos)
+            cur_data = self._data_pos(scene_pos)
+            self._view_box.translateBy(x=last_data.x() - cur_data.x(), y=last_data.y() - cur_data.y())
+    
+        self._pan_last_scene_pos = scene_pos
         return True
 
     def _on_release(self, event) -> bool:
-        if self._drag_index is not None:
+        if self._mouse_grabbed:
             self._plot_widget.releaseMouse()
+            self._mouse_grabbed = False
+        if self._drag_index is not None:
             self._drag_index = None
             return True
 
         if self._press_scene_pos is None:
             return True   # a Ctrl+click delete already handled this press
-
+    
         scene_pos = self._scene_pos(event)
-        if not self._press_had_ctrl and is_click(self._press_scene_pos, scene_pos, self._press_time, now()):
+        if not self._press_had_ctrl and not self._panning and is_click(
+            self._press_scene_pos, scene_pos, self._press_time, now()
+        ):
             data_pos = self._data_pos(scene_pos)
             if self._x_min <= data_pos.x() <= self._x_max:
                 self._points.append((data_pos.x(), data_pos.y()))
                 self._redraw_points()
                 self.points_changed.emit(self.points)
+    
         self._press_scene_pos = None
+        self._pan_last_scene_pos = None
+        self._panning = False
         return True
 
     def _on_key(self, event) -> bool:
@@ -191,3 +229,12 @@ class GapPointEditor(QObject):
             self.finish(commit=False)
             return True
         return False
+
+    def _on_wheel(self, event) -> bool:
+        delta = event.angleDelta().y()
+        if delta == 0:
+            return True
+        scale = 0.999 ** delta   # tune sensitivity to taste
+        center = self._data_pos(self._plot_widget.mapToScene(event.position().toPoint()))
+        self._view_box.scaleBy((scale, scale), center=(center.x(), center.y()))
+        return True

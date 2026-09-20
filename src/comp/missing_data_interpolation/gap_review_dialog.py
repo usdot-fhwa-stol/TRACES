@@ -43,7 +43,7 @@ import pyqtgraph as pg
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QComboBox, QDoubleSpinBox, QHBoxLayout, QLabel, QMessageBox,
-    QPushButton, QSplitter, QVBoxLayout, QDialog,
+    QPushButton, QSplitter, QVBoxLayout, QDialog, QWidget,
 )
 
 from comp.base_comp import IMPUTED_AUTO, IMPUTED_MANUAL
@@ -199,7 +199,9 @@ class GapReviewDialog(QDialog):
         right_layout.addLayout(apply_close_row)
     
         right_layout.addStretch(1)
-        main_layout.addLayout(right_layout)
+        self._right_panel = QWidget()
+        self._right_panel.setLayout(right_layout)
+        main_layout.addWidget(self._right_panel)
 
     def _build_param_controls(self) -> QVBoxLayout:
         col = QVBoxLayout()
@@ -653,12 +655,14 @@ class GapReviewDialog(QDialog):
         total = sum(self._pre_edit_splitter_sizes) or 1
         self._plot_splitter.setSizes(
             [total if attr == plot_attr else 0 for attr in order])
+        self._right_panel.setVisible(False)
 
     def _restore_plot_layout(self):
         """Undo _expand_plot_for_editing, restoring the normal three-plot view."""
         if self._pre_edit_splitter_sizes is not None:
             self._plot_splitter.setSizes(self._pre_edit_splitter_sizes)
             self._pre_edit_splitter_sizes = None
+        self._right_panel.setVisible(True)
 
     def _on_add_points(self):
         if self._point_editor is not None:
