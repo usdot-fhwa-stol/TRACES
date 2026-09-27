@@ -33,8 +33,13 @@ plot/gap_point_editor.py's GapPointEditor, installed as an event filter
 on whichever of the three plots matches the gap's current fitting base,
 using plot/point_edit_utils.py's shared hit-testing/click-vs-drag
 helpers. Only available when the selected gap's fitting base is
-position, speed, or acceleration. Per spec the plots should also enlarge 
-while Add Points is active.
+position, speed, or acceleration.
+
+While Add Points is active the fitting-base plot and the next derived
+plot (distance -> speed, speed -> acceleration) are enlarged together so
+the effect of added points on the derived parameter is visible live;
+acceleration shows alone since there is no jerk plot. Points can only
+be added on the fitting-base plot -- the derived plot is view-only.
 """
 
 import json
@@ -123,6 +128,8 @@ class GapReviewDialog(QDialog):
         self._added_points: List[tuple] = []
         self._point_editor = None
         self._pre_edit_splitter_sizes: Optional[List[int]] = None
+        self._companion_plot_attr: Optional[str] = None
+        self._companion_mouse_state: Optional[List[bool]] = None
         self._initial_zoom_done = False
 
         self._build_ui()
@@ -688,22 +695,61 @@ class GapReviewDialog(QDialog):
         "acceleration": "_accel_plot",
     }
 
+    # the next derived parameter's plot, shown read-only beneath the
+    # fitting-base plot while Add Points is active so the user can see how
+    # added points affect it. Acceleration has none.
+    _DERIVED_PLOT_ATTR = {
+        "_dist_plot":  "_speed_plot",
+        "_speed_plot": "_accel_plot",
+        "_accel_plot": None,
+    }
+
+    def _editing_plot_attrs(self, plot_attr: str) -> List[str]:
+        """[fitting-base plot, derived plot] -- or just the fitting-base
+        plot when there's no derived plot or its column isn't in the
+        dataset (e.g. no veh_speed)."""
+        attrs = [plot_attr]
+        derived = self._DERIVED_PLOT_ATTR.get(plot_attr)
+        available = {"_speed_plot": self._has_speed, "_accel_plot": self._has_accel}
+        if derived is not None and available.get(derived, False):
+            attrs.append(derived)
+        return attrs
+
     def _expand_plot_for_editing(self, plot_attr: str):
-        """Give the plot being edited most of the splitter's space and
-        collapse the other two -- the spec's 'the graphs should be
-        enlarged' when Add Points is active. Undone by _restore_plot_layout."""
+        """Enlarge the fitting-base plot plus the next derived plot (split
+        equally) and collapse the rest -- the spec's 'the graphs should be
+        enlarged' when Add Points is active. The derived plot is view-only:
+        GapPointEditor is installed only on the fitting-base plot, and the
+        derived plot's pan/zoom is disabled here so it can't shift the
+        shared (XLinked) time axis mid-edit. Undone by _restore_plot_layout."""
         self._pre_edit_splitter_sizes = self._plot_splitter.sizes()
         order = ["_dist_plot", "_speed_plot", "_accel_plot"]
+        visible = self._editing_plot_attrs(plot_attr)
         total = sum(self._pre_edit_splitter_sizes) or 1
+        share = total // len(visible)
         self._plot_splitter.setSizes(
-            [total if attr == plot_attr else 0 for attr in order])
+            [share if attr in visible else 0 for attr in order])
         self._right_panel.setVisible(False)
 
+        self._companion_plot_attr = visible[1] if len(visible) > 1 else None
+        if self._companion_plot_attr is not None:
+            vb = getattr(self, self._companion_plot_attr).getViewBox()
+            self._companion_mouse_state = list(vb.state['mouseEnabled'])
+            vb.setMouseEnabled(x=False, y=False)
+
     def _restore_plot_layout(self):
-        """Undo _expand_plot_for_editing, restoring the normal three-plot view."""
+        """Undo _expand_plot_for_editing, restoring the normal three-plot
+        view and the derived plot's pan/zoom."""
         if self._pre_edit_splitter_sizes is not None:
             self._plot_splitter.setSizes(self._pre_edit_splitter_sizes)
             self._pre_edit_splitter_sizes = None
+        if self._companion_plot_attr is not None:
+            vb = getattr(self, self._companion_plot_attr).getViewBox()
+            if self._companion_mouse_state is not None:
+                vb.setMouseEnabled(x=self._companion_mouse_state[0],
+                                   y=self._companion_mouse_state[1])
+            self._companion_plot_attr = None
+            self._companion_mouse_state = None
         self._right_panel.setVisible(True)
 
     def _on_add_points(self):
