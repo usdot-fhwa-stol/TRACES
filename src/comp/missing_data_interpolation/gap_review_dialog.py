@@ -13,6 +13,10 @@ last-saved spline parameters into the side controls. Values only change
 on View (preview, not saved) or Apply (saved), and only for the
 currently selected gap.
 
+On first open the view zooms to the first selected gap: its region is
+centered and spans 50% of the plot width (25% margin each side). Only x
+is zoomed; each plot's y-axis stays auto-ranged to its full data range.
+
 Gap status colors (white/yellow/green from the spec, plus a light red
 added for GAP_STATUS_UNFILLED:
     IMPUTED_AUTO         -- yellow region; rendered dashed until
@@ -119,6 +123,7 @@ class GapReviewDialog(QDialog):
         self._added_points: List[tuple] = []
         self._point_editor = None
         self._pre_edit_splitter_sizes: Optional[List[int]] = None
+        self._initial_zoom_done = False
 
         self._build_ui()
 
@@ -148,6 +153,14 @@ class GapReviewDialog(QDialog):
             self._plot_splitter.addWidget(plot)
         self._speed_plot.setXLink(self._dist_plot)
         self._accel_plot.setXLink(self._dist_plot)
+
+        # y stays in auto-range over the plot's data
+        # (autoVisible off), so zooming x to a gap never shrinks y to just
+        # the visible window. Each plot's y is independent (not linked).
+        for plot in (self._dist_plot, self._speed_plot, self._accel_plot):
+            vb = plot.getViewBox()
+            vb.enableAutoRange(axis=pg.ViewBox.YAxis, enable=True)
+            vb.setAutoVisible(y=False)
 
         for i in range(1, self._plot_splitter.count()):
             self._plot_splitter.handle(i).setEnabled(False)
@@ -295,6 +308,35 @@ class GapReviewDialog(QDialog):
     def _update_nav_buttons(self):
         self._prev_btn.setEnabled(self._gap_index > 0)
         self._next_btn.setEnabled(self._gap_index < len(self._gaps) - 1)
+
+    def showEvent(self, event):
+        """Zoom to the first selected gap the first time the dialog is
+        shown. Done here rather than in __init__ so the plots have real
+        geometry: the speed/accel XLinks map ranges through screen
+        geometry, and the y auto-range is otherwise still pending."""
+        super().showEvent(event)
+        if not self._initial_zoom_done and self._gaps:
+            self._initial_zoom_done = True
+            self._zoom_to_gap(self._gaps[self._gap_index])
+
+    def _zoom_to_gap(self, gap: GapResult):
+        """Set the x-range so the gap's highlighted region is centered and
+        occupies 50% of the plot width, leaving a 25% margin on each side.
+        Only x is changed; y remains in full-range auto-range (see _build_ui).
+
+        With gap width w, the total span is 2w, so each margin is w/2."""
+        width = gap.end_time - gap.start_time
+        if width <= 0:
+            width = 1.0   # defensive fallback; a valid gap always has width > 0
+        margin = width / 2.0
+        x0, x1 = gap.start_time - margin, gap.end_time + margin
+
+        # Set the range on all three plots explicitly rather than relying on
+        # XLink propagation alone. setXRange disables only x auto-range, so
+        # y auto-range stays on.
+        for plot in (self._dist_plot, self._speed_plot, self._accel_plot):
+            plot.setXRange(x0, x1, padding=0)
+            plot.getViewBox().enableAutoRange(axis=pg.ViewBox.YAxis, enable=True)
 
     def _center_view_on_gap(self, gap: GapResult):
         """If gap isn't fully within the plot's current x-range, re-center

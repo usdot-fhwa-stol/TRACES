@@ -115,7 +115,7 @@ class GapConfigDialog(BaseAnalysisDialog):
         self._skip_btn = QPushButton("Skip")
         self._skip_btn.setEnabled(False)   # updated in __init__ once self._event_id exists
         self._skip_btn.setToolTip(
-            "Continue reviewing gaps already recorded for this event "
+            "Continue reviewing gaps previously recorded for this event "
             "without re-running automatic detection and fill.")
         self._skip_btn.clicked.connect(self._on_skip)
     
@@ -142,7 +142,7 @@ class GapConfigDialog(BaseAnalysisDialog):
         if event_has_gap_records(self._db_connection, self._event_id):
             reply = QMessageBox.question(
                 self, "Start Over?",
-                "This event already has gaps recorded from a previous run "
+                "This event has gaps recorded from a previous run "
                 "(automatically and/or manually filled).\n\n"
                 "Clicking \u201cYes\u201d will delete those records and "
                 "detect gaps from scratch using the parameters set above.\n\n"
@@ -231,7 +231,7 @@ class GapConfigDialog(BaseAnalysisDialog):
         total = len(self._detected_gaps)
         if not unfillable:
             self._viability_label.setText(
-                f"All {total} detected gap(s) can be auto-filled with these settings.")
+                f"All {total} detected gap(s) will be auto-filled with these settings.")
             self._viability_label.setStyleSheet("font-style: italic;")
         else:
             self._viability_label.setText(
@@ -255,7 +255,7 @@ class GapConfigDialog(BaseAnalysisDialog):
         if n_unfilled:
             parts.append(f"{n_unfilled} unfilled")
         self._viability_label.setText(
-            f"This event already has {total} gap(s) recorded from a previous run "
+            f"This event has {total} gap(s) recorded from a previous run "
             f"({', '.join(parts)}). Click Skip to continue reviewing them, or "
             f"Apply to start over.")
         self._viability_label.setStyleSheet("font-style: italic;")
