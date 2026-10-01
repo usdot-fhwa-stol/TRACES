@@ -15,12 +15,14 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction
 import pyqtgraph as pg
 from utils import events_columns
+from .interaction_mode import InteractionMode
 
 # Set up logger
 logger = logging.getLogger(__name__)
 _NOT_IMPLEMENTED_TOOLTIP = "Not yet implemented."
 _NO_SELECTION_TOOLTIP    = "Select one or more vehicles to enable."
 _SINGLE_SELECTION_TOOLTIP = "Filtering is only available when one trajectory is selected."
+_SELECT_MODE_TOOLTIP = "Available in Select Trajectory mode."
 
 class CustomViewBox(pg.ViewBox):
     """Custom ViewBox that handles selection box drawing when Shift is held and custom context menus.
@@ -76,6 +78,9 @@ class CustomViewBox(pg.ViewBox):
                 {'label': 'Internal Consistency',   'callback': self._run_ic_rightclick},
                 {'label': 'Platoon Consistency',    'callback': None},
             ]},
+            {'filter': 'ASO', 'label': 'Trajectory Stitching', 'callback': self._start_stitching,
+             'single_only': True, 'select_mode_only': True,
+             'single_tooltip': "Select exactly one trajectory to stitch."},
         ]
 
     def mousePressEvent(self, ev):
@@ -321,6 +326,43 @@ class CustomViewBox(pg.ViewBox):
 
         ev.accept()
 
+    def _item_state(self, item, menu_type, vehicle_count, available_cols):
+        """(enabled, tooltip) for a registry item or sub-item. Same checks,
+        in the same order, as the former inline submenu logic, plus
+        'select_mode_only'."""
+        override = item.get('disabled_tooltip')
+        if item.get('callback') is None:
+            return False, override or _NOT_IMPLEMENTED_TOOLTIP
+        item_filter = item.get('filter')
+        if item_filter is not None and menu_type not in item_filter:
+            return False, override or _NO_SELECTION_TOOLTIP
+        if item.get('single_only') and vehicle_count != 1:
+            return False, override or item.get('single_tooltip', _SINGLE_SELECTION_TOOLTIP)
+        req_col = item.get('requires_column')
+        if req_col is not None and req_col not in available_cols:
+            return False, f"This dataset does not contain the {req_col} column."
+        if (item.get('select_mode_only')
+                and self.parent_widget._interaction_mode != InteractionMode.SELECT):
+            return False, override or _SELECT_MODE_TOOLTIP
+        return True, ""
+
+    def _make_menu_action(self, item, parent_menu, menu_type, vehicle_count, available_cols):
+        action = QAction(item['label'], parent_menu)
+        enabled, tooltip = self._item_state(item, menu_type, vehicle_count, available_cols)
+        action.setEnabled(enabled)
+        if enabled:
+            action.triggered.connect(lambda checked, cb=item['callback']: cb())
+        elif tooltip:
+            action.setToolTip(tooltip)
+        return action
+
+    def _start_stitching(self):
+        """Right-click > Trajectory Stitching: enter selection mode with the
+        single trajectory in context as the first segment."""
+        target = self._get_target_vehicle_ids()
+        if len(target) == 1:
+            self.parent_widget.start_stitch_selection(target[0])
+
     def _show_context_menu(self, ev):
         """Show custom context menu based on click location and current state.
         
@@ -366,47 +408,18 @@ class CustomViewBox(pg.ViewBox):
         available_cols = events_columns(self.parent_widget._db_connection) if self.parent_widget._db_connection else set()
         vehicle_count = len(self._get_target_vehicle_ids())
         for item in self._context_menu_registry:
-                    if menu_type not in item['filter']:
-                        continue
-                    if 'submenu' in item:
-                        sub = QMenu(item['label'], context_menu)
-                        sub.setToolTipsVisible(True)
-                        for sub_item in item['submenu']:
-                            sub_action = QAction(sub_item['label'], sub)
-                            sub_filter = sub_item.get('filter')
-                            context_ok = sub_filter is None or menu_type in sub_filter
-                            single_ok = not sub_item.get('single_only') or vehicle_count == 1
-                            req_col = sub_item.get('requires_column')
-                            column_ok = req_col is None or req_col in available_cols
-                            if sub_item.get('callback') is None:
-                                sub_action.setEnabled(False)
-                                sub_action.setToolTip(sub_item.get('disabled_tooltip', _NOT_IMPLEMENTED_TOOLTIP))
-                            elif not context_ok:
-                                sub_action.setEnabled(False)
-                                sub_action.setToolTip(sub_item.get('disabled_tooltip', _NO_SELECTION_TOOLTIP))
-                            elif not single_ok:
-                                sub_action.setEnabled(False)
-                                sub_action.setToolTip(sub_item.get('disabled_tooltip', _SINGLE_SELECTION_TOOLTIP))
-                            elif not column_ok:
-                                sub_action.setEnabled(False)
-                                sub_action.setToolTip(
-                                    f"This dataset does not contain the {req_col} column.")
-                            else:
-                                sub_action.triggered.connect(
-                                    lambda checked, cb=sub_item['callback']: cb()
-                                )
-                            sub.addAction(sub_action)
-        
-                        context_menu.addMenu(sub)
-                    else:
-                        action = QAction(item['label'], context_menu)
-                        if item.get('callback') is None:
-                            action.setEnabled(False)
-                        else:
-                            action.triggered.connect(
-                                lambda checked, cb=item['callback']: cb()
-                            )
-                        context_menu.addAction(action)
+            if menu_type not in item['filter']:
+                continue
+            if 'submenu' in item:
+                sub = QMenu(item['label'], context_menu)
+                sub.setToolTipsVisible(True)
+                for sub_item in item['submenu']:
+                    sub.addAction(self._make_menu_action(
+                        sub_item, sub, menu_type, vehicle_count, available_cols))
+                context_menu.addMenu(sub)
+            else:
+                context_menu.addAction(self._make_menu_action(
+                    item, context_menu, menu_type, vehicle_count, available_cols))
         
         # Show context menu at cursor position
         global_pos = self.parent_widget._scatter_plot.mapToGlobal(
@@ -424,26 +437,7 @@ class CustomViewBox(pg.ViewBox):
         Returns:
             int or None: Vehicle ID if found, None otherwise
         """
-        time_tolerance = 0.05  # Time tolerance in seconds
-        pixel_tolerance = 3   # Pixel distance to register click
-        
-        min_dist = float('inf')
-        closest_veh_id = None
-        
-        for series in self.parent_widget._series.values():
-            if series["plot_item"] and len(series["veh_time"]) > 0:
-                mask = (series["veh_time"] >= mx - time_tolerance) & (series["veh_time"] <= mx + time_tolerance)
-                x_filtered = series["veh_time"][mask]
-                y_filtered = series["veh_dist_trav"][mask]
-                
-                if len(x_filtered) > 0:
-                    distances = np.abs(y_filtered - my)
-                    min_idx = np.argmin(distances)
-                    if distances[min_idx] < pixel_tolerance and distances[min_idx] < min_dist:
-                        min_dist = distances[min_idx]
-                        closest_veh_id = series["veh_id"]
-        
-        return closest_veh_id
+        return self.parent_widget.find_vehicle_at(mx, my)
     
     def _clear_selection_box(self):
         """Remove the selection box from the plot."""

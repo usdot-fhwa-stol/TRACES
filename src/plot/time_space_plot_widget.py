@@ -4,7 +4,7 @@ import numpy as np
 import sqlite3
 from PyQt6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QPushButton, 
     QLabel, QComboBox, QDialog)
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QKeyEvent, QAction, QActionGroup
 import pyqtgraph as pg
 from superqt import QLabeledRangeSlider, QLabeledSlider
@@ -15,6 +15,7 @@ from gui.toggle_switch import ToggleSwitch
 from .interaction_mode import InteractionMode, InteractionModeHandler
 from .gap_headway_handler import GapHeadwayModeHandler
 from .shockwave_handler import ShockwaveSemiAutoModeHandler
+from .stitch_select_handler import StitchSelectModeHandler
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -48,6 +49,8 @@ class TimeSpacePlotWidget(QWidget):
         _min_time_span (float): Minimum allowed time slider span for zoom limiting.
         _min_dist_span (float): Minimum allowed distance slider span for zoom limiting.
     """
+
+    vehicle_ids_changed = pyqtSignal()   # trajectories added/removed (e.g. stitching)
 
     _HANDLER_FACTORIES = {
         InteractionMode.SELECT:              InteractionModeHandler,
@@ -116,6 +119,7 @@ class TimeSpacePlotWidget(QWidget):
         self._mode_actions       = {}    # InteractionMode → QAction
         self._shockwave_action   = None  # stored for cancel-restore
         self._shockwave_slider_widget = None  # created in _setup_ui
+        self._stitch_target_resolver = None   # set by MainWindow
         self._tooltip_select = ("lane_id, veh_speed, veh_accel, "
                                 "veh_automation, veh_length")
 
@@ -339,26 +343,23 @@ class TimeSpacePlotWidget(QWidget):
         
         self._setup_mode_menu()
         self._update_search_action_for_mode(InteractionMode.SELECT)
-        
+
+    def _new_series_dict(self, veh_id: int, index: int) -> dict:
+        return {
+            'veh_id': veh_id,
+            'color': self.series_color[index % len(self.series_color)],
+            'text_color': self.text_color[index % len(self.text_color)],
+            'plot_item': None,
+            'veh_time': np.array([], dtype=np.float64),
+            'veh_dist_trav': np.array([], dtype=np.float64),
+            'veh_speed': np.array([], dtype=np.float64),
+            'segments': []
+        }
+
     def _initialize_series_from_ids(self):
         """Initialize the _series dictionary using the provided vehicle IDs."""
-        # Clear existing series
-        self._series = {}
-        
-        # Create series dictionaries for each vehicle using provided veh_ids
-        for index, veh_id in enumerate(self._veh_ids):
-            series_dict = {
-                'veh_id': veh_id,
-                'color': self.series_color[index % len(self.series_color)],
-                'text_color': self.text_color[index % len(self.text_color)],
-                'plot_item': None,
-                'veh_time': np.array([], dtype=np.float64),
-                'veh_dist_trav': np.array([], dtype=np.float64),
-                'veh_speed': np.array([], dtype=np.float64),
-                'segments': []
-            }
-            self._series[veh_id] = series_dict
-
+        self._series = {veh_id: self._new_series_dict(veh_id, index)
+                        for index, veh_id in enumerate(self._veh_ids)}
         logger.debug(f"Initialized {len(self._series)} vehicle series for event {self._current_event_id}")
 
     def _populate_lane_combobox_from_ids(self):
@@ -494,7 +495,7 @@ class TimeSpacePlotWidget(QWidget):
             time_min, time_max = self._time_slider.value()
             dist_min, dist_max = self._dist_slider.value()
 
-            from utils import events_columns
+            from utils import events_columns, active_rows_clause, measured_rows_clause
             cols = events_columns(self._db_connection)
 
             # Gate speed-dependent features on column presence. veh_speed is
@@ -526,10 +527,9 @@ class TimeSpacePlotWidget(QWidget):
                 position_col = "veh_dist_trav"
                 # Outside spline mode, never plot synthetic fill rows as if
                 # they were measured trajectory points.
-                where_extra = (
-                    " AND (is_spline_imputed = 0 OR is_spline_imputed IS NULL)"
-                    if "is_spline_imputed" in cols else ""
-                )
+                where_extra = measured_rows_clause(cols)
+            # Trajectories consumed by a stitch are never plotted.
+            where_extra += active_rows_clause(cols)
 
             cursor = self._db_connection.cursor()
             cursor.execute(f"""
@@ -647,6 +647,97 @@ class TimeSpacePlotWidget(QWidget):
         logger.debug(f"Applied slider filters: time=[{time_lo}, {time_hi}], "
                       f"dist=[{dist_lo}, {dist_hi}]")
 
+    def _nearest_point(self, mx: float, my: float, time_tolerance: float = 0.05):
+        """Nearest plotted point to (mx, my) in view coordinates, searching
+        only points within ±time_tolerance of mx. Shared by hover, context
+        menu hit-testing, and mode handlers (e.g. stitch selection).
+
+        Returns:
+            (series, veh_time, veh_dist_trav, dist_distance) or None.
+        """
+        if not self._series:
+            return None
+        best = None
+        for series in self._series.values():
+            if not series["plot_item"] or len(series["veh_time"]) == 0:
+                continue
+            mask = ((series["veh_time"] >= mx - time_tolerance) &
+                    (series["veh_time"] <= mx + time_tolerance))
+            x_f = series["veh_time"][mask]
+            if len(x_f) == 0:
+                continue
+            y_f = series["veh_dist_trav"][mask]
+            distances = np.abs(y_f - my)
+            idx = np.argmin(distances)
+            if best is None or distances[idx] < best[3]:
+                best = (series, x_f[idx], y_f[idx], distances[idx])
+        return best
+
+    def find_vehicle_at(self, mx: float, my: float, tolerance: float = 3.0):
+        """Vehicle ID of the plotted point nearest (mx, my), or None if
+        nothing lies within *tolerance* (view units, same scale the
+        context menu has always used)."""
+        hit = self._nearest_point(mx, my)
+        if hit is None or hit[3] >= tolerance:
+            return None
+        return hit[0]["veh_id"]
+
+    def set_db_connection(self, conn):
+        """Point the widget at a different (content-identical) database
+        without reloading, so sliders, view range, lane, selection, and
+        color mode are all preserved. Everything here reads
+        self._db_connection per operation, so swapping it is enough."""
+        self._db_connection = conn
+        self._last_queried_point = None   # tooltip cache refers to the old file
+
+    # ── Trajectory stitching ─────────────────────────────────────────────
+
+    def start_stitch_selection(self, veh_id: int):
+        """Enter stitch selection mode with *veh_id* as the first trajectory."""
+        if self._interaction_mode != InteractionMode.SELECT:
+            return
+        self._on_mode_changed(InteractionMode.STITCH_SELECT,
+                              handler=StitchSelectModeHandler(veh_id))
+
+    def end_stitch_selection(self):
+        """Leave stitch selection mode and return to Select."""
+        if self._interaction_mode != InteractionMode.STITCH_SELECT:
+            return
+        action = self._mode_actions.get(InteractionMode.SELECT)
+        if action is not None:
+            action.setChecked(True)   # setChecked doesn't emit triggered
+        self._on_mode_changed(InteractionMode.SELECT)
+
+    def stitch_target_resolver(self):
+        """Write-target resolver for the preview dialog, or None to use
+        the dialog's in-place default."""
+        return self._stitch_target_resolver
+
+    def refresh_after_stitch(self, new_veh_id: int, removed_veh_ids):
+        """Show a just-applied stitch without disturbing the view: sliders,
+        view range, lane, and color mode are untouched. Removed sources
+        are dropped, the new trajectory is added and selected."""
+        import json
+        row = self._db_connection.execute(
+            "SELECT summary_json FROM ranges WHERE event_id = ?",
+            (self._current_event_id,)).fetchone()
+        if row:
+            self._veh_ids = json.loads(row[0]).get('veh_id', self._veh_ids)
+
+        for veh_id in removed_veh_ids:
+            self._series.pop(veh_id, None)
+            self._selected_series.discard(veh_id)
+        if new_veh_id not in self._series:
+            index = self._veh_ids.index(new_veh_id) if new_veh_id in self._veh_ids else len(self._series)
+            self._series[new_veh_id] = self._new_series_dict(new_veh_id, index)
+
+        self._update_plot_data()
+        if self._series[new_veh_id]['plot_item'] is not None:
+            self._selected_series = {new_veh_id}
+            self._update_plot_colors()
+        logger.info(f"Plot refreshed after stitch: {tuple(removed_veh_ids)} -> {new_veh_id}")
+        self.vehicle_ids_changed.emit()
+
     def _handle_mouse_moved(self, pos):
         """Handle mouse movement calling mode-specific handler.
 
@@ -671,24 +762,13 @@ class TimeSpacePlotWidget(QWidget):
         pixel_tolerance_hide = 6
 
         # ── find closest point (shared by all modes) ─────────────────────
-        min_dist     = float('inf')
-        closest_data = None
-
-        for series in self._series.values():
-            if series["plot_item"] and len(series["veh_time"]) > 0:
-                mask = ((series["veh_time"] >= mx - time_tolerance) &
-                        (series["veh_time"] <= mx + time_tolerance))
-                x_f = series["veh_time"][mask]
-                y_f = series["veh_dist_trav"][mask]
-                if len(x_f) > 0:
-                    distances = np.abs(y_f - my)
-                    idx = np.argmin(distances)
-                    if distances[idx] < min_dist:
-                        min_dist     = distances[idx]
-                        closest_data = (series["veh_id"],
-                                        series["color"],
-                                        series["text_color"],
-                                        x_f[idx], y_f[idx])
+        hit = self._nearest_point(mx, my, time_tolerance)
+        if hit is not None:
+            series, hit_t, hit_d, min_dist = hit
+            closest_data = (series["veh_id"], series["color"],
+                            series["text_color"], hit_t, hit_d)
+        else:
+            min_dist, closest_data = float('inf'), None
 
         # ── mode handler ──────────────────────────────────────────────
         if self._active_handler.on_hover(self, pos, closest_data, min_dist):
@@ -926,6 +1006,7 @@ class TimeSpacePlotWidget(QWidget):
             InteractionMode.SHOCKWAVE_MANUAL:    shockwave_action,
             InteractionMode.SHOCKWAVE_SEMI_AUTO: shockwave_action,
             InteractionMode.SHOCKWAVE_AUTOMATIC: shockwave_action,
+            InteractionMode.STITCH_SELECT:       select_action,
         }
         self._interaction_mode = InteractionMode.SELECT
         self._active_handler   = InteractionModeHandler()
@@ -964,7 +1045,6 @@ class TimeSpacePlotWidget(QWidget):
         self._interaction_mode = mode
         self._active_handler.on_enter(self)
         self._update_search_action_for_mode(mode)
-        self._active_handler.on_enter(self)
         self._update_plot_data()   # position column may depend on the new handler
         logger.debug(f"Mode changed to: {mode.value}")
 

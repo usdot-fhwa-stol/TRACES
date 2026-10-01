@@ -398,9 +398,8 @@ class GapReviewDialog(QDialog):
         self._gap_s_spin.setValue(gap.spline_s if gap.spline_s is not None else 1.0)
 
         if gap.spline_k is not None:
-            k_idx = self._gap_k_combo.findData(gap.spline_k)
-            if k_idx >= 0:
-                self._gap_k_combo.setCurrentIndex(k_idx)
+            k_idx = self._gap_k_combo.findData(gap.spline_k) if gap.spline_k is not None else -1
+            self._gap_k_combo.setCurrentIndex(k_idx if k_idx >= 0 else 0)
 
     # ── Trajectory loading ───────────────────────────────────────────────
 
@@ -509,7 +508,7 @@ class GapReviewDialog(QDialog):
                     movable=False,
                 )
                 region.setZValue(-10)
-                plot.addItem(region)
+                plot.addItem(region, ignoreBounds=True)
     
                 gap_mask = (self._traj_time >= gap.start_time) & (self._traj_time <= gap.end_time)
                 gap_finite = y_data[gap_mask & np.isfinite(y_data)]
@@ -517,7 +516,7 @@ class GapReviewDialog(QDialog):
     
                 label = pg.TextItem(str(gap.gap_id), anchor=(0.5, 1.0), color='k')
                 label.setPos((gap.start_time + gap.end_time) / 2, y_top)
-                plot.addItem(label)
+                plot.addItem(label, ignoreBounds=True)
                 region_map[gap.gap_id] = {"region": region, "label": label}
 
     def _update_region_selection(self):

@@ -5,16 +5,29 @@ from typing import Iterable, Optional, List, Any, Dict
 # Sentinel for "no options provided" — distinguishable from an explicit empty dict.
 _UNSET: Dict[str, Any] = {}
 
-# Shared row-provenance flag on events.<row>. One column, one place of
-# truth, used by both SplineComp and MissingDataInterpolationComp instead
-# of each owning a private flag.
-IMPUTED_ORIGINAL = " "   # real observation (column default)
-IMPUTED_SPLINE   = "S"   # synthetic row created solely to complete SplineComp's calc_* timing grid
-IMPUTED_AUTO     = "A"   # gap filled automatically by Missing Data Interpolation
-IMPUTED_MANUAL   = "M"   # gap filled/refined manually by Missing Data Interpolation
+# Column vocabulary lives in utils (importable by plot/gui without comp);
+# re-exported here so existing `from comp.base_comp import IMPUTED_*`
+# imports keep working.
+from utils import (  # noqa: F401
+    events_columns,
+    IMPUTED_ORIGINAL, IMPUTED_SPLINE, IMPUTED_AUTO, IMPUTED_MANUAL, IMPUTED_STATUS_COL,
+    TRAJ_KEPT, TRAJ_REMOVED, TRAJ_STITCHED, TRAJ_STATUS_COL,
+    active_rows_clause, measured_rows_clause,
+)
 
-IMPUTED_STATUS_COL = "imputed_status"
-
+# Per-row columns written by analysis modules whose values are only valid
+# for the trajectory they were computed on (derivatives, spline fits,
+# errors). Trajectory Stitching writes NULL into these on stitched rows,
+# since values computed per segment are wrong across the seam; the user
+# reruns the analysis on the stitched trajectory. Add to this list when a
+# new module writes per-row results into events.
+DERIVED_EVENTS_COLUMNS = (
+    # SplineComp
+    "calc_position", "calc_speed", "calc_acceleration", "calc_jerk",
+    # InternalConsistencyComp
+    "veh_speed_cal", "veh_accel_cal", "veh_jerk_cal",
+    "speed_error", "accel_error", "jerk_error",
+)
 
 def ensure_imputed_status_column(conn: sqlite3.Connection) -> None:
     """Add the shared imputed_status TEXT column to events, if not already
@@ -45,6 +58,49 @@ def ensure_imputed_status_column(conn: sqlite3.Connection) -> None:
             f"WHERE is_spline_imputed = 1 AND {IMPUTED_STATUS_COL} = '{IMPUTED_ORIGINAL}'"
         )
         conn.commit()
+
+_TRAJ_STATUS_TRIGGER = "events_traj_status_inherit"
+
+
+def ensure_traj_status_column(conn: sqlite3.Connection) -> None:
+    """Add events.traj_status (default TRAJ_KEPT) and its inherit trigger,
+    if not already present. Safe to call repeatedly.
+
+    Invariant: traj_status is uniform per (event_id, veh_id). That's what
+    lets analyses exclude removed trajectories purely by vehicle ID.
+    Rows inserted later into an existing trajectory -- gap fills,
+    SplineComp synthetic rows -- would otherwise get the default 'K'
+    even inside a stitched or removed trajectory, so an AFTER INSERT
+    trigger copies the vehicle's existing non-K status onto any new K
+    row. Both lookups use the (event_id, veh_id) prefix of the primary
+    key. UPSERTs that take the ON CONFLICT path don't fire it, which is
+    correct: that row already has the right status.
+    """
+    col, kept = TRAJ_STATUS_COL, TRAJ_KEPT
+    if col not in events_columns(conn):
+        conn.execute(
+            f"ALTER TABLE events ADD COLUMN {col} TEXT NOT NULL DEFAULT '{kept}'")
+    conn.execute(f"""
+        CREATE TRIGGER IF NOT EXISTS {_TRAJ_STATUS_TRIGGER}
+        AFTER INSERT ON events
+        WHEN NEW.{col} = '{kept}'
+        BEGIN
+            UPDATE events
+               SET {col} = (SELECT e.{col} FROM events e
+                             WHERE e.event_id = NEW.event_id
+                               AND e.veh_id   = NEW.veh_id
+                               AND e.{col}   <> '{kept}'
+                             LIMIT 1)
+             WHERE event_id = NEW.event_id
+               AND veh_id   = NEW.veh_id
+               AND veh_time = NEW.veh_time
+               AND EXISTS (SELECT 1 FROM events e
+                            WHERE e.event_id = NEW.event_id
+                              AND e.veh_id   = NEW.veh_id
+                              AND e.{col}   <> '{kept}');
+        END
+    """)
+    conn.commit()
 
 class BaseComp(ABC):
     """Base class for computational analyses over the events table.
@@ -99,17 +155,19 @@ class BaseComp(ABC):
 
     @staticmethod
     def _events_columns(db_connection: sqlite3.Connection) -> set:
-        """Column names present in the events table. Delegates to the shared
-        utils.events_columns helper so plot and gui modules can perform the
-        same check without importing from the comp package."""
-        from utils import events_columns
+        """Column names present in the events table (utils.events_columns)."""
         return events_columns(db_connection)
 
     @staticmethod
     def _event_veh_ids(db_connection: sqlite3.Connection, event_id: int) -> List[int]:
+        """Active vehicle IDs for an event. Removed (stitched-away)
+        trajectories are excluded here, which by the per-vehicle
+        traj_status invariant excludes them from every analysis whose
+        top-level path passes veh_ids=None."""
+        active = active_rows_clause(events_columns(db_connection))
         cursor = db_connection.cursor()
         cursor.execute(
-            "SELECT DISTINCT veh_id FROM events WHERE event_id = ? ORDER BY veh_id",
+            f"SELECT DISTINCT veh_id FROM events WHERE event_id = ?{active} ORDER BY veh_id",
             (event_id,),
         )
         return [row[0] for row in cursor.fetchall()]

@@ -13,6 +13,7 @@ class InteractionMode(Enum):
     SHOCKWAVE_MANUAL   = "shockwave_manual"
     SHOCKWAVE_SEMI_AUTO = "shockwave_semi_auto"
     SHOCKWAVE_AUTOMATIC = "shockwave_automatic"
+    STITCH_SELECT       = "stitch_select"
 
 
 class InteractionModeHandler:

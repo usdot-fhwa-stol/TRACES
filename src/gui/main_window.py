@@ -5,6 +5,7 @@ from PyQt6.QtGui import QAction
 from PyQt6.QtCore import QTimer
 from .home_widget import HomeWidget
 from utils import get_user_data_path, last_dialog_dir, remember_dialog_path
+from .database_session import DatabaseSession
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -37,7 +38,8 @@ class MainWindow(QMainWindow):
         self._export_menu = None
         self._mode_menu = None
         self._data_menu = None
-        self._db_connection = None
+        self._db_session = DatabaseSession(self)
+        self._db_session.database_switched.connect(self._on_database_switched)
         self._plot_widget = None
         self._import_dialog = None
         self._selected_export_columns = []  # Initially empty list of selected export columns
@@ -50,6 +52,11 @@ class MainWindow(QMainWindow):
         self._load_settings()
         self._setup_home_page()
         self._load_home_page()
+
+    @property
+    def _db_connection(self):
+        """The open connection (owned by DatabaseSession), or None."""
+        return self._db_session.connection
 
     def _setup_ui(self):
         """Set up the main window UI including menu bar and initial settings."""
@@ -282,12 +289,6 @@ class MainWindow(QMainWindow):
             if self._home_widget and self.centralWidget() == self._home_widget:
                 self._home_widget.refresh(self._recent_files)
 
-    # Columns that every valid trajectory database must provide in the
-    # events table. Matches the required set enforced by the import
-    # configuration check (BaseProcess.check_configuration implementations).
-    _REQUIRED_EVENTS_COLUMNS = ("event_id", "veh_id", "veh_time",
-                                "lane_id", "veh_dist_trav")
-
     def _check_database(self, file_path: str) -> bool:
         """Check if the file is a valid trajectory database.
 
@@ -308,63 +309,10 @@ class MainWindow(QMainWindow):
         Returns:
             bool: True if the database is valid and contains data, False otherwise.
         """
-        import sqlite3
-        try:
-            # Check if file is a valid SQLite database
-            conn = sqlite3.connect(file_path)
-            cursor = conn.cursor()
-
-            # Check that both required tables exist
-            cursor.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' "
-                "AND name IN ('events', 'ranges')"
-            )
-            found_tables = {row[0] for row in cursor.fetchall()}
-
-            if "events" not in found_tables:
-                conn.close()
-                QMessageBox.critical(self, "Error",
-                                     "Database does not contain an 'events' table.")
-                return False
-
-            if "ranges" not in found_tables:
-                conn.close()
-                QMessageBox.critical(
-                    self, "Error",
-                    "Database does not contain a 'ranges' table. The import "
-                    "may not have completed successfully — re-import the "
-                    "source file.")
-                return False
-
-            # Check that the events table has the required columns
-            cursor.execute("PRAGMA table_info(events)")
-            existing_columns = {row[1] for row in cursor.fetchall()}
-            missing = [c for c in self._REQUIRED_EVENTS_COLUMNS
-                       if c not in existing_columns]
-            if missing:
-                conn.close()
-                QMessageBox.critical(
-                    self, "Error",
-                    "Events table is missing required column(s): "
-                    f"{', '.join(missing)}.")
-                return False
-
-            # Check for at least one record
-            cursor.execute("SELECT COUNT(*) FROM events")
-            if cursor.fetchone()[0] == 0:
-                conn.close()
-                QMessageBox.critical(self, "Error", "Events table is empty.")
-                return False
-
-            # If all checks pass, close any existing connection and set new one
-            if self._db_connection:
-                self._db_connection.close()
-            self._db_connection = conn
-            return True
-
-        except sqlite3.Error as e:
-            QMessageBox.critical(self, "Error", f"Failed to open database: {str(e)}")
-            return False
+        ok, error = self._db_session.open(file_path)
+        if not ok:
+            QMessageBox.critical(self, "Error", error)
+        return ok
 
     def _open_file(self):
         """Handle the Open menu action by showing file dialog and validating database."""
@@ -483,9 +431,7 @@ class MainWindow(QMainWindow):
         self._search_vehicle_action.setEnabled(False)
 
         # Close database connection
-        if self._db_connection:
-            self._db_connection.close()
-            self._db_connection = None
+        self._db_session.close()
         
         # Reset window title
         self.setWindowTitle("Trajectory Tools")
@@ -509,6 +455,32 @@ class MainWindow(QMainWindow):
         self._mode_menu.menuAction().setVisible(False)
         self._mode_menu.clear()
 
+    def _on_database_switched(self, new_conn, old_conn, new_path: str):
+        """DatabaseSession copied the open database and switched to the
+        copy. Keep the current view: swap the plot widget's connection
+        rather than rebuilding it."""
+        self._close_dialogs_using(old_conn)
+        if self._plot_widget is not None:
+            self._plot_widget.set_db_connection(new_conn)
+        self.add_recent_file(new_path)
+        self.setWindowTitle(f"Trajectory Tools - {new_path}")
+        logger.info(f"Now working in {new_path}")
+
+    def _close_dialogs_using(self, conn):
+        """Close visible modeless dialogs still holding *conn* (e.g. a Spline
+        Fitting preview), before that connection is closed under them."""
+        from PyQt6.QtWidgets import QDialog
+        for dlg in self.findChildren(QDialog):
+            if dlg.isVisible() and getattr(dlg, "_db_connection", None) is conn:
+                logger.debug(f"Closing {type(dlg).__name__}: its database was replaced")
+                dlg.close()
+
+    def _on_vehicle_ids_changed(self):
+        """Trajectories were added/removed (e.g. by stitching): refresh the
+        vehicle search dialog if it's open."""
+        if self._search_dialog is not None and self._plot_widget is not None:
+            self._search_dialog.set_vehicle_ids(self._plot_widget.get_vehicle_ids())
+
     def _create_plot_widget(self, event_id: int, time_min: float, time_max: float, 
                            dist_min: float, dist_max: float, event_summary: dict):
         """Create and configure the plot widget with settings from the dialog.
@@ -524,6 +496,8 @@ class MainWindow(QMainWindow):
         from plot.time_space_plot_widget import TimeSpacePlotWidget
         if not self._plot_widget:
             self._plot_widget = TimeSpacePlotWidget(mode_menu=self._mode_menu)
+            self._plot_widget._stitch_target_resolver = self._db_session.ensure_write_target
+            self._plot_widget.vehicle_ids_changed.connect(self._on_vehicle_ids_changed)
             self._plot_widget.set_search_action(self._search_vehicle_action)
         
         # Set database connection and apply settings with all parameters
@@ -704,8 +678,7 @@ class MainWindow(QMainWindow):
         if self._search_dialog is not None:
             self._search_dialog.close()
 
-        if self._db_connection:
-            self._db_connection.close()
+        self._db_session.close()
 
         self._save_settings()
         super().closeEvent(event)

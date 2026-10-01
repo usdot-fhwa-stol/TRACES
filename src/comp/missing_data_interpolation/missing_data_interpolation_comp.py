@@ -30,9 +30,8 @@ import numpy as np
 from ..base_comp import (
     BaseComp, ensure_imputed_status_column, IMPUTED_AUTO, IMPUTED_MANUAL, IMPUTED_ORIGINAL,
 )
-from comp.spline.spline_comp import (
-    generate_complete_timestamps, apply_spline_fit, nearest_valid_ic,
-)
+from comp.spline.spline_comp import apply_spline_fit, nearest_valid_ic
+from ..trajectory_utils import generate_complete_timestamps
 
 logger = logging.getLogger(__name__)
 
@@ -532,6 +531,19 @@ def write_gap_rows(db_connection: sqlite3.Connection, gaps: List[GapResult]) -> 
         ],
     )
 
+def _exclude_removed_vehicles(db_connection: sqlite3.Connection, event_id: int):
+    """(sql_fragment, params) excluding gaps on removed trajectories, so the
+    review dialog can never navigate to -- or Apply a fill into -- a
+    trajectory consumed by a stitch."""
+    from utils import events_columns, TRAJ_STATUS_COL, TRAJ_REMOVED
+    if TRAJ_STATUS_COL not in events_columns(db_connection):
+        return "", []
+    return (
+        f" AND veh_id NOT IN (SELECT DISTINCT veh_id FROM events "
+        f"WHERE event_id = ? AND {TRAJ_STATUS_COL} = ?)",
+        [event_id, TRAJ_REMOVED],
+    )
+
 def event_has_gap_records(db_connection: sqlite3.Connection, event_id: int) -> bool:
     """True if the gaps table already has at least one row for *event_id*
     -- i.e. a previous GapConfigDialog Apply (or GapReviewDialog Apply)
@@ -539,7 +551,9 @@ def event_has_gap_records(db_connection: sqlite3.Connection, event_id: int) -> b
     Apply-button start-over confirmation.
     """
     cursor = db_connection.cursor()
-    cursor.execute("SELECT 1 FROM gaps WHERE event_id = ? LIMIT 1", (event_id,))
+    extra, params = _exclude_removed_vehicles(db_connection, event_id)
+    cursor.execute(f"SELECT 1 FROM gaps WHERE event_id = ?{extra} LIMIT 1",
+                   [event_id, *params])
     return cursor.fetchone() is not None
 
 
@@ -551,10 +565,11 @@ def read_gap_rows(db_connection: sqlite3.Connection, event_id: int) -> List[GapR
     left behind, since neither path hands it an in-memory list anymore.
     """
     cursor = db_connection.cursor()
+    extra, params = _exclude_removed_vehicles(db_connection, event_id)
     cursor.execute(
         f"SELECT {', '.join(GAPS_INSERT_COLUMNS)} FROM gaps "
-        f"WHERE event_id = ? ORDER BY veh_id, gap_id",
-        (event_id,),
+        f"WHERE event_id = ?{extra} ORDER BY veh_id, gap_id",
+        [event_id, *params],
     )
     return [
         GapResult(

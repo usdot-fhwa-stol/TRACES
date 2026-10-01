@@ -94,7 +94,7 @@ def events_columns(db_connection) -> set:
     to do that check.
 
     Note: analysis modules may ALTER TABLE to add computed columns
-    (veh_speed_cal, calc_*, is_spline_imputed, ...) during a session, so
+    (veh_speed_cal, calc_*, imputed_status, ...) during a session, so
     the result reflects the table at call time and should be re-queried
     per operation rather than cached for the lifetime of a connection.
 
@@ -112,3 +112,41 @@ def events_columns(db_connection) -> set:
         return {row[1] for row in cursor.fetchall()}
     except sqlite3.Error:
         return set()
+
+# ── events-table column vocabulary ─────────────────────────────────────────
+# Defined here (not in comp) so plot/gui/data_import can build filters
+# without importing the comp package. comp.base_comp re-exports these.
+
+# Row provenance -- events.imputed_status (per row).
+IMPUTED_ORIGINAL = " "   # real observation (column default)
+IMPUTED_SPLINE   = "S"   # synthetic row created solely to complete SplineComp's calc_* timing grid
+IMPUTED_AUTO     = "A"   # gap filled automatically by Missing Data Interpolation
+IMPUTED_MANUAL   = "M"   # gap filled/refined manually by Missing Data Interpolation
+IMPUTED_STATUS_COL = "imputed_status"
+
+# Trajectory status -- events.traj_status (uniform per event_id, veh_id).
+TRAJ_KEPT      = "K"     # not part of a stitch (column default)
+TRAJ_REMOVED   = "R"     # consumed by a stitch; hidden from plot and analyses
+TRAJ_STITCHED  = "S"     # created by a stitch
+TRAJ_STATUS_COL = "traj_status"
+
+
+def active_rows_clause(cols: set, alias: str = "") -> str:
+    """SQL fragment excluding rows of removed (stitched-away) trajectories,
+    or "" if the traj_status column doesn't exist yet. Starts with ' AND'."""
+    if TRAJ_STATUS_COL not in cols:
+        return ""
+    p = f"{alias}." if alias else ""
+    return f" AND {p}{TRAJ_STATUS_COL} <> '{TRAJ_REMOVED}'"
+
+
+def measured_rows_clause(cols: set, alias: str = "") -> str:
+    """SQL fragment excluding SplineComp synthetic rows (no measurement).
+    Falls back to the legacy is_spline_imputed column on databases that
+    predate imputed_status. Starts with ' AND', or "" if neither exists."""
+    p = f"{alias}." if alias else ""
+    if IMPUTED_STATUS_COL in cols:
+        return f" AND {p}{IMPUTED_STATUS_COL} <> '{IMPUTED_SPLINE}'"
+    if "is_spline_imputed" in cols:
+        return f" AND ({p}is_spline_imputed = 0 OR {p}is_spline_imputed IS NULL)"
+    return ""

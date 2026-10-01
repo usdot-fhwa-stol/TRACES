@@ -49,6 +49,7 @@ import numpy as np
 from scipy.interpolate import make_splrep
 
 from ..base_comp import BaseComp, IMPUTED_ORIGINAL, IMPUTED_SPLINE, ensure_imputed_status_column
+from ..trajectory_utils import generate_complete_timestamps
 
 logger = logging.getLogger(__name__)
 
@@ -200,37 +201,6 @@ class SplineFitResult:
 
 
 # ── Core math (shared by both invocation paths) ────────────────────────────
-
-def generate_complete_timestamps(time_array: np.ndarray) -> np.ndarray:
-    """Return a complete timestamp grid spanning *time_array*.
-
-    The step is inferred from the smallest observed positive inter-sample
-    gap. Every original timestamp is preserved exactly; synthetic grid
-    points are added only where they don't fall within tolerance of an
-    existing original timestamp, so originals always take priority over
-    the synthetic grid (no original timestamp is ever displaced).
-    """
-    t = np.unique(np.asarray(time_array, dtype=np.float64))
-    if t.size < 2:
-        return t
-
-    gaps = np.diff(t)
-    gaps = gaps[gaps > 0]
-    if gaps.size == 0:
-        return t
-
-    dt = float(gaps.min())
-    tol = dt * 1e-3
-
-    grid = np.arange(t[0], t[-1] + dt * 0.5, dt)
-
-    idx_hi = np.clip(np.searchsorted(t, grid), 0, t.size - 1)
-    idx_lo = np.clip(idx_hi - 1, 0, t.size - 1)
-    near_original = (np.abs(t[idx_hi] - grid) <= tol) | (np.abs(t[idx_lo] - grid) <= tol)
-    grid = grid[~near_original]
-
-    return np.sort(np.concatenate([t, grid]))
-
 
 def apply_spline_fit(
     time_valid: np.ndarray,

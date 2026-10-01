@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from typing import Iterable, Optional, List, Dict, Any
 import numpy as np
 from ..base_comp import BaseComp
+from utils import measured_rows_clause
+from ..trajectory_utils import estimate_time_step
 
 logger = logging.getLogger(__name__)
 
@@ -53,10 +55,7 @@ class MissingDataComp(BaseComp):
         # module is meant to report. Column is optional (only added once
         # Spline Fitting has run), so gate on its presence.
         columns = self._events_columns(db_connection)
-        imputed_filter = (
-            " AND (is_spline_imputed = 0 OR is_spline_imputed IS NULL)"
-            if "is_spline_imputed" in columns else ""
-        )
+        imputed_filter = measured_rows_clause(columns)
 
         placeholders = ",".join("?" for _ in veh_ids)
         sql = (
@@ -148,25 +147,4 @@ class MissingDataComp(BaseComp):
         """
         Calculates the most frequent time increment (mode) across all vehicle trajectories.
         """
-        all_time_diffs = []
-        
-        for time_array in grouped_time_arrays.values():
-            if len(time_array) > 1:
-                diffs = np.diff(time_array)
-                all_time_diffs.append(diffs)
-                
-        if not all_time_diffs:
-            # Fallback safe default if the entire dataset is empty or invalid
-            return 0.1 
-
-        combined_diffs = np.concatenate(all_time_diffs)
-        
-        # Round to 3 decimal places to prevent floating-point mismatch (e.g. 0.1000001 != 0.0999999)
-        rounded_diffs = np.round(combined_diffs, decimals=3)
-        
-        # Get the statistical mode
-        unique_vals, counts = np.unique(rounded_diffs, return_counts=True)
-        max_count_index = np.argmax(counts)
-        mode_val = unique_vals[max_count_index]
-
-        return float(mode_val)
+        return estimate_time_step(grouped_time_arrays.values())

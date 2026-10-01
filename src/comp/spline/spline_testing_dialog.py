@@ -46,8 +46,8 @@ only checks (per fitting base) whether *that one* trajectory has enough
 valid data points, closing itself with a message if none of the four
 bases are viable at all.
 
-Measured data is read with is_spline_imputed excluded (where that column
-exists): this window is about testing fit quality against real
+Measured data is read with imputed_status = IMPUTED_SPLINE excluded (where 
+that column exists): this window is about testing fit quality against real
 measurements, not against rows synthesized by a previous "fill missing
 rows" run.
 

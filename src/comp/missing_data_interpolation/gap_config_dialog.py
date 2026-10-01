@@ -335,6 +335,12 @@ class GapConfigDialog(BaseAnalysisDialog):
             )
             filled_gap_ids = {r.gap_id for r in veh_fill_rows}
             for gap in veh_gaps:
+                # Record the parameters this run used (or tried, for gaps it
+                # couldn't fill), so Gap Review opens each gap on the
+                # settings that produced its current fill.
+                gap.spline_fitting_base = params["fitting_base"]
+                gap.spline_s = params["s"]
+                gap.spline_k = params["k"]
                 gap.status = IMPUTED_AUTO if gap.gap_id in filled_gap_ids else GAP_STATUS_UNFILLED
             fill_rows.extend(veh_fill_rows)
 
