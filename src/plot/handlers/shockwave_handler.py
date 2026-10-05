@@ -200,7 +200,16 @@ class ShockwaveModeHandler(InteractionModeHandler):
 
         removed = self._active_chain.pop(best_idx)
         if not self._active_chain:
-            self._reset_mode_state()
+            if self._is_editing:
+                panel = self._ensure_result_panel(widget)
+                if self._fitted_results:
+                    remaining_result = self._fitted_results[-1]
+                    panel.update_result(remaining_result)
+                    self._panel_result_id = remaining_result.id
+                else:
+                    panel.clear()
+                    self._panel_result_id = None
+            self._reset_chain_state()
         else:
             self._sync_derived_state()
 

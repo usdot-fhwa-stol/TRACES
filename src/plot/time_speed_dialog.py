@@ -273,6 +273,12 @@ class TimeSpeedDialog(QDialog):
         self._y_slider.setOrientation(Qt.Orientation.Vertical)
         self._y_slider.setDecimals(1)
         self._style_editable_range_slider(self._y_slider)
+        self._y_slider.label_shift_x = 4
+        for label in self._y_slider._handle_labels:
+            value_width = label.fontMetrics().horizontalAdvance("-99.9") + 6
+            label.setStyleSheet(
+                label.styleSheet() + f" min-width: {value_width}px;"
+            )
         control_layout.addWidget(self._y_slider, stretch=1)
 
         # Lane combobox next
@@ -596,6 +602,10 @@ class TimeSpeedDialog(QDialog):
                     color=(0, 0, 0),
                     anchor=(0.5, 0),
                 )
+                font = label.textItem.font()
+                font.setPointSize(14)
+                font.setBold(True)
+                label.setFont(font)
                 label.setPos((start_time + end_time) / 2.0, label_y)
                 label.setZValue(10)
                 self._plot.addItem(label)

@@ -211,32 +211,39 @@ class MainWindow(QMainWindow):
         """Provide read-only plot controls without changing the active mode."""
         mode_instructions = {
             "Time-Space Diagram": (
-                "Left-click a trajectory: toggle its selection",
-                "Left-drag: add trajectories inside the box to the selection",
-                "Shift + left-drag: remove trajectories inside the box",
-                "Esc: clear the selection",
-                "Right-click: open the plot context menu",
-                "Mouse wheel: zoom around the cursor",
+                "<ul>"
+                "<li><b>Left-click</b> a trajectory to select or deselect it.</li>"
+                "<li><b>Left-drag</b> a box to select the trajectories inside it.</li>"
+                "<li>Hold <b>Shift</b> and <b>left-drag</b> a box to remove trajectories from the selection.</li>"
+                "<li>Press <b>Esc</b> to clear the selection.</li>"
+                "<li><b>Right-click</b> to open the plot context menu.</li>"
+                "<li>Scroll the <b>mouse wheel</b> to zoom around the cursor.</li>"
+                "</ul>"
             ),
             "Gap Headway": (
-                "Hover near a point: preview gap and headway",
-                "Left-click a point: lock or unlock its overlay",
-                "Esc: clear all locked overlays",
-                "Right-click: open the plot context menu",
-                "Mouse wheel: zoom around the cursor",
+                "<ul>"
+                "<li><b>Hover</b> near a trajectory point to preview its gap and headway.</li>"
+                "<li><b>Left-click</b> the point to lock or unlock the gap and headway.</li>"
+                "<li>Press <b>Esc</b> to clear all locked gaps and headways.</li>"
+                "<li><b>Right-click</b> to open the plot context menu.</li>"
+                "<li>Scroll the <b>mouse wheel</b> to zoom around the cursor.</li>"
+                "</ul>"
             ),
             "Shockwave": (
-                "Semi-Automatic method (Manual and Automatic unavailable)",
-                "Left-click a marker: start or extend a chain",
-                "Choose the same marker color on adjacent trajectories",
-                "Ctrl + left-click a committed shockwave point: edit it while idle",
-                "Ctrl + right-click a chain point: remove that point",
-                "Ctrl + right-click a committed shockwave point: delete it while idle",
-                "Enter: fit or re-fit the chain (at least 2 points)",
-                "Esc: cancel a new chain or revert an edit",
-                "Left-click the results panel title: open the results table",
-                "Right-click without Ctrl: open the plot context menu",
-                "Mouse wheel: zoom around the cursor",
+                "<p><b>Quick Instructions:</b></p><ul>"
+                "<li><b>Left-click</b> a marker to start or extend a shockwave.</li>"
+                "<li>Press <b>Enter</b> to commit the shockwave. Select at least two points.</li>"
+                "<li>Press <b>Esc</b> to cancel the shockwave currently in progress.</li>"
+                "<li>Hold <b>Ctrl</b> and <b>right-click</b> a committed shockwave point to delete the entire shockwave.</li>"
+                "<li><b>Left-click</b> the results panel title to open the shockwave results table.</li>"
+                "<li><b>Right-click</b> to open the plot context menu.</li>"
+                "<li>Scroll the <b>mouse wheel</b> to zoom around the cursor.</li>"
+                "</ul><p><b>Edit a Shockwave:</b></p><ul>"
+                "<li>Hold <b>Ctrl</b> and <b>left-click</b> a committed shockwave point to start editing that shockwave.</li>"
+                "<li>While editing, hold <b>Ctrl</b> and <b>right-click</b> a selected point to remove it.</li>"
+                "<li>Press <b>Enter</b> to save the edited shockwave.</li>"
+                "<li>Press <b>Esc</b> to cancel the edit and restore the original shockwave.</li>"
+                "</ul>"
             ),
         }
         for mode_name, instructions in mode_instructions.items():
@@ -255,7 +262,7 @@ class MainWindow(QMainWindow):
             dialog.resize(620, 420)
             layout = QVBoxLayout(dialog)
             commands = QTextBrowser(dialog)
-            commands.setPlainText("\n\n".join(instructions))
+            commands.setHtml(instructions)
             layout.addWidget(commands)
             buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close, dialog)
             buttons.rejected.connect(dialog.close)
