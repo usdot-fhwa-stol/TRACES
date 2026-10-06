@@ -50,6 +50,8 @@ class Units:
         "osm_traffic_control": "",
         "preceding_veh_id"  : "",
         "veh_dist_trav"     : "m",
+        "spacing"           : "m",
+        "veh_spacing"       : "m",
         "event_name"        : "",
     }
 
