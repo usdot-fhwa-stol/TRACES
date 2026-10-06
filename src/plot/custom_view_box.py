@@ -74,7 +74,7 @@ class CustomViewBox(pg.ViewBox):
                 {'label': 'Jerk Analysis',          'callback': self._run_jerk_analysis_rightclick},
                 {'label': 'Missing Data',           'callback': self._run_missing_data_analysis_rightclick},
                 {'label': 'Internal Consistency',   'callback': self._run_ic_rightclick},
-                {'label': 'Platoon Consistency',    'callback': None},
+                {'label': 'Platoon Consistency',    'callback': self._run_platoon_rightclick},
             ]},
         ]
 
@@ -694,6 +694,19 @@ class CustomViewBox(pg.ViewBox):
             event_ids=[event_id],
             veh_ids=veh_ids,
         )
+        dlg.exec()
+
+    def _run_platoon_rightclick(self):
+        if (not self.parent_widget._db_connection
+                or self.parent_widget._current_event_id is None):
+            return
+        veh_ids = self._get_target_vehicle_ids()
+        if not veh_ids:
+            return
+        from comp.platoon import PlatoonConsistencyDialog
+        dlg = PlatoonConsistencyDialog(
+            self.parent_widget, self.parent_widget._db_connection,
+            event_ids=[self.parent_widget._current_event_id], veh_ids=veh_ids)
         dlg.exec()
 
     def _run_ic_rightclick(self):

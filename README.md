@@ -15,3 +15,12 @@ By contributing to the Federal Highway Administration (FHWA) Connected Automated
 
 ## Contact
 Please click on the CARMA logo below to visit the Federal Highway Adminstration(FHWA) CARMA website. For more information, contact CAVSupportServices@dot.gov.
+
+## Platoon Consistency
+
+See [Platoon Consistency](docs/platoon-consistency.md) for the Module 3 workflow, calculation conventions, and validation command.
+
+## Spectral Analysis
+
+See [Spectral Analysis](docs/spectral-analysis.md) for the Module 5 workflow,
+DFT conventions, plot and CSV export, and validation command.
