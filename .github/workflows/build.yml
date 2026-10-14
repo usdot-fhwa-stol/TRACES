@@ -50,7 +50,11 @@ jobs:
           --hidden-import utm `
           src/trajectory_tools.py
 
-    - name: Check bundled data files
+    # PyInstaller records modules it couldn't find in a warn file instead of
+    # failing the build -- a package missing from requirements.txt (as scipy
+    # once was) shows up only there. Fail on any required package listed as
+    # missing; optional ones (e.g. OpenGL for pyqtgraph.opengl) are ignored.
+    - name: Check bundled data files and packages
       shell: powershell
       run: |
         $required = @(
@@ -59,6 +63,14 @@ jobs:
         )
         foreach ($path in $required) {
           if (-not (Test-Path $path)) { Write-Error "Missing from build: $path"; exit 1 }
+        }
+        $warn = "build/trajectory_tools/warn-trajectory_tools.txt"
+        $packages = "scipy|numpy|pyqtgraph|superqt|PyQt6|utm"
+        $missing = Select-String -Path $warn -Pattern "^missing module named '?($packages)'? -"
+        if ($missing) {
+          $missing | ForEach-Object { Write-Host $_.Line }
+          Write-Error "Required package(s) missing from the build; check requirements.txt"
+          exit 1
         }
 
     - name: Install NSIS
