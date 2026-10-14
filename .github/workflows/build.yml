@@ -20,22 +20,46 @@ jobs:
     - name: Show installed versions
       run: pip list
 
+    # Packages are collected as compiled modules, not copied as source:
+    # --collect-submodules bundles every module of a package, including
+    # those PyInstaller can't see from import statements -- the lazy
+    # (PEP 562) re-exports in each package's __init__.py, and the
+    # data_import processor classes ImportDialog loads by name from the
+    # JSON configs. Package order follows the dependency order
+    # (utils, data_import, ui_kit, analysis, plot, gui); utils.py is a
+    # top-level module and is found from the entry script's imports.
+    #
+    # Data files: config/ is read through utils.get_resource_path;
+    # ui_kit/plot_view.js is read through importlib.resources
+    # (ui_kit.plot_export.load_asset) and must sit in a ui_kit folder.
     - name: Build with PyInstaller
       shell: powershell
       run: |
         pyinstaller --name "trajectory_tools" --onedir --windowed `
+          --paths src `
           --add-data "src/config;config" `
-          --add-data "src/data_import;data_import" `
-          --add-data "src/gui;gui" `
-          --add-data "src/plot;plot" `
+          --add-data "src/ui_kit/plot_view.js;ui_kit" `
+          --collect-submodules data_import `
+          --collect-submodules ui_kit `
+          --collect-submodules analysis `
+          --collect-submodules plot `
+          --collect-submodules gui `
           --hidden-import PyQt6 `
           --hidden-import pyqtgraph `
           --hidden-import superqt `
           --hidden-import utm `
-          --hidden-import data_import.base_process `
-          --hidden-import data_import.csv_algorithms `
-          --hidden-import data_import.csv_process `
           src/trajectory_tools.py
+
+    - name: Check bundled data files
+      shell: powershell
+      run: |
+        $required = @(
+          "dist/trajectory_tools/_internal/ui_kit/plot_view.js",
+          "dist/trajectory_tools/_internal/config"
+        )
+        foreach ($path in $required) {
+          if (-not (Test-Path $path)) { Write-Error "Missing from build: $path"; exit 1 }
+        }
 
     - name: Install NSIS
       run: choco install nsis --yes --no-progress
