@@ -1,5 +1,0 @@
-# comp/consistency/__init__.py
-from .internal_consistency_comp import InternalConsistencyComp, InternalConsistencyResult
-from .internal_consistency_dialog import InternalConsistencyDialog
-from .internal_consistency_stats_dialog import InternalConsistencyStatsDialog
-from .internal_consistency_result_dialog import InternalConsistencyResultDialog

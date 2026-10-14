@@ -3,8 +3,9 @@ import os
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Iterable, List, Optional, Tuple
 
+import numpy as np
 
 _last_dialog_dir: Optional[str] = None   # process-wide, not persisted across app restarts
 
@@ -114,8 +115,8 @@ def events_columns(db_connection) -> set:
         return set()
 
 # ── events-table column vocabulary ─────────────────────────────────────────
-# Defined here (not in comp) so plot/gui/data_import can build filters
-# without importing the comp package. comp.base_comp re-exports these.
+# Defined here (not in analysis) so plot/gui/data_import can build filters
+# without importing the analysis package. analysis.base_comp re-exports these.
 
 # Row provenance -- events.imputed_status (per row).
 IMPUTED_ORIGINAL = " "   # real observation (column default)
@@ -150,3 +151,92 @@ def measured_rows_clause(cols: set, alias: str = "") -> str:
     if "is_spline_imputed" in cols:
         return f" AND ({p}is_spline_imputed = 0 OR {p}is_spline_imputed IS NULL)"
     return ""
+
+# ── Sampling interval and gaps ─────────────────────────────────────────────
+# The single definition of "gap" for the whole application. Qt-free and
+# numpy-only so ui_kit, analysis and plot can all use it.
+#
+#   step     the dataset's sampling interval: the most common positive
+#            interval between consecutive samples. event_time_step() for an
+#            event (preferred); estimate_time_step() for arrays in memory.
+#   gap      consecutive samples more than GAP_FACTOR * step apart
+#            (half a step of tolerance for timestamp jitter)
+#   missing  expected samples absent inside an interval (missing_samples)
+
+DEFAULT_TIME_STEP = 0.1   # seconds; fallback when no step can be inferred
+GAP_FACTOR = 1.5
+
+
+def step_mode(diffs: np.ndarray, decimals: int = 3,
+              default: float = DEFAULT_TIME_STEP) -> float:
+    """Most frequent positive, finite inter-sample difference. Zero diffs
+    (duplicate timestamps) are excluded -- a zero step would otherwise
+    make every downstream dt / step divide by zero."""
+    diffs = np.asarray(diffs, dtype=np.float64)
+    diffs = diffs[np.isfinite(diffs) & (diffs > 0)]
+    if diffs.size == 0:
+        return default
+    # Round before counting to absorb float jitter (0.1000001 vs 0.0999999).
+    vals, counts = np.unique(np.round(diffs, decimals), return_counts=True)
+    return float(vals[np.argmax(counts)])
+
+
+def estimate_time_step(time_arrays: Iterable[np.ndarray], decimals: int = 3,
+                       default: float = DEFAULT_TIME_STEP) -> float:
+    """Mode of consecutive time differences across several trajectories.
+    Each array must be one trajectory's times in ascending order."""
+    diffs = [np.diff(np.asarray(t, dtype=np.float64))
+             for t in time_arrays if len(t) > 1]
+    if not diffs:
+        return default
+    return step_mode(np.concatenate(diffs), decimals, default)
+
+
+def event_time_step(db_connection, event_id: int, decimals: int = 3,
+                    default: float = DEFAULT_TIME_STEP) -> float:
+    """Dataset sampling interval for one event: the mode of consecutive
+    time differences within each active trajectory, measured rows only
+    (SplineComp synthetic rows excluded). The step every gap decision for
+    this event should use."""
+    cols = events_columns(db_connection)
+    rows = db_connection.execute(
+        f"SELECT veh_id, veh_time FROM events WHERE event_id = ?"
+        f"{active_rows_clause(cols)}{measured_rows_clause(cols)} "
+        f"ORDER BY veh_id, veh_time",
+        (event_id,),
+    ).fetchall()
+    if len(rows) < 2:
+        return default
+    arr = np.asarray(rows, dtype=np.float64)
+    same_vehicle = np.diff(arr[:, 0]) == 0
+    return step_mode(np.diff(arr[:, 1])[same_vehicle], decimals, default)
+
+
+def gap_indices(t, step: Optional[float]) -> np.ndarray:
+    """Indices i where t[i] -> t[i + 1] is a gap. *t* ascending. Empty when
+    there are fewer than two samples or no valid step."""
+    t = np.asarray(t, dtype=np.float64)
+    if t.size < 2 or not step or step <= 0:
+        return np.empty(0, dtype=np.intp)
+    return np.nonzero(np.diff(t) > GAP_FACTOR * step)[0]
+
+
+def missing_samples(dt, step: float):
+    """Expected samples absent inside interval(s) *dt*: 0 for any interval
+    up to GAP_FACTOR * step, else ceil(dt/step - 0.5) - 1 -- the samples
+    at start + k*step lying more than half a step before the interval's
+    end. Scalar in, int out; array in, int array out."""
+    n = np.ceil(np.asarray(dt, dtype=np.float64) / step - 0.5 - 1e-6) - 1
+    n = np.where(np.isfinite(n), np.maximum(n, 0), 0).astype(int)
+    return int(n) if n.ndim == 0 else n
+
+
+def segment_bounds(t, step: Optional[float]) -> List[Tuple[int, int]]:
+    """(start, end) index pairs, end exclusive, of the gap-free runs of *t*."""
+    n = len(t)
+    if n == 0:
+        return []
+    cuts = gap_indices(t, step) + 1
+    starts = np.concatenate(([0], cuts))
+    ends = np.concatenate((cuts, [n]))
+    return list(zip(starts.tolist(), ends.tolist()))

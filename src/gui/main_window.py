@@ -47,7 +47,7 @@ class MainWindow(QMainWindow):
         self._search_dialog = None
         self._home_widget = None
         self._log_viewer_dialog = None
-        
+
         self._setup_ui()
         self._load_settings()
         self._setup_home_page()
@@ -61,7 +61,7 @@ class MainWindow(QMainWindow):
     def _setup_ui(self):
         """Set up the main window UI including menu bar and initial settings."""
         self.setWindowTitle("Trajectory Tools")
-        
+
         # Create menu bar
         menu_bar = QMenuBar()
         self.setMenuBar(menu_bar)
@@ -115,7 +115,7 @@ class MainWindow(QMainWindow):
         export_ic_action = QAction("&Internal Consistency", self)
         export_ic_action.triggered.connect(self._export_internal_consistency)
         export_analysis_menu.addAction(export_ic_action)
-        
+
         # placeholders for future noise analysis modules
         placeholder = QAction("&Platoon Consistency", self)
         placeholder.setEnabled(False)
@@ -157,9 +157,9 @@ class MainWindow(QMainWindow):
         spline_fitting_action.triggered.connect(self._run_spline_fitting)
         self._data_menu.addAction(spline_fitting_action)
 
-        missing_data_interp_action = QAction("&Missing Data and Interpolation", self)
-        missing_data_interp_action.triggered.connect(self._run_missing_data_interpolation)
-        self._data_menu.addAction(missing_data_interp_action)
+        gap_interp_action = QAction("&Gap Interpolation", self)
+        gap_interp_action.triggered.connect(self._run_gap_interpolation)
+        self._data_menu.addAction(gap_interp_action)
 
         # Analysis menu
         self._analysis_menu = QMenu("&Analysis", self)
@@ -197,7 +197,7 @@ class MainWindow(QMainWindow):
         self._home_widget.import_file_requested.connect(self._import_file)
         self._home_widget.recent_file_requested.connect(self._open_recent_file)
         self.setCentralWidget(self._home_widget)
-    
+
     def _load_home_page(self):
         if self._home_widget:
             self._home_widget.refresh(self._recent_files)
@@ -229,29 +229,29 @@ class MainWindow(QMainWindow):
                             maximized = maximized.lower() == 'true'
 
                             # Validate position is on screen
-                            if (0 <= x <= screen_rect.width() - 100 and 
+                            if (0 <= x <= screen_rect.width() - 100 and
                                 0 <= y <= screen_rect.height() - 100):
                                 self.setGeometry(x, y, width, height)
                                 if maximized:
                                     self.showMaximized()
                             else:
-                                self._set_default_geometry(default_x, default_y, 
+                                self._set_default_geometry(default_x, default_y,
                                                          default_width, default_height)
 
                             # Load recent files
                             self._recent_files = lines[1:8]  # Up to 7 files
                             self._update_recent_menu()
                         else:
-                            self._set_default_geometry(default_x, default_y, 
+                            self._set_default_geometry(default_x, default_y,
                                                     default_width, default_height)
                     else:
-                        self._set_default_geometry(default_x, default_y, 
+                        self._set_default_geometry(default_x, default_y,
                                                 default_width, default_height)
             except (ValueError, IndexError, FileNotFoundError):
-                self._set_default_geometry(default_x, default_y, 
+                self._set_default_geometry(default_x, default_y,
                                         default_width, default_height)
         else:
-            self._set_default_geometry(default_x, default_y, 
+            self._set_default_geometry(default_x, default_y,
                                     default_width, default_height)
 
     def _set_default_geometry(self, x: int, y: int, width: int, height: int):
@@ -284,7 +284,7 @@ class MainWindow(QMainWindow):
                 action.triggered.connect(lambda checked, path=file_path: self._open_recent_file(path))
                 self._recent_menu.addAction(action)
             self._recent_menu.setEnabled(bool(self._recent_files))
-    
+
             # Update home widget if it is currently the central widget
             if self._home_widget and self.centralWidget() == self._home_widget:
                 self._home_widget.refresh(self._recent_files)
@@ -330,13 +330,13 @@ class MainWindow(QMainWindow):
         if self._check_database(file_path):
             self.add_recent_file(file_path)
             self.setWindowTitle(f"Trajectory Tools - {file_path}")
-            
+
             # Show settings dialog before creating plot widget
             from plot.time_space_plot_settings_dialog import TimeSpacePlotSettingsDialog
-            settings_dialog = TimeSpacePlotSettingsDialog(parent=self, 
+            settings_dialog = TimeSpacePlotSettingsDialog(parent=self,
                 db_connection=self._db_connection, search_action=self._search_vehicle_action)
             settings_dialog.settings_applied.connect(self._create_plot_widget)
-            
+
             result = settings_dialog.exec()
             if result == QDialog.DialogCode.Accepted:
                 # Plot widget will be created in _create_plot_widget callback
@@ -362,13 +362,13 @@ class MainWindow(QMainWindow):
         if self._check_database(file_path):
             self.add_recent_file(file_path)
             self.setWindowTitle(f"Trajectory Tools - {file_path}")
-            
+
             # Show settings dialog before creating plot widget
             from plot.time_space_plot_settings_dialog import TimeSpacePlotSettingsDialog
-            settings_dialog = TimeSpacePlotSettingsDialog(parent=self, 
+            settings_dialog = TimeSpacePlotSettingsDialog(parent=self,
                 db_connection=self._db_connection, search_action=self._search_vehicle_action)
             settings_dialog.settings_applied.connect(self._create_plot_widget)
-            
+
             result = settings_dialog.exec()
             if result == QDialog.DialogCode.Accepted:
                 # Plot widget will be created in _create_plot_widget callback
@@ -399,7 +399,7 @@ class MainWindow(QMainWindow):
             print(output_path)
             self.add_recent_file(output_path)
             self.setWindowTitle(f"Trajectory Tools - {output_path}")
-            
+
             # Use QTimer to delay showing settings dialog to allow import dialog to close
             QTimer.singleShot(200, lambda: self._show_settings_for_imported_file())
 
@@ -410,10 +410,10 @@ class MainWindow(QMainWindow):
         if self._db_connection:
             # Show settings dialog before creating plot widget
             from plot.time_space_plot_settings_dialog import TimeSpacePlotSettingsDialog
-            settings_dialog = TimeSpacePlotSettingsDialog(parent=self, 
+            settings_dialog = TimeSpacePlotSettingsDialog(parent=self,
                 db_connection=self._db_connection, search_action=self._search_vehicle_action)
             settings_dialog.settings_applied.connect(self._create_plot_widget)
-            
+
             result = settings_dialog.exec()
             if result == QDialog.DialogCode.Accepted:
                 # Plot widget will be created in _create_plot_widget callback
@@ -432,25 +432,25 @@ class MainWindow(QMainWindow):
 
         # Close database connection
         self._db_session.close()
-        
+
         # Reset window title
         self.setWindowTitle("Trajectory Tools")
-        
+
         # Remove plot widget if it exists and show home page
         if self._plot_widget:
             self._plot_widget.setParent(None)
             self._plot_widget.deleteLater()
             self._plot_widget = None
-        
+
         # Show home page again
         self.setCentralWidget(self._home_widget)
         self._load_home_page()
-        
+
         # Disable export menu
         self._export_menu.setEnabled(False)
         self._data_menu.menuAction().setVisible(False)
         self._analysis_menu.menuAction().setVisible(False)
-        
+
         # Reset plot mode menu
         self._mode_menu.menuAction().setVisible(False)
         self._mode_menu.clear()
@@ -468,9 +468,15 @@ class MainWindow(QMainWindow):
 
     def _close_dialogs_using(self, conn):
         """Close visible modeless dialogs still holding *conn* (e.g. a Spline
-        Fitting preview), before that connection is closed under them."""
+        Fitting preview), before that connection is closed under them.
+
+        Dialogs that set KEEPS_OPEN_ON_DB_SWITCH (GapConfigDialog) requested
+        the switch themselves and move onto the new connection, so they
+        are left open."""
         from PyQt6.QtWidgets import QDialog
         for dlg in self.findChildren(QDialog):
+            if getattr(dlg, "KEEPS_OPEN_ON_DB_SWITCH", False):
+                continue
             if dlg.isVisible() and getattr(dlg, "_db_connection", None) is conn:
                 logger.debug(f"Closing {type(dlg).__name__}: its database was replaced")
                 dlg.close()
@@ -481,10 +487,27 @@ class MainWindow(QMainWindow):
         if self._search_dialog is not None and self._plot_widget is not None:
             self._search_dialog.set_vehicle_ids(self._plot_widget.get_vehicle_ids())
 
-    def _create_plot_widget(self, event_id: int, time_min: float, time_max: float, 
+    def _on_event_data_changed(self, event_id: int):
+        """A data module (Gap Interpolation) changed the events table of
+        *event_id*. If the plot shows that event, reload it from the
+        database -- sliders, view range, lane, selection, mode and color
+        mode are kept -- so filled or removed gaps appear immediately."""
+        widget = self._plot_widget
+        if widget is None:
+            return
+        if widget._current_event_id != event_id:
+            logger.info(f"Event {event_id} data changed; plot shows event "
+                        f"{widget._current_event_id}, not reloading")
+            return
+        logger.info(f"Event {event_id} data changed; reloading plot")
+        # Deferred to the next event-loop pass, after the closing dialog is
+        # fully gone -- the same path a lane change takes.
+        QTimer.singleShot(0, widget._update_plot_data)
+
+    def _create_plot_widget(self, event_id: int, time_min: float, time_max: float,
                            dist_min: float, dist_max: float, event_summary: dict):
         """Create and configure the plot widget with settings from the dialog.
-        
+
         Args:
             event_id (int): Selected event ID.
             time_min (float): Minimum time value.
@@ -499,7 +522,7 @@ class MainWindow(QMainWindow):
             self._plot_widget._stitch_target_resolver = self._db_session.ensure_write_target
             self._plot_widget.vehicle_ids_changed.connect(self._on_vehicle_ids_changed)
             self._plot_widget.set_search_action(self._search_vehicle_action)
-        
+
         # Set database connection and apply settings with all parameters
         self._plot_widget.set_database(self._db_connection)
         self._plot_widget._apply_settings(event_id, time_min, time_max, dist_min, dist_max, event_summary)
@@ -522,9 +545,9 @@ class MainWindow(QMainWindow):
         if not self._db_connection:
             QMessageBox.warning(self, "Warning", "No database is currently open.")
             return
-            
+
         from .export_dialog import ExportDialog
-        dialog = ExportDialog(parent=self, db_connection=self._db_connection, 
+        dialog = ExportDialog(parent=self, db_connection=self._db_connection,
                             selected_columns=self._selected_export_columns.copy())
         dialog.setModal(True)
         dialog.export_finished.connect(self._handle_export_finished)
@@ -558,7 +581,7 @@ class MainWindow(QMainWindow):
             return
 
         # Step 2: show JerkCompDialog in export mode (Save button).
-        from comp.jerk import JerkCompDialog
+        from analysis.jerk import JerkCompDialog
         jerk_dlg = JerkCompDialog(self, self._db_connection, event_ids=event_ids, export_mode=True)
         jerk_dlg.exec()
 
@@ -567,17 +590,17 @@ class MainWindow(QMainWindow):
             from PyQt6.QtWidgets import QMessageBox
             QMessageBox.warning(self, "Warning", "No database is currently open.")
             return
-    
+
         from PyQt6.QtWidgets import QDialog
-        from gui.event_selection_dialog import EventSelectionDialog
+        from .event_selection_dialog import EventSelectionDialog
         sel_dlg = EventSelectionDialog(self, self._db_connection)
         if sel_dlg.exec() != QDialog.DialogCode.Accepted:
             return
         event_ids = sel_dlg.selected_event_ids
         if not event_ids:
             return
-    
-        from comp.consistency import InternalConsistencyDialog
+
+        from analysis.internal_consistency import InternalConsistencyDialog
         dlg = InternalConsistencyDialog(
             self, self._db_connection,
             event_ids=event_ids, export_mode=True)
@@ -600,7 +623,7 @@ class MainWindow(QMainWindow):
             return
 
         # Step 2: show MissingDataCompDialog in export mode (Save… button).
-        from comp.missing_data import MissingDataCompDialog
+        from analysis.missing_data import MissingDataCompDialog
         md_dlg = MissingDataCompDialog(self, self._db_connection, event_ids=event_ids, export_mode=True)
         md_dlg.exec()
 
@@ -650,7 +673,7 @@ class MainWindow(QMainWindow):
 
     def _show_log_viewer(self) -> None:
         """Show the modeless System Log Viewer dialog.
-    
+
         If the dialog is already open and minimized, restore it.  If it is
         visible and not minimized, bring it to the front.  If it does not exist
         yet, create it.
@@ -662,7 +685,7 @@ class MainWindow(QMainWindow):
             self._log_viewer_dialog.activateWindow()
             return
 
-        from .log_viewer_dialog import LogViewerDialog    
+        from .log_viewer_dialog import LogViewerDialog
         self._log_viewer_dialog = LogViewerDialog(parent=self)
         self._log_viewer_dialog.show()
 
@@ -688,7 +711,7 @@ class MainWindow(QMainWindow):
         if not self._db_connection:
             QMessageBox.warning(self, "Warning", "No database is currently open.")
             return
-    
+
         from .event_selection_dialog import EventSelectionDialog
         sel_dlg = EventSelectionDialog(self, self._db_connection)
         if sel_dlg.exec() != QDialog.DialogCode.Accepted:
@@ -696,31 +719,39 @@ class MainWindow(QMainWindow):
         event_ids = sel_dlg.selected_event_ids
         if not event_ids:
             return
-    
-        from comp.spline import SplineCompDialog
+
+        from analysis.spline import SplineCompDialog
         dlg = SplineCompDialog(self, self._db_connection, event_ids=event_ids)
         dlg.exec()
 
-    def _run_missing_data_interpolation(self):
+    def _run_gap_interpolation(self):
         event_id = self._plot_widget._current_event_id
-        from comp.missing_data_interpolation import GapConfigDialog
-        dlg = GapConfigDialog(self, self._db_connection, event_ids=[event_id])
+        from analysis.gap_interpolation import GapConfigDialog
+        dlg = GapConfigDialog(self, self._db_connection, event_ids=[event_id],
+                              resolve_target=self._db_session.ensure_write_target)
+        # Writes reported by the config dialog itself (e.g. Delete, then
+        # Close) arrive on its data_changed. The review window it opens
+        # usually outlives it, so connect to that window directly as it
+        # is created rather than relaying through the closed config dialog.
+        dlg.data_changed.connect(self._on_event_data_changed)
+        dlg.review_opened.connect(
+            lambda review: review.data_changed.connect(self._on_event_data_changed))
         dlg.exec()
 
     def _run_jerk_analysis(self):
-        from comp.jerk import JerkCompDialog
+        from analysis.jerk import JerkCompDialog
         event_id = self._plot_widget._current_event_id
         dlg = JerkCompDialog(self, self._db_connection, event_ids=[event_id])
         dlg.exec()
 
     def _run_internal_consistency(self):
-        from comp.consistency import InternalConsistencyDialog
+        from analysis.internal_consistency import InternalConsistencyDialog
         event_id = self._plot_widget._current_event_id
         dlg = InternalConsistencyDialog(self, self._db_connection, event_ids=[event_id])
         dlg.exec()
 
     def _run_missing_data_analysis(self):
         event_id = self._plot_widget._current_event_id
-        from comp.missing_data import MissingDataCompDialog
+        from analysis.missing_data import MissingDataCompDialog
         dlg = MissingDataCompDialog(self, self._db_connection, event_ids=[event_id])
         dlg.exec()

@@ -8,14 +8,18 @@ from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QKeyEvent, QAction, QActionGroup
 import pyqtgraph as pg
 from superqt import QLabeledRangeSlider, QLabeledSlider
+from ui_kit.vertical_gradient_value import GradientConfig, VerticalGradientValue
+from ui_kit.toggle_switch import ToggleSwitch
+from ui_kit.plot_style import (RED, GREEN, YELLOW, BLUE, ORANGE, PURPLE, CYAN, 
+    MAGENTA, LIME, TEAL, BROWN, MAROON, OLIVE, NAVY, GREY, WHITE, BLACK)
 from .time_space_plot_settings_dialog import TimeSpacePlotSettingsDialog
 from .custom_view_box import CustomViewBox
-from .vertical_gradient_value import GradientConfig, VerticalGradientValue
-from gui.toggle_switch import ToggleSwitch
-from .interaction_mode import InteractionMode, InteractionModeHandler
-from .gap_headway_handler import GapHeadwayModeHandler
-from .shockwave_handler import ShockwaveSemiAutoModeHandler
-from .stitch_select_handler import StitchSelectModeHandler
+from .slider_view_box import enforce_min_span
+from .handlers.interaction_mode import InteractionMode, InteractionModeHandler
+from .handlers.gap_headway_handler import GapHeadwayModeHandler
+from .handlers.shockwave_handler import ShockwaveSemiAutoModeHandler
+from .handlers.stitch_select_handler import StitchSelectModeHandler
+from utils import event_time_step, segment_bounds
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -48,6 +52,7 @@ class TimeSpacePlotWidget(QWidget):
         text_color (list): Static list of text colors for tooltip content.
         _min_time_span (float): Minimum allowed time slider span for zoom limiting.
         _min_dist_span (float): Minimum allowed distance slider span for zoom limiting.
+        _time_step (float): Event sampling interval used for segments.
     """
 
     vehicle_ids_changed = pyqtSignal()   # trajectories added/removed (e.g. stitching)
@@ -62,12 +67,18 @@ class TimeSpacePlotWidget(QWidget):
         # InteractionMode.SHOCKWAVE_AUTOMATIC:    ShockwaveAutomaticModeHandler, # Phase 3
     }
 
-    _DIMMED_COLOR  = '#a9a9a9'
+    # ShockwaveConfigDialog method key -> interaction mode.
+    _SHOCKWAVE_MODES = {
+        "manual":    InteractionMode.SHOCKWAVE_MANUAL,
+        "semi_auto": InteractionMode.SHOCKWAVE_SEMI_AUTO,
+        "automatic": InteractionMode.SHOCKWAVE_AUTOMATIC,
+    }
+
+    _DIMMED_COLOR  = GREY
 
     series_color = [
-        '#e6194B', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4', 
-        '#42d4f4', '#f032e6', '#bfef45', '#469990', '#9A6324', '#800000', 
-        '#808000', '#000075', '#000000'
+        RED, GREEN, YELLOW, BLUE, ORANGE, PURPLE, CYAN, MAGENTA, 
+        LIME, TEAL, BROWN, MAROON, OLIVE, NAVY, BLACK
     ]
 
     series_paint: dict[str, tuple] = {
@@ -76,12 +87,10 @@ class TimeSpacePlotWidget(QWidget):
     series_paint[_DIMMED_COLOR] = (pg.mkPen(color=_DIMMED_COLOR), pg.mkBrush(color=_DIMMED_COLOR))
     
     text_color = [
-        '#ffffff', '#ffffff', '#000000', '#ffffff', '#ffffff', '#ffffff', 
-        '#000000', '#ffffff', '#000000', '#ffffff', '#ffffff', '#ffffff', 
-        '#ffffff', '#ffffff', '#ffffff'
+        WHITE, WHITE, BLACK, WHITE, WHITE, WHITE, BLACK, WHITE, 
+        BLACK, WHITE, WHITE, WHITE, WHITE, WHITE, WHITE
     ]
 
-    _SERIES_SEG_THRESHOLD = 0.3   # seconds; max intra-segment time gap
     _BASE_MIN_SPAN = 10.0          # absolute floor for the smaller axis
 
     def __init__(self, parent=None, mode_menu=None):
@@ -122,6 +131,7 @@ class TimeSpacePlotWidget(QWidget):
         self._stitch_target_resolver = None   # set by MainWindow
         self._tooltip_select = ("lane_id, veh_speed, veh_accel, "
                                 "veh_automation, veh_length")
+        self._time_step = None
 
         logger.debug("TimeSpacePlotWidget initialized")
         
@@ -304,6 +314,7 @@ class TimeSpacePlotWidget(QWidget):
                     f"time=[{time_min}, {time_max}], dist=[{dist_min}, {dist_max}]")
         
         self._current_event_id = event_id
+        self._time_step = event_time_step(self._db_connection, event_id)
         self._dist_range = (dist_min, dist_max)
         self._time_range = (time_min, time_max)
         self._lane_ids = event_summary.get('lane_id', [])
@@ -426,36 +437,17 @@ class TimeSpacePlotWidget(QWidget):
         series['veh_dist_trav'] = distances
         series['veh_speed'] = speeds # cached for speed gradient
 
-        # Derive contiguous segments based on time gap threshold.
-        # Each segment is a tuple:
-        #   (start_idx, end_idx, t_min, t_max, d_min, d_max)
-        # where start_idx is inclusive, end_idx is exclusive.
+        # Contiguous segments split at time gaps (utils.segment_bounds).
+        # Each: (start_idx, end_idx, t_min, t_max, d_min, d_max, seg_t, seg_d),
+        # start inclusive, end exclusive; seg_t / seg_d are views.
         segments = []
-        seg_start = 0
-        for j in range(1, len(times)):
-            if (times[j] - times[j - 1]) > self._SERIES_SEG_THRESHOLD:
-                # Close current segment
-                seg_times = times[seg_start:j]
-                seg_dists = distances[seg_start:j]
-                segments.append((
-                    seg_start, j,
-                    float(seg_times[0]), float(seg_times[-1]),
-                    float(np.min(seg_dists)), float(np.max(seg_dists)),
-                    times[seg_start:j],         # seg_t view
-                    distances[seg_start:j]      # seg_d view
-                ))
-                seg_start = j
-        # Close final segment
-        if seg_start < len(times):
-            seg_times = times[seg_start:]
-            seg_dists = distances[seg_start:]
-            segments.append((
-                seg_start, len(times),
-                float(seg_times[0]), float(seg_times[-1]),
-                float(np.min(seg_dists)), float(np.max(seg_dists)),
-                times[seg_start:],          # seg_t view
-                distances[seg_start:]       # seg_d view
-            ))
+        for start, end in segment_bounds(times, self._time_step):
+            seg_t = times[start:end]
+            seg_d = distances[start:end]
+            segments.append((start, end,
+                             float(seg_t[0]), float(seg_t[-1]),
+                             float(np.min(seg_d)), float(np.max(seg_d)),
+                             seg_t, seg_d))
         series['segments'] = segments
 
         if len(times) == 0:
@@ -591,53 +583,9 @@ class TimeSpacePlotWidget(QWidget):
 
         self._clear_selection_box()
 
-        time_lo, time_hi = self._time_slider.value()
-        dist_lo, dist_hi = self._dist_slider.value()
+        time_lo, time_hi = enforce_min_span(self._time_slider, self._min_time_span)
+        dist_lo, dist_hi = enforce_min_span(self._dist_slider, self._min_dist_span)
 
-        # ── enforce minimum time span ────────────────────────────────
-        if (time_hi - time_lo) < self._min_time_span:
-            center = (time_lo + time_hi) / 2.0
-            half = self._min_time_span / 2.0
-            time_lo = center - half
-            time_hi = center + half
-
-            # clamp to slider hard limits
-            s_min = self._time_slider.minimum()
-            s_max = self._time_slider.maximum()
-            if time_lo < s_min:
-                time_lo = s_min
-                time_hi = time_lo + self._min_time_span
-            if time_hi > s_max:
-                time_hi = s_max
-                time_lo = time_hi - self._min_time_span
-            time_lo = max(time_lo, s_min)
-
-            self._time_slider.blockSignals(True)
-            self._time_slider.setValue((time_lo, time_hi))
-            self._time_slider.blockSignals(False)
-
-        # ── enforce minimum distance span ────────────────────────────
-        if (dist_hi - dist_lo) < self._min_dist_span:
-            center = (dist_lo + dist_hi) / 2.0
-            half = self._min_dist_span / 2.0
-            dist_lo = center - half
-            dist_hi = center + half
-
-            s_min = self._dist_slider.minimum()
-            s_max = self._dist_slider.maximum()
-            if dist_lo < s_min:
-                dist_lo = s_min
-                dist_hi = dist_lo + self._min_dist_span
-            if dist_hi > s_max:
-                dist_hi = s_max
-                dist_lo = dist_hi - self._min_dist_span
-            dist_lo = max(dist_lo, s_min)
-
-            self._dist_slider.blockSignals(True)
-            self._dist_slider.setValue((dist_lo, dist_hi))
-            self._dist_slider.blockSignals(False)
-
-        # ── update plot view ─────────────────────────────────────────
         self._scatter_plot.getViewBox().setRange(
             xRange=[time_lo, time_hi],
             yRange=[dist_lo, dist_hi],
@@ -717,6 +665,16 @@ class TimeSpacePlotWidget(QWidget):
         """Show a just-applied stitch without disturbing the view: sliders,
         view range, lane, and color mode are untouched. Removed sources
         are dropped, the new trajectory is added and selected."""
+        self.refresh_after_stitch_change([new_veh_id], removed_veh_ids, [new_veh_id])
+
+    def refresh_after_stitch_change(self, added_veh_ids, removed_veh_ids,
+                                    select_veh_ids=()):
+        """Show stitching changes -- a stitch, an undo, or an undo followed
+        by a new stitch -- without disturbing the view: sliders, view range,
+        lane, and color mode are untouched. Removed trajectories are
+        dropped, added ones (a new stitch, or the sources an undo restored)
+        are added, and those of *select_veh_ids* plotted on this lane are
+        selected."""
         import json
         row = self._db_connection.execute(
             "SELECT summary_json FROM ranges WHERE event_id = ?",
@@ -727,15 +685,19 @@ class TimeSpacePlotWidget(QWidget):
         for veh_id in removed_veh_ids:
             self._series.pop(veh_id, None)
             self._selected_series.discard(veh_id)
-        if new_veh_id not in self._series:
-            index = self._veh_ids.index(new_veh_id) if new_veh_id in self._veh_ids else len(self._series)
-            self._series[new_veh_id] = self._new_series_dict(new_veh_id, index)
+        for veh_id in added_veh_ids:
+            if veh_id not in self._series:
+                index = self._veh_ids.index(veh_id) if veh_id in self._veh_ids else len(self._series)
+                self._series[veh_id] = self._new_series_dict(veh_id, index)
 
         self._update_plot_data()
-        if self._series[new_veh_id]['plot_item'] is not None:
-            self._selected_series = {new_veh_id}
+        selected = {v for v in select_veh_ids
+                    if v in self._series and self._series[v]['plot_item'] is not None}
+        if selected:
+            self._selected_series = selected
             self._update_plot_colors()
-        logger.info(f"Plot refreshed after stitch: {tuple(removed_veh_ids)} -> {new_veh_id}")
+        logger.info(f"Plot refreshed after stitching change: removed {sorted(removed_veh_ids)}, "
+                    f"added {sorted(added_veh_ids)}")
         self.vehicle_ids_changed.emit()
 
     def _handle_mouse_moved(self, pos):
@@ -1081,10 +1043,10 @@ class TimeSpacePlotWidget(QWidget):
 
     def _on_shockwave_action_triggered(self):
         """Show ShockwaveConfigDialog; activate mode on OK, restore previous on Cancel."""
-        from comp.shockwave import ShockwaveConfigDialog
+        from analysis.shockwave import ShockwaveConfigDialog
         dlg = ShockwaveConfigDialog(self, self._db_connection, self._current_event_id)
         if dlg.exec() == QDialog.DialogCode.Accepted:
-            mode    = dlg.selected_interaction_mode()
+            mode    = self._SHOCKWAVE_MODES[dlg.selected_method()]
             handler = ShockwaveSemiAutoModeHandler(
                 slope_percentile=dlg.selected_slope_percentile(),
                 vicinity=dlg.selected_vicinity(),

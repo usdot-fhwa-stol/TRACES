@@ -15,7 +15,8 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction
 import pyqtgraph as pg
 from utils import events_columns
-from .interaction_mode import InteractionMode
+from .slider_view_box import zoom_slider
+from .handlers.interaction_mode import InteractionMode
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -40,7 +41,9 @@ class CustomViewBox(pg.ViewBox):
         _context_menu_registry (list): Registry of context menu items
         _current_context_vehicle (int): Vehicle ID for series-specific context menu actions
     """
-    
+
+    _zoom_slider = staticmethod(zoom_slider)
+
     def __init__(self, parent_widget, *args, **kwargs):
         """Initialize the CustomViewBox.
         
@@ -252,14 +255,18 @@ class CustomViewBox(pg.ViewBox):
         super().mouseClickEvent(ev)
 
     def wheelEvent(self, ev, axis=None):
-        """Zoom the view on scroll-wheel, preserving aspect ratio.
+        """Zoom on scroll-wheel by driving the time/distance sliders.
 
-        Zooms toward the cursor position.  Minimum spans and slider hard
-        limits are read from the parent widget — no local recalculation.
+        Over the plot area (axis=None) both axes zoom by the same factor,
+        preserving the current aspect ratio. Over an axis, pyqtgraph's
+        AxisItem.wheelEvent forwards the event here with axis=0 (bottom,
+        time) or axis=1 (left, distance), and only that axis zooms.
+        Zoom is anchored at the cursor. Minimum spans and slider hard
+        limits come from the parent widget.
 
         Args:
             ev:   QGraphicsSceneWheelEvent.
-            axis: Unused; kept for signature compatibility.
+            axis: None for both axes, 0 for time only, 1 for distance only.
         """
         _ZOOM_FACTOR = 0.9          # <1 → scroll-up zooms in
 
@@ -268,61 +275,20 @@ class CustomViewBox(pg.ViewBox):
             ev.accept()
             return
 
-        pw = self.parent_widget      # shorthand
+        pw = self.parent_widget
         scale = _ZOOM_FACTOR if delta > 0 else 1.0 / _ZOOM_FACTOR
 
-        # Current window from sliders (source of truth)
-        t_lo, t_hi = pw._time_slider.value()
-        d_lo, d_hi = pw._dist_slider.value()
-        t_span = t_hi - t_lo
-        d_span = d_hi - d_lo
-
-        # Precomputed minimum spans
-        min_t = pw._min_time_span
-        min_d = pw._min_dist_span
-
-        # Cursor in view coords — zoom centres here
+        # Cursor in view coords. Over an axis, only the coordinate along
+        # that axis is meaningful, and only that one is used below.
         mouse_point = self.mapSceneToView(ev.scenePos())
-        mx, my = mouse_point.x(), mouse_point.y()
 
-        fx = max(0.0, min(1.0, (mx - t_lo) / t_span if t_span else 0.5))
-        fy = max(0.0, min(1.0, (my - d_lo) / d_span if d_span else 0.5))
-
-        # New spans, clamped to minimums
-        new_t_span = max(t_span * scale, min_t)
-        new_d_span = max(d_span * scale, min_d)
-
-        # New edges, keeping cursor at the same fractional position
-        new_t_lo = mx - fx * new_t_span
-        new_t_hi = new_t_lo + new_t_span
-        new_d_lo = my - fy * new_d_span
-        new_d_hi = new_d_lo + new_d_span
-
-        # Clamp to slider hard limits
-        s_t_min = pw._time_slider.minimum()
-        s_t_max = pw._time_slider.maximum()
-        s_d_min = pw._dist_slider.minimum()
-        s_d_max = pw._dist_slider.maximum()
-
-        if new_t_lo < s_t_min:
-            new_t_lo = s_t_min
-            new_t_hi = new_t_lo + new_t_span
-        if new_t_hi > s_t_max:
-            new_t_hi = s_t_max
-            new_t_lo = new_t_hi - new_t_span
-        new_t_lo = max(new_t_lo, s_t_min)
-
-        if new_d_lo < s_d_min:
-            new_d_lo = s_d_min
-            new_d_hi = new_d_lo + new_d_span
-        if new_d_hi > s_d_max:
-            new_d_hi = s_d_max
-            new_d_lo = new_d_hi - new_d_span
-        new_d_lo = max(new_d_lo, s_d_min)
-
-        # Push through sliders → triggers _on_slider_changed → updates view
-        pw._time_slider.setValue((new_t_lo, new_t_hi))
-        pw._dist_slider.setValue((new_d_lo, new_d_hi))
+        # Each setValue triggers _on_slider_changed → updates the view.
+        if axis in (None, 0):
+            self._zoom_slider(pw._time_slider, mouse_point.x(),
+                              scale, pw._min_time_span)
+        if axis in (None, 1):
+            self._zoom_slider(pw._dist_slider, mouse_point.y(),
+                              scale, pw._min_dist_span)
 
         ev.accept()
 
@@ -661,7 +627,7 @@ class CustomViewBox(pg.ViewBox):
             return
 
         event_id = self.parent_widget._current_event_id
-        from comp.jerk import JerkCompDialog
+        from analysis.jerk import JerkCompDialog
         dlg = JerkCompDialog(
             self.parent_widget,
             self.parent_widget._db_connection,
@@ -680,7 +646,7 @@ class CustomViewBox(pg.ViewBox):
 
         event_id = self.parent_widget._current_event_id
         
-        from comp.missing_data import MissingDataCompDialog
+        from analysis.missing_data import MissingDataCompDialog
         # The dialog now manages the entire lifecycle
         dlg = MissingDataCompDialog(
             self.parent_widget,
@@ -696,7 +662,7 @@ class CustomViewBox(pg.ViewBox):
             return
     
         # Gate on veh_dist_trav presence.
-        from comp.base_comp import BaseComp
+        from analysis.base_comp import BaseComp
         cols = BaseComp._events_columns(self.parent_widget._db_connection)
         if "veh_dist_trav" not in cols:
             from PyQt6.QtWidgets import QMessageBox
@@ -708,7 +674,7 @@ class CustomViewBox(pg.ViewBox):
         veh_ids  = self._get_target_vehicle_ids()
         event_id = self.parent_widget._current_event_id
     
-        from comp.consistency import InternalConsistencyDialog
+        from analysis.internal_consistency import InternalConsistencyDialog
         dlg = InternalConsistencyDialog(
             self.parent_widget,
             self.parent_widget._db_connection,
@@ -732,7 +698,7 @@ class CustomViewBox(pg.ViewBox):
             return
 
         veh_id = target_veh_ids[0]
-        from comp.spline import SplineTestingDialog
+        from analysis.spline import SplineTestingDialog
         dialog = SplineTestingDialog(
             self.parent_widget,
             self.parent_widget._db_connection,
