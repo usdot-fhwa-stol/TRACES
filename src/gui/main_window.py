@@ -22,6 +22,7 @@ class MainWindow(QMainWindow):
         _export_menu (QMenu): Submenu for export options.
         _mode_menu (QMenu): Top-level menu used by plots to set interaction mode.
         _data_menu (QMenu): Top-level menu used by plots to perform data manipulation.
+        _analysis_menu (QMenu): Top-level Analysis menu; holds the Noise submenu.
         _db_connection (sqlite3.Connection): Current database connection.
         _plot_widget (TimeSpacePlotWidget): Plot widget for displaying trajectory data.
         _selected_export_columns (list): List of selected column names for export.
@@ -166,26 +167,30 @@ class MainWindow(QMainWindow):
         menu_bar.addMenu(self._analysis_menu)
         self._analysis_menu.menuAction().setVisible(False)  # hidden until DB is open
 
+        # Noise submenu (mirrors the right-click Noise Analysis submenu)
+        noise_menu = QMenu("&Noise", self)
+        self._analysis_menu.addMenu(noise_menu)
+
         jerk_action = QAction("&Jerk Analysis", self)
         jerk_action.triggered.connect(self._run_jerk_analysis)
-        self._analysis_menu.addAction(jerk_action)
+        noise_menu.addAction(jerk_action)
 
         missing_data_action = QAction("&Missing Data", self)
         missing_data_action.triggered.connect(self._run_missing_data_analysis)
-        self._analysis_menu.addAction(missing_data_action)
+        noise_menu.addAction(missing_data_action)
 
         ic_action = QAction("&Internal Consistency", self)
         ic_action.triggered.connect(self._run_internal_consistency)
-        self._analysis_menu.addAction(ic_action)
+        noise_menu.addAction(ic_action)
 
         # placeholders for future noise analysis modules
         placeholder = QAction("&Platoon Consistency", self)
         placeholder.setEnabled(False)
-        self._analysis_menu.addAction(placeholder)
+        noise_menu.addAction(placeholder)
 
         placeholder = QAction("S&pectral Analysis", self)
         placeholder.setEnabled(False)
-        self._analysis_menu.addAction(placeholder)
+        noise_menu.addAction(placeholder)
 
         self._mode_menu = QMenu("&Mode", self)
         menu_bar.addMenu(self._mode_menu)
@@ -739,18 +744,21 @@ class MainWindow(QMainWindow):
         dlg.exec()
 
     def _run_jerk_analysis(self):
+        """Handle the Analysis > Noise > Jerk Analysis menu action."""
         from analysis.jerk import JerkCompDialog
         event_id = self._plot_widget._current_event_id
         dlg = JerkCompDialog(self, self._db_connection, event_ids=[event_id])
         dlg.exec()
 
     def _run_internal_consistency(self):
+        """Handle the Analysis > Noise > Internal Consistency menu action."""
         from analysis.internal_consistency import InternalConsistencyDialog
         event_id = self._plot_widget._current_event_id
         dlg = InternalConsistencyDialog(self, self._db_connection, event_ids=[event_id])
         dlg.exec()
 
     def _run_missing_data_analysis(self):
+        """Handle the Analysis > Noise > Missing Data menu action."""
         event_id = self._plot_widget._current_event_id
         from analysis.missing_data import MissingDataCompDialog
         dlg = MissingDataCompDialog(self, self._db_connection, event_ids=[event_id])

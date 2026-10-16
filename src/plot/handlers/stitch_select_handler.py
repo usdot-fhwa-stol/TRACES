@@ -1,28 +1,45 @@
 """Trajectory Stitching selection mode (Task 9.2, "Operation").
 
-Entered from the right-click menu with one trajectory already chosen.
-Shows "Select trajectory to stitch", highlights the first trajectory, and
-waits for a click on a second one, which opens the preview dialog.
+Entered from the right-click menu (Stitching > Basic Stitching) with one
+trajectory already chosen. Every picked trajectory gets an orange halo
+drawn along its whole trajectory -- every lane, not just the lane on
+show -- since segments of one vehicle often break at a lane change.
 
-If the first trajectory is itself the result of a stitch that can still be
-undone, the banner also says "press Enter to edit", and Enter opens the
-preview dialog on that stitch (review state, Undo enabled).
+Picks
+-----
+The handler tracks the two most recently picked trajectories, oldest
+first. Clicking a trajectory adds it as the most recent pick; with two
+already picked, the oldest is dropped (3050, then 120, then 402 leaves
+120 and 402; then 7170 leaves 402 and 7170). Clicking a picked
+trajectory again makes it the most recent pick. Nothing opens on a
+click.
 
-Cancel with Escape, right-click, or Mode > Select Trajectory. Cancelling
-the preview dialog stays in this mode so another second trajectory can be
-picked -- unless the dialog undid a stitch, which changes the trajectories
-on the plot, so the mode ends and the plot refreshes. The lane may be
-changed while waiting -- segments of one vehicle often break at a lane
-change.
+Keys
+----
+Enter   Two picks: open the preview dialog on the pair.
+        One pick that is itself the result of a stitch that can still be
+        undone: open the preview dialog on that stitch (review state,
+        Undo enabled).
+Escape  Remove the most recent pick. Removing the only pick leaves the
+        mode.
+Right-click, or Mode > Select Trajectory, leaves the mode.
+
+Cancelling the preview dialog stays in this mode with the same picks, so
+either can be swapped before trying again -- unless the dialog undid a
+stitch, which changes the trajectories on the plot, so the mode ends and
+the plot refreshes. The lane may be changed while picking.
 """
 
 import logging
 import sqlite3
+from typing import Dict, List, Optional, Tuple
 
+import numpy as np
 import pyqtgraph as pg
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import QDialog, QMessageBox
 
+from utils import events_columns, measured_rows_clause, segment_bounds
 from .interaction_mode import InteractionModeHandler
 from .plot_overlay_label import PlotOverlayLabel
 
@@ -30,35 +47,38 @@ logger = logging.getLogger(__name__)
 
 _CLICK_MAX_MOVE = 5   # px; CustomViewBox starts a drag box beyond this
 _TITLE = "Trajectory Stitching"
+_MAX_PICKS = 2
+_HALO_PEN = pg.mkPen(color=(255, 165, 0, 150), width=18)
 
 
 class StitchSelectModeHandler(InteractionModeHandler):
 
     def __init__(self, first_veh_id: int):
-        self._first = first_veh_id
+        self._picks: List[int] = [first_veh_id]   # oldest first, at most _MAX_PICKS
         self._banner = None
-        self._highlight = None
+        self._halos: Dict[int, pg.PlotDataItem] = {}
+        # veh_id -> (times, distances) over all lanes, NaN-separated at
+        # time gaps. Trajectories don't change while this mode is active
+        # (a stitch or undo ends it), so they're loaded once per vehicle.
+        self._trajectories: Dict[int, Tuple[np.ndarray, np.ndarray]] = {}
+        self._editable: Dict[int, bool] = {}
         self._saved_selection = set()
         self._busy = False       # preview dialog open
-        self._editable = False   # first trajectory is an undoable stitch
 
     # ── Lifecycle ──────────────────────────────────────────────────────
 
     def on_enter(self, widget):
-        # Selection dimming would grey out everything on a lane where the
-        # first trajectory isn't present; use a halo instead.
+        # Selection dimming would grey out everything on a lane where a
+        # picked trajectory isn't present; use halos instead.
         self._saved_selection = set(widget._selected_series)
         widget._selected_series.clear()
         widget._update_plot_colors()
-        self._editable = self._is_editable(widget)
         self._banner = PlotOverlayLabel(widget._scatter_plot)
-        self._update_banner(widget)
-        self._draw_highlight(widget)
-        logger.debug("Entered stitch selection with vehicle %s (editable: %s)",
-                     self._first, self._editable)
+        self._refresh(widget)
+        logger.debug("Entered stitch selection with vehicle %s", self._picks[0])
 
     def on_exit(self, widget):
-        self._clear_highlight(widget)
+        self._clear_halos(widget)
         if self._banner is not None:
             self._banner.dispose()
             self._banner = None
@@ -66,11 +86,10 @@ class StitchSelectModeHandler(InteractionModeHandler):
         widget._update_plot_colors()
 
     def on_plot_cleared(self, widget):
-        self._highlight = None   # scatter_plot.clear() already removed it
+        self._halos.clear()   # scatter_plot.clear() already removed them
 
     def on_data_reloaded(self, widget):
-        self._draw_highlight(widget)
-        self._update_banner(widget)
+        self._refresh(widget)
 
     # ── Mouse / keys ──────────────────────────────────────────────────
 
@@ -95,13 +114,14 @@ class StitchSelectModeHandler(InteractionModeHandler):
         veh_id = widget.find_vehicle_at(pt.x(), pt.y())
         if veh_id is None:
             return True
-        if veh_id == self._first:
-            hint = " or press <b>Enter</b> to edit its stitch" if self._editable else ""
+        if self._picks == [veh_id]:
+            hint = (" or press <b>Enter</b> to edit its stitch"
+                    if self._is_editable(widget, veh_id) else "")
             self._banner.flash(f"Choose a <b>different</b> trajectory to stitch with{hint}.")
             return True
 
-        self._busy = True
-        QTimer.singleShot(0, lambda: self._open_preview(widget, veh_id))
+        self._pick(veh_id)
+        self._refresh(widget)
         return True
 
     def on_right_click(self, view_box, ev) -> bool:
@@ -114,32 +134,60 @@ class StitchSelectModeHandler(InteractionModeHandler):
             return False
         key = event.key()
         if key == Qt.Key.Key_Escape:
-            widget.end_stitch_selection()
+            dropped = self._picks.pop()
+            logger.debug("Stitch selection: removed vehicle %s", dropped)
+            if not self._picks:
+                widget.end_stitch_selection()
+            else:
+                self._refresh(widget)
             return True
-        if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and self._editable:
-            self._busy = True
-            QTimer.singleShot(0, lambda: self._open_edit(widget))
+        if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            if len(self._picks) == _MAX_PICKS:
+                first, second = self._picks
+                self._busy = True
+                QTimer.singleShot(0, lambda: self._open_preview(widget, first, second))
+            elif self._is_editable(widget, self._picks[0]):
+                veh_id = self._picks[0]
+                self._busy = True
+                QTimer.singleShot(0, lambda: self._open_edit(widget, veh_id))
+            else:
+                self._banner.flash("Select a <b>second</b> trajectory first.")
             return True
         return False
 
+    # ── Picks ─────────────────────────────────────────────────────────
+
+    def _pick(self, veh_id: int):
+        """Make *veh_id* the most recent pick, dropping the oldest beyond
+        _MAX_PICKS."""
+        if veh_id in self._picks:
+            self._picks.remove(veh_id)
+        self._picks.append(veh_id)
+        del self._picks[:-_MAX_PICKS]
+        logger.debug("Stitch selection picks: %s", self._picks)
+
+    def _is_editable(self, widget, veh_id: int) -> bool:
+        """True if *veh_id* is the result of a stitch that can still be
+        undone. Cached per vehicle for the life of the mode."""
+        if veh_id not in self._editable:
+            from analysis.manual_stitching import ManualStitchingComp
+            try:
+                self._editable[veh_id] = ManualStitchingComp.stitch_record_for(
+                    widget._db_connection, widget._current_event_id, veh_id) is not None
+            except (sqlite3.Error, ValueError):
+                logger.exception("Could not look up the stitch of vehicle %s", veh_id)
+                self._editable[veh_id] = False
+        return self._editable[veh_id]
+
     # ── Preview ────────────────────────────────────────────────────────
 
-    def _is_editable(self, widget) -> bool:
-        from analysis.manual_stitching import ManualStitchingComp
-        try:
-            return ManualStitchingComp.stitch_record_for(
-                widget._db_connection, widget._current_event_id, self._first) is not None
-        except (sqlite3.Error, ValueError):
-            logger.exception("Could not look up the stitch of vehicle %s", self._first)
-            return False
-
-    def _open_preview(self, widget, second_veh_id: int):
-        """New stitch of the first trajectory with *second_veh_id*."""
+    def _open_preview(self, widget, first_veh_id: int, second_veh_id: int):
+        """New stitch of the two picked trajectories."""
         from analysis.manual_stitching import ManualStitchingComp, StitchingPreviewDialog
         try:
             inputs = ManualStitchingComp.prepare(
                 widget._db_connection, widget._current_event_id,
-                self._first, second_veh_id)
+                first_veh_id, second_veh_id)
         except (ValueError, sqlite3.Error) as exc:
             self._busy = False
             QMessageBox.warning(widget, _TITLE, str(exc))
@@ -149,13 +197,12 @@ class StitchSelectModeHandler(InteractionModeHandler):
                                      resolve_target=widget.stitch_target_resolver())
         self._finish(widget, dlg, dlg.exec() == QDialog.DialogCode.Accepted)
 
-    def _open_edit(self, widget):
-        """Review (and possibly undo) the stitch that created the first
-        trajectory."""
+    def _open_edit(self, widget, veh_id: int):
+        """Review (and possibly undo) the stitch that created *veh_id*."""
         from analysis.manual_stitching import ManualStitchingComp, StitchingPreviewDialog
         try:
             inputs, record = ManualStitchingComp.prepare_existing(
-                widget._db_connection, widget._current_event_id, self._first)
+                widget._db_connection, widget._current_event_id, veh_id)
         except (ValueError, sqlite3.Error) as exc:
             self._busy = False
             QMessageBox.warning(widget, _TITLE, str(exc))
@@ -169,7 +216,7 @@ class StitchSelectModeHandler(InteractionModeHandler):
     def _finish(self, widget, dlg, accepted: bool):
         """Apply what the dialog changed -- an undo, a stitch, or both (an
         undo followed by a new stitch of the restored pair) -- to the plot.
-        Nothing changed: stay in selection mode."""
+        Nothing changed: stay in selection mode with the same picks."""
         self._busy = False
         undo = dlg.undo_info
         result = dlg.result_info if accepted else None
@@ -192,33 +239,71 @@ class StitchSelectModeHandler(InteractionModeHandler):
 
     # ── Visuals ────────────────────────────────────────────────────────
 
-    def _on_lane(self, widget) -> bool:
-        series = widget._series.get(self._first) if widget._series else None
-        return series is not None and series["plot_item"] is not None
+    def _refresh(self, widget):
+        self._draw_halos(widget)
+        self._update_banner(widget)
 
     def _update_banner(self, widget):
         if self._banner is None:
             return
-        where = "" if self._on_lane(widget) else " (not on this lane)"
-        edit = (f"<br>Vehicle {self._first} is a stitched trajectory — "
-                f"press <b>Enter</b> to edit" if self._editable else "")
+        if len(self._picks) == _MAX_PICKS:
+            first, recent = self._picks
+            self._banner.show_message(
+                f"<b>Vehicles {first} and {recent} selected</b> — press "
+                f"<b>Enter</b> to open the stitching preview<br>"
+                f"Click another trajectory to replace vehicle {first} — "
+                f"Esc removes vehicle {recent} — right-click to cancel")
+            return
+        only = self._picks[0]
+        edit = (f"<br>Vehicle {only} is a stitched trajectory — "
+                f"press <b>Enter</b> to edit" if self._is_editable(widget, only) else "")
         self._banner.show_message(
             f"<b>Select trajectory to stitch</b><br>"
-            f"with vehicle {self._first}{where} — Esc or right-click to cancel"
-            f"{edit}")
+            f"with vehicle {only} — Esc or right-click to cancel{edit}")
 
-    def _draw_highlight(self, widget):
-        self._clear_highlight(widget)
-        if not self._on_lane(widget):
-            return
-        series = widget._series[self._first]
-        self._highlight = pg.PlotDataItem(
-            series["veh_time"], series["veh_dist_trav"],
-            pen=pg.mkPen(color=(255, 165, 0, 150), width=18))
-        self._highlight.setZValue(-10)   # halo beneath the scatter points
-        widget._scatter_plot.addItem(self._highlight)
+    def _trajectory(self, widget, veh_id: int) -> Optional[Tuple[np.ndarray, np.ndarray]]:
+        """*veh_id*'s points on every lane, ordered by time, with a NaN
+        between segments separated by a time gap so the halo breaks there
+        instead of bridging it. Same rows the plot shows (SplineComp
+        synthetic rows excluded)."""
+        if veh_id not in self._trajectories:
+            cols = events_columns(widget._db_connection)
+            try:
+                rows = widget._db_connection.execute(
+                    f"SELECT veh_time, veh_dist_trav FROM events "
+                    f"WHERE event_id = ? AND veh_id = ? AND veh_dist_trav IS NOT NULL"
+                    f"{measured_rows_clause(cols)} ORDER BY veh_time",
+                    (widget._current_event_id, veh_id)).fetchall()
+            except sqlite3.Error:
+                logger.exception("Could not load the trajectory of vehicle %s", veh_id)
+                rows = []
+            if not rows:
+                self._trajectories[veh_id] = None
+            else:
+                t = np.array([r[0] for r in rows], dtype=np.float64)
+                d = np.array([r[1] for r in rows], dtype=np.float64)
+                xs, ys = [], []
+                for start, end in segment_bounds(t, widget._time_step):
+                    if xs:
+                        xs.append(np.array([np.nan]))
+                        ys.append(np.array([np.nan]))
+                    xs.append(t[start:end])
+                    ys.append(d[start:end])
+                self._trajectories[veh_id] = (np.concatenate(xs), np.concatenate(ys))
+        return self._trajectories[veh_id]
 
-    def _clear_highlight(self, widget):
-        if self._highlight is not None:
-            widget._scatter_plot.removeItem(self._highlight)
-            self._highlight = None
+    def _draw_halos(self, widget):
+        self._clear_halos(widget)
+        for veh_id in self._picks:
+            data = self._trajectory(widget, veh_id)
+            if data is None:
+                continue
+            halo = pg.PlotDataItem(data[0], data[1], pen=_HALO_PEN, connect="finite")
+            halo.setZValue(-10)   # beneath the scatter points
+            widget._scatter_plot.addItem(halo)
+            self._halos[veh_id] = halo
+
+    def _clear_halos(self, widget):
+        for halo in self._halos.values():
+            widget._scatter_plot.removeItem(halo)
+        self._halos.clear()

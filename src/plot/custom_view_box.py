@@ -27,12 +27,12 @@ _SELECT_MODE_TOOLTIP = "Available in Select Trajectory mode."
 
 class CustomViewBox(pg.ViewBox):
     """Custom ViewBox that handles selection box drawing when Shift is held and custom context menus.
-    
+
     This class extends pyqtgraph's ViewBox to provide:
     - Shift+drag selection box for selecting multiple vehicles
     - Right-click context menus with dynamic content based on current state
     - Integration with parent TimeSpacePlotWidget for vehicle selection management
-    
+
     Attributes:
         parent_widget: Reference to the parent TimeSpacePlotWidget
         _selection_start (QPointF): Starting point of selection box in view coordinates
@@ -46,7 +46,7 @@ class CustomViewBox(pg.ViewBox):
 
     def __init__(self, parent_widget, *args, **kwargs):
         """Initialize the CustomViewBox.
-        
+
         Args:
             parent_widget: Reference to the parent TimeSpacePlotWidget
             *args: Additional positional arguments passed to parent ViewBox
@@ -81,9 +81,12 @@ class CustomViewBox(pg.ViewBox):
                 {'label': 'Internal Consistency',   'callback': self._run_ic_rightclick},
                 {'label': 'Platoon Consistency',    'callback': None},
             ]},
-            {'filter': 'ASO', 'label': 'Trajectory Stitching', 'callback': self._start_stitching,
-             'single_only': True, 'select_mode_only': True,
-             'single_tooltip': "Select exactly one trajectory to stitch."},
+            {'filter': 'ASO', 'label': 'Stitching', 'submenu': [
+                {'label': 'Basic Stitching', 'callback': self._start_stitching,
+                 'single_only': True, 'select_mode_only': True,
+                 'single_tooltip': "Select exactly one trajectory to stitch."},
+                {'label': 'Advanced Stitching', 'callback': None},
+            ]},
         ]
 
     def mousePressEvent(self, ev):
@@ -108,11 +111,11 @@ class CustomViewBox(pg.ViewBox):
 
             # Calculate distance moved since press
             move_distance = (ev.scenePos() - self._press_pos).manhattanLength()
-            
+
             # If we've moved enough distance, start selection box
             if move_distance > 5 and not self._is_selecting:  # 5 pixel threshold
                 self._is_selecting = True
-                
+
                 # Create selection box
                 self._selection_box = pg.RectROI(
                     pos=[self._selection_start.x(), self._selection_start.y()],
@@ -120,30 +123,30 @@ class CustomViewBox(pg.ViewBox):
                     pen=pg.mkPen(color='red', width=2, style=Qt.PenStyle.DashLine),
                     removable=False
                 )
-                
+
                 # Disable handles
                 for handle in self._selection_box.getHandles():
                     handle.hide()
-                
+
                 # Add to parent plot
                 self.parent_widget._scatter_plot.addItem(self._selection_box)
-            
+
             # Update selection box if we're selecting
             if self._is_selecting and self._selection_box:
                 current_pos = self.mapSceneToView(ev.scenePos())
                 x0, y0 = self._selection_start.x(), self._selection_start.y()
                 x1, y1 = current_pos.x(), current_pos.y()
-    
+
                 # Update selection box position and size
                 self._selection_box.setPos(min(x0, x1), min(y0, y1))
                 self._selection_box.setSize([abs(x1 - x0), abs(y1 - y0)])
-            
+
             ev.accept()
             return
-    
+
         # For non-selection moves, use default behavior
         super().mouseMoveEvent(ev)
-    
+
     def mouseReleaseEvent(self, ev):
         """Handle mouse release events for selection box completion or single clicks."""
         if ev.button() == Qt.MouseButton.LeftButton and hasattr(self, '_press_pos') and self._press_pos is not None:
@@ -153,18 +156,18 @@ class CustomViewBox(pg.ViewBox):
 
             if self.parent_widget._active_handler.on_mouse_release(self, ev):
                 return
-            
+
             if self._is_selecting:
                 # Complete selection box
                 end_pos = self.mapSceneToView(ev.scenePos())
-                
+
                 x0, y0 = self._selection_start.x(), self._selection_start.y()
                 x1, y1 = end_pos.x(), end_pos.y()
-                
+
                 # Get selection box bounds
                 x_min, x_max = min(x0, x1), max(x0, x1)
                 y_min, y_max = min(y0, y1), max(y0, y1)
-                
+
                 # Find vehicles with points in the selection box
                 selected_vehicles = set()
                 for series in self.parent_widget._series.values():
@@ -173,7 +176,7 @@ class CustomViewBox(pg.ViewBox):
                                (series['veh_dist_trav'] >= y_min) & (series['veh_dist_trav'] <= y_max)
                         if np.any(mask):
                             selected_vehicles.add(series['veh_id'])
-                
+
                 # Update selected_series: add or remove based on Shift key
                 if ev.modifiers() & Qt.KeyboardModifier.ShiftModifier:
                     self.parent_widget._selected_series -= selected_vehicles
@@ -185,34 +188,34 @@ class CustomViewBox(pg.ViewBox):
 
                 # Update plot colors
                 self.parent_widget._update_plot_colors()
-                
+
                 # Clear selection box
                 self._clear_selection_box()
-                
+
             elif move_distance < 5 and press_duration < 0.5:  # Short click with minimal movement
                 # Handle single click on series
                 mouse_point = self.mapSceneToView(ev.scenePos())
                 mx, my = mouse_point.x(), mouse_point.y()
-                
+
                 # Find closest point
                 min_dist = float('inf')
                 closest_veh_id = None
                 time_tolerance = 0.05  # Time tolerance in seconds
                 pixel_tolerance = 3   # Pixel distance to register click
-                
+
                 for series in self.parent_widget._series.values():
                     if series["plot_item"] and len(series["veh_time"]) > 0:
                         mask = (series["veh_time"] >= mx - time_tolerance) & (series["veh_time"] <= mx + time_tolerance)
                         x_filtered = series["veh_time"][mask]
                         y_filtered = series["veh_dist_trav"][mask]
-                        
+
                         if len(x_filtered) > 0:
                             distances = np.abs(y_filtered - my)
                             min_idx = np.argmin(distances)
                             if distances[min_idx] < pixel_tolerance and distances[min_idx] < min_dist:
                                 min_dist = distances[min_idx]
                                 closest_veh_id = series["veh_id"]
-                
+
                 if closest_veh_id is not None:
                     # Toggle veh_id in selected_series
                     if closest_veh_id in self.parent_widget._selected_series:
@@ -222,24 +225,24 @@ class CustomViewBox(pg.ViewBox):
                         # Clear selected_series if it contains all vehicles
                         if len(self.parent_widget._selected_series) == len(self.parent_widget._series):
                             self.parent_widget._selected_series.clear()
-                    
+
                     # Update plot colors
                     self.parent_widget._update_plot_colors()
                     logger.debug(f"Toggled veh_id {closest_veh_id}, selected_series: {self.parent_widget._selected_series}")
-            
+
             # Clean up
             self._press_pos = None
             self._press_time = None
             self._is_selecting = False
             ev.accept()
             return
-        
+
         # For non-left releases, use default behavior
         super().mouseReleaseEvent(ev)
 
     def mouseClickEvent(self, ev):
         """Override to handle right-click context menu.
-        
+
         Args:
             ev: Mouse event containing button information
         """
@@ -250,7 +253,7 @@ class CustomViewBox(pg.ViewBox):
             self._show_context_menu(ev)
             ev.accept()
             return
-        
+
         # For other clicks, use default behavior
         super().mouseClickEvent(ev)
 
@@ -323,29 +326,29 @@ class CustomViewBox(pg.ViewBox):
         return action
 
     def _start_stitching(self):
-        """Right-click > Trajectory Stitching: enter selection mode with the
-        single trajectory in context as the first segment."""
+        """Right-click > Stitching > Basic Stitching: enter selection mode
+        with the single trajectory in context as the first segment."""
         target = self._get_target_vehicle_ids()
         if len(target) == 1:
             self.parent_widget.start_stitch_selection(target[0])
 
     def _show_context_menu(self, ev):
         """Show custom context menu based on click location and current state.
-        
+
         Args:
             ev: Mouse event containing position information
         """
         if not self.parent_widget._series:
             return
-            
+
         # Get click position
         pos = ev.scenePos()
         mouse_point = self.mapSceneToView(pos)
         mx, my = mouse_point.x(), mouse_point.y()
-        
+
         # Check if we clicked on a plot item
         clicked_vehicle_id = self._find_clicked_vehicle(mx, my)
-        
+
         # Determine context menu type and title
         if clicked_vehicle_id is not None:
             menu_type = 'O'  # series (O for "One vehicle")
@@ -359,7 +362,7 @@ class CustomViewBox(pg.ViewBox):
             menu_type = 'A'  # all
             title = 'All'
             self._current_context_vehicle = None
-        
+
         # Create and populate context menu
         context_menu = QMenu(self.parent_widget)
         context_menu.setToolTipsVisible(True)
@@ -386,25 +389,25 @@ class CustomViewBox(pg.ViewBox):
             else:
                 context_menu.addAction(self._make_menu_action(
                     item, context_menu, menu_type, vehicle_count, available_cols))
-        
+
         # Show context menu at cursor position
         global_pos = self.parent_widget._scatter_plot.mapToGlobal(
             self.parent_widget._scatter_plot.mapFromScene(pos)
         )
         context_menu.exec(global_pos)
-    
+
     def _find_clicked_vehicle(self, mx, my):
         """Find vehicle ID at the given coordinates, if any.
-        
+
         Args:
             mx (float): Mouse x coordinate in view space
             my (float): Mouse y coordinate in view space
-            
+
         Returns:
             int or None: Vehicle ID if found, None otherwise
         """
         return self.parent_widget.find_vehicle_at(mx, my)
-    
+
     def _clear_selection_box(self):
         """Remove the selection box from the plot."""
         if self._selection_box:
@@ -415,7 +418,7 @@ class CustomViewBox(pg.ViewBox):
 
     def _get_vehicle_data_for_context(self):
         """Get vehicle data lists based on current context.
-        
+
         Returns:
             tuple: (veh_ids, series_colors, text_colors) for the current context
         """
@@ -427,9 +430,9 @@ class CustomViewBox(pg.ViewBox):
             veh_ids = list(self.parent_widget._selected_series)
         else:
             # All context - vehicles with plot items
-            veh_ids = [veh_id for veh_id, series in self.parent_widget._series.items() 
+            veh_ids = [veh_id for veh_id, series in self.parent_widget._series.items()
                       if series['plot_item'] is not None]
-        
+
         # Get corresponding colors for these vehicles
         series_colors = []
         text_colors = []
@@ -440,7 +443,7 @@ class CustomViewBox(pg.ViewBox):
             else:
                 series_colors.append('#000000')  # Default black
                 text_colors.append('#ffffff')    # Default white
-        
+
         return veh_ids, series_colors, text_colors
 
     # Context menu callback methods
@@ -454,13 +457,13 @@ class CustomViewBox(pg.ViewBox):
             self.parent_widget._selected_series.clear()
         self.parent_widget._update_plot_colors()
         logger.debug("Selected all vehicles")
-    
+
     def _clear_selection(self):
         """Clear vehicle selection."""
         self.parent_widget._selected_series.clear()
         self.parent_widget._update_plot_colors()
         logger.debug("Cleared vehicle selection")
-    
+
     def _invert_selection(self):
         """Invert current vehicle selection."""
         all_vehicles = set(self.parent_widget._series.keys())
@@ -469,14 +472,14 @@ class CustomViewBox(pg.ViewBox):
             self.parent_widget._selected_series.clear()
         self.parent_widget._update_plot_colors()
         logger.debug("Inverted vehicle selection")
-    
+
     def _select_vehicle_only(self):
         """Select only the clicked vehicle."""
         if self._current_context_vehicle is not None:
             self.parent_widget._selected_series = {self._current_context_vehicle}
             self.parent_widget._update_plot_colors()
             logger.debug(f"Selected only vehicle {self._current_context_vehicle}")
-    
+
     def _toggle_vehicle_selection(self):
         """Toggle selection of the clicked vehicle."""
         if self._current_context_vehicle is not None:
@@ -490,7 +493,7 @@ class CustomViewBox(pg.ViewBox):
                     self.parent_widget._selected_series.clear()
             self.parent_widget._update_plot_colors()
             logger.debug(f"Toggled selection for vehicle {veh_id}")
-    
+
     def _reset_view(self):
         """Reset the plot view to show all data."""
         self.autoRange()
@@ -501,10 +504,10 @@ class CustomViewBox(pg.ViewBox):
         if not self.parent_widget._db_connection or self.parent_widget._current_event_id is None:
             logger.warning("No database connection or event ID available for time-speed dialog")
             return
-        
+
         # Get vehicle data for current context
         veh_ids, series_colors, text_colors = self._get_vehicle_data_for_context()
-        
+
         if not veh_ids:
             logger.warning("No vehicles available for time-speed dialog")
             return
@@ -530,16 +533,16 @@ class CustomViewBox(pg.ViewBox):
         )
         dialog.show()
         logger.debug(f"Opened time-speed dialog for {len(veh_ids)} vehicles")
-    
+
     def _show_time_accel_dialog(self):
         """Show time-acceleration dialog for vehicles based on current context."""
         if not self.parent_widget._db_connection or self.parent_widget._current_event_id is None:
             logger.warning("No database connection or event ID available for time-acceleration dialog")
             return
-        
+
         # Get vehicle data for current context
         veh_ids, series_colors, text_colors = self._get_vehicle_data_for_context()
-        
+
         if not veh_ids:
             logger.warning("No vehicles available for time-acceleration dialog")
             return
@@ -565,33 +568,33 @@ class CustomViewBox(pg.ViewBox):
         )
         dialog.show()
         logger.debug(f"Opened time-acceleration dialog for {len(veh_ids)} vehicles")
-    
+
     def _generate_statistics(self):
         """Generate and display statistics for vehicles based on current context."""
         if not self.parent_widget._db_connection or self.parent_widget._current_event_id is None:
             logger.warning("No database connection or event ID available for statistics")
             return
-        
+
         # Determine which vehicle IDs to include based on context
         target_veh_ids = self._get_target_vehicle_ids()
         if not target_veh_ids:
             logger.warning("No vehicles available for statistics")
             return
-        
+
         # Determine the mode for the dialog title
         mode = self._get_statistics_mode()
-        
+
         # Create and show statistics dialog
         from .statistics_dialog import StatisticsDialog
-        dialog = StatisticsDialog(self.parent_widget, target_veh_ids, 
-                                self.parent_widget._db_connection, 
+        dialog = StatisticsDialog(self.parent_widget, target_veh_ids,
+                                self.parent_widget._db_connection,
                                 self.parent_widget._current_event_id,
                                 mode)
         dialog.exec()
-    
+
     def _get_target_vehicle_ids(self):
         """Get the list of vehicle IDs based on current context.
-        
+
         Returns:
             list: List of vehicle IDs to include in statistics
         """
@@ -603,12 +606,12 @@ class CustomViewBox(pg.ViewBox):
             return list(self.parent_widget._selected_series)
         else:
             # All context - vehicles with plot items
-            return [veh_id for veh_id, series in self.parent_widget._series.items() 
+            return [veh_id for veh_id, series in self.parent_widget._series.items()
                    if series['plot_item'] is not None]
-    
+
     def _get_statistics_mode(self):
         """Get the mode string for the statistics dialog title.
-        
+
         Returns:
             str: Mode string (All, Selected, or Series)
         """
@@ -639,13 +642,13 @@ class CustomViewBox(pg.ViewBox):
     def _run_missing_data_analysis_rightclick(self):
         if not self.parent_widget._db_connection or self.parent_widget._current_event_id is None:
             return
-            
+
         veh_ids = self._get_target_vehicle_ids()
         if not veh_ids:
             return
 
         event_id = self.parent_widget._current_event_id
-        
+
         from analysis.missing_data import MissingDataCompDialog
         # The dialog now manages the entire lifecycle
         dlg = MissingDataCompDialog(
@@ -660,7 +663,7 @@ class CustomViewBox(pg.ViewBox):
         if (not self.parent_widget._db_connection
                 or self.parent_widget._current_event_id is None):
             return
-    
+
         # Gate on veh_dist_trav presence.
         from analysis.base_comp import BaseComp
         cols = BaseComp._events_columns(self.parent_widget._db_connection)
@@ -670,10 +673,10 @@ class CustomViewBox(pg.ViewBox):
                 self.parent_widget, "Internal Consistency",
                 "The veh_dist_trav column is required but absent from this dataset.")
             return
-    
+
         veh_ids  = self._get_target_vehicle_ids()
         event_id = self.parent_widget._current_event_id
-    
+
         from analysis.internal_consistency import InternalConsistencyDialog
         dlg = InternalConsistencyDialog(
             self.parent_widget,
@@ -691,7 +694,7 @@ class CustomViewBox(pg.ViewBox):
         if not self.parent_widget._db_connection or self.parent_widget._current_event_id is None:
             logger.warning("No database connection or event ID available for spline fitting")
             return
-    
+
         target_veh_ids = self._get_target_vehicle_ids()
         if len(target_veh_ids) != 1:
             logger.warning("Spline Fitting requested without exactly one trajectory in context")
