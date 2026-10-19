@@ -20,22 +20,58 @@ jobs:
     - name: Show installed versions
       run: pip list
 
+    # Packages are collected as compiled modules, not copied as source:
+    # --collect-submodules bundles every module of a package, including
+    # those PyInstaller can't see from import statements -- the lazy
+    # (PEP 562) re-exports in each package's __init__.py, and the
+    # data_import processor classes ImportDialog loads by name from the
+    # JSON configs. Package order follows the dependency order
+    # (utils, data_import, ui_kit, analysis, plot, gui); utils.py is a
+    # top-level module and is found from the entry script's imports.
+    #
+    # Data files: config/ is read through utils.get_resource_path;
+    # ui_kit/plot_view.js is read through importlib.resources
+    # (ui_kit.plot_export.load_asset) and must sit in a ui_kit folder.
     - name: Build with PyInstaller
       shell: powershell
       run: |
         pyinstaller --name "trajectory_tools" --onedir --windowed `
+          --paths src `
           --add-data "src/config;config" `
-          --add-data "src/data_import;data_import" `
-          --add-data "src/gui;gui" `
-          --add-data "src/plot;plot" `
+          --add-data "src/ui_kit/plot_view.js;ui_kit" `
+          --collect-submodules data_import `
+          --collect-submodules ui_kit `
+          --collect-submodules analysis `
+          --collect-submodules plot `
+          --collect-submodules gui `
           --hidden-import PyQt6 `
           --hidden-import pyqtgraph `
           --hidden-import superqt `
           --hidden-import utm `
-          --hidden-import data_import.base_process `
-          --hidden-import data_import.csv_algorithms `
-          --hidden-import data_import.csv_process `
           src/trajectory_tools.py
+
+    # PyInstaller records modules it couldn't find in a warn file instead of
+    # failing the build -- a package missing from requirements.txt (as scipy
+    # once was) shows up only there. Fail on any required package listed as
+    # missing; optional ones (e.g. OpenGL for pyqtgraph.opengl) are ignored.
+    - name: Check bundled data files and packages
+      shell: powershell
+      run: |
+        $required = @(
+          "dist/trajectory_tools/_internal/ui_kit/plot_view.js",
+          "dist/trajectory_tools/_internal/config"
+        )
+        foreach ($path in $required) {
+          if (-not (Test-Path $path)) { Write-Error "Missing from build: $path"; exit 1 }
+        }
+        $warn = "build/trajectory_tools/warn-trajectory_tools.txt"
+        $packages = "scipy|numpy|pyqtgraph|superqt|PyQt6|utm"
+        $missing = Select-String -Path $warn -Pattern "^missing module named '?($packages)'? -"
+        if ($missing) {
+          $missing | ForEach-Object { Write-Host $_.Line }
+          Write-Error "Required package(s) missing from the build; check requirements.txt"
+          exit 1
+        }
 
     - name: Install NSIS
       run: choco install nsis --yes --no-progress
@@ -116,10 +152,29 @@ jobs:
         '@
         $nsis | Out-File -FilePath installer.nsi -Encoding utf8
 
+    # makensis.exe's location varies with the runner image and the NSIS
+    # package version (Program Files vs. Program Files (x86), with or
+    # without a Bin folder), so find it rather than hard-code a path.
     - name: Build installer
       shell: powershell
       run: |
-        $makensis = "C:\Program Files (x86)\NSIS\makensis.exe"
+        $candidates = @(
+          (Get-Command makensis.exe -ErrorAction SilentlyContinue).Source,
+          "${env:ProgramFiles(x86)}\NSIS\makensis.exe",
+          "${env:ProgramFiles(x86)}\NSIS\Bin\makensis.exe",
+          "$env:ProgramFiles\NSIS\makensis.exe",
+          "$env:ProgramFiles\NSIS\Bin\makensis.exe"
+        ) | Where-Object { $_ -and (Test-Path $_) }
+        $makensis = $candidates | Select-Object -First 1
+        if (-not $makensis) {
+          # Last resort: search the usual install roots a few levels deep.
+          $roots = @("${env:ProgramFiles(x86)}", "$env:ProgramFiles", "$env:ProgramData\chocolatey") |
+                   Where-Object { $_ -and (Test-Path $_) }
+          $makensis = Get-ChildItem -Path $roots -Filter makensis.exe -Recurse -Depth 4 `
+                        -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+        }
+        if (-not $makensis) { Write-Error "makensis.exe not found after installing NSIS"; exit 1 }
+        Write-Host "Using $makensis"
         & $makensis installer.nsi
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 

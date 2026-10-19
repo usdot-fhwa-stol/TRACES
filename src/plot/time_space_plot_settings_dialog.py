@@ -374,13 +374,15 @@ class TimeSpacePlotSettingsDialog(QDialog):
             time_min, time_max = self._time_slider.value()
             dist_min, dist_max = self._dist_slider.value()
 
+            from utils import events_columns, active_rows_clause
+            active = active_rows_clause(events_columns(self._db_connection))
             cursor = self._db_connection.cursor()
-            cursor.execute("""
-                SELECT COUNT(DISTINCT veh_id) 
-                FROM events 
-                WHERE event_id = ? 
-                AND veh_time BETWEEN ? AND ? 
-                AND veh_dist_trav BETWEEN ? AND ?
+            cursor.execute(f"""
+                SELECT COUNT(DISTINCT veh_id)
+                FROM events
+                WHERE event_id = ?
+                AND veh_time BETWEEN ? AND ?
+                AND veh_dist_trav BETWEEN ? AND ?{active}
             """, (self._current_event_id, time_min, time_max, dist_min, dist_max))
 
             self._current_record_count = cursor.fetchone()[0]   # <-- store it
