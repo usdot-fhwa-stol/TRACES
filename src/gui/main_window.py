@@ -1,6 +1,9 @@
 import logging
 from pathlib import Path
-from PyQt6.QtWidgets import QMainWindow, QMenuBar, QMenu, QApplication, QFileDialog, QMessageBox, QDialog
+from PyQt6.QtWidgets import (
+    QMainWindow, QMenuBar, QMenu, QApplication, QFileDialog, QMessageBox,
+    QDialog, QVBoxLayout, QTextBrowser, QDialogButtonBox,
+)
 from PyQt6.QtGui import QAction
 from PyQt6.QtCore import QTimer
 from .home_widget import HomeWidget
@@ -48,6 +51,7 @@ class MainWindow(QMainWindow):
         self._search_dialog = None
         self._home_widget = None
         self._log_viewer_dialog = None
+        self._help_dialogs = {}
 
         self._setup_ui()
         self._load_settings()
@@ -195,6 +199,74 @@ class MainWindow(QMainWindow):
         self._mode_menu = QMenu("&Mode", self)
         menu_bar.addMenu(self._mode_menu)
         self._mode_menu.menuAction().setVisible(False)
+
+        help_menu = menu_bar.addMenu("&Help")
+        self._populate_mode_help(help_menu)
+
+    def _populate_mode_help(self, help_menu):
+        """Provide read-only plot controls without changing the active mode."""
+        mode_instructions = {
+            "Time-Space Diagram": (
+                "<ul>"
+                "<li><b>Left-click</b> a trajectory to select or deselect it.</li>"
+                "<li><b>Left-drag</b> a box to select the trajectories inside it.</li>"
+                "<li>Hold <b>Shift</b> and <b>left-drag</b> a box to remove trajectories from the selection.</li>"
+                "<li>Press <b>Esc</b> to clear the selection.</li>"
+                "<li><b>Right-click</b> to open the plot context menu.</li>"
+                "<li>Scroll the <b>mouse wheel</b> to zoom around the cursor.</li>"
+                "</ul>"
+            ),
+            "Gap Headway": (
+                "<ul>"
+                "<li><b>Hover</b> near a trajectory point to preview its gap and headway.</li>"
+                "<li><b>Left-click</b> the point to lock or unlock the gap and headway.</li>"
+                "<li>Press <b>Esc</b> to clear all locked gaps and headways.</li>"
+                "<li><b>Right-click</b> to open the plot context menu.</li>"
+                "<li>Scroll the <b>mouse wheel</b> to zoom around the cursor.</li>"
+                "</ul>"
+            ),
+            "Shockwave": (
+                "<p><b>Quick Instructions:</b></p><ul>"
+                "<li><b>Left-click</b> a marker to start or extend a shockwave.</li>"
+                "<li>Press <b>Enter</b> to commit the shockwave. Select at least two points.</li>"
+                "<li>Press <b>Esc</b> to cancel the shockwave currently in progress.</li>"
+                "<li>Hold <b>Ctrl</b> and <b>right-click</b> a committed shockwave point to delete the entire shockwave.</li>"
+                "<li><b>Left-click</b> the results panel title to open the shockwave results table.</li>"
+                "<li><b>Right-click</b> to open the plot context menu.</li>"
+                "<li>Scroll the <b>mouse wheel</b> to zoom around the cursor.</li>"
+                "</ul><p><b>Edit a Shockwave:</b></p><ul>"
+                "<li>Hold <b>Ctrl</b> and <b>left-click</b> a committed shockwave point to start editing that shockwave.</li>"
+                "<li>While editing, hold <b>Ctrl</b> and <b>right-click</b> a selected point to remove it.</li>"
+                "<li>Press <b>Enter</b> to save the edited shockwave.</li>"
+                "<li>Press <b>Esc</b> to cancel the edit and restore the original shockwave.</li>"
+                "</ul>"
+            ),
+        }
+        for mode_name, instructions in mode_instructions.items():
+            action = help_menu.addAction(mode_name)
+            action.triggered.connect(
+                lambda checked=False, name=mode_name, commands=instructions:
+                    self._show_mode_help(name, commands)
+            )
+
+    def _show_mode_help(self, mode_name, instructions):
+        """Keep controls visible in a separate window while using the plot."""
+        dialog = self._help_dialogs.get(mode_name)
+        if dialog is None:
+            dialog = QDialog(self)
+            dialog.setWindowTitle(f"{mode_name} — Help")
+            dialog.resize(620, 420)
+            layout = QVBoxLayout(dialog)
+            commands = QTextBrowser(dialog)
+            commands.setHtml(instructions)
+            layout.addWidget(commands)
+            buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close, dialog)
+            buttons.rejected.connect(dialog.close)
+            layout.addWidget(buttons)
+            self._help_dialogs[mode_name] = dialog
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
 
     def _setup_home_page(self):
         self._home_widget = HomeWidget()
@@ -725,7 +797,17 @@ class MainWindow(QMainWindow):
         if not event_ids:
             return
 
-        from analysis.spline import SplineCompDialog
+        try:
+            from analysis.spline import SplineCompDialog
+        except ModuleNotFoundError as exc:
+            if exc.name != "scipy":
+                raise
+            QMessageBox.warning(
+                self,
+                "Missing dependency",
+                "Spline Fitting requires SciPy. Install project requirements and restart the app.",
+            )
+            return
         dlg = SplineCompDialog(self, self._db_connection, event_ids=event_ids)
         dlg.exec()
 

@@ -3,6 +3,10 @@
 Trajectory Tools is a pre-release desktop application for importing, exploring, and analyzing vehicle trajectory data. It uses JSON import profiles to normalize different CSV layouts into SQLite databases, then provides an interactive time-space plot, trajectory-quality analyses, and data export tools through a PyQt6 interface.
 
 ![Trajectory Tools displaying vehicle trajectories on a time-space plot](docs/images/01-main-window-overview.png)
+For project-specific roadmap items, recommended implementations, and version tracking, see [Trajectory Tools Open Source Tracking](docs/open-source-tracking.md).
+
+## Code of Conduct
+Please read our [CARMA Code of Conduct](https://github.com/usdot-fhwa-stol/CARMAPlatform/blob/develop/Code_of_Conduct.md) which outlines our expectations for participants within the CARMA community, as well as steps to reporting unacceptable behavior. We are committed to providing a welcoming and inspiring community for all and expect our code of conduct to be honored. Anyone who violates this code of conduct may be banned from the community.
 
 ## Features
 
