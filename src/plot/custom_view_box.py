@@ -10,7 +10,7 @@ This module provides a CustomViewBox class that extends pyqtgraph's ViewBox to a
 import logging
 import time
 import numpy as np
-from PyQt6.QtWidgets import QMenu
+from PyQt6.QtWidgets import QMenu, QMessageBox
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction
 import pyqtgraph as pg
@@ -701,7 +701,17 @@ class CustomViewBox(pg.ViewBox):
             return
 
         veh_id = target_veh_ids[0]
-        from analysis.spline import SplineTestingDialog
+        try:
+            from analysis.spline import SplineTestingDialog
+        except ModuleNotFoundError as exc:
+            if exc.name != "scipy":
+                raise
+            QMessageBox.warning(
+                self.parent_widget,
+                "Missing dependency",
+                "Spline Fitting requires SciPy. Install project requirements and restart the app.",
+            )
+            return
         dialog = SplineTestingDialog(
             self.parent_widget,
             self.parent_widget._db_connection,
