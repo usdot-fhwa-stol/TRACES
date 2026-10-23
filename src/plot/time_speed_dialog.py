@@ -561,9 +561,9 @@ class TimeSpeedDialog(QDialog):
         logger.debug(f"Applied slider filters: time=[{time_min}, {time_max}], y=[{y_min}, {y_max}]")
 
     def _add_lane_annotations(self):
-        """Add dashed vertical lane-boundary markers and lane labels."""
+        """Show lane boundaries and labels only in the All Lanes view."""
         self._lane_label_items.clear()
-        if len(self._vehicle_data) != 1:
+        if self._lane_combobox.currentData() != -1 or len(self._vehicle_data) != 1:
             return
 
         y_min, y_max = self._y_slider.value()
