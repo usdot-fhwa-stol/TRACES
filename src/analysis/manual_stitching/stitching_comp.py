@@ -79,7 +79,8 @@ from utils import (
     GAP_FACTOR, missing_samples, events_columns, measured_rows_clause,
     TRAJ_STATUS_COL, TRAJ_KEPT, TRAJ_REMOVED, TRAJ_STITCHED,
 )
-from ..base_comp import BaseComp, DERIVED_EVENTS_COLUMNS, ensure_traj_status_column
+from ..base_comp import (BaseComp, DERIVED_EVENTS_COLUMNS,
+                         ensure_traj_status_column, purge_vehicle_records)
 from ..trajectory_utils import TrajectoryData, event_time_step, load_trajectory
 
 logger = logging.getLogger(__name__)
@@ -765,6 +766,7 @@ class ManualStitchingComp(BaseComp):
             with conn:
                 conn.execute("DELETE FROM events WHERE event_id = ? AND veh_id = ?",
                              (event_id, new_id))
+                purge_vehicle_records(conn, event_id, new_id)
                 for v, st in restored.items():
                     conn.execute(
                         f"UPDATE events SET {TRAJ_STATUS_COL} = ? "

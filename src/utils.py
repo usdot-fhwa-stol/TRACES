@@ -1,9 +1,10 @@
 import sys
 import os
 import shutil
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable, List, Optional, Tuple
+from typing import Dict, FrozenSet, Iterable, List, Optional, Tuple
 
 import numpy as np
 
@@ -118,12 +119,115 @@ def events_columns(db_connection) -> set:
 # Defined here (not in analysis) so plot/gui/data_import can build filters
 # without importing the analysis package. analysis.base_comp re-exports these.
 
-# Row provenance -- events.imputed_status (per row).
-IMPUTED_ORIGINAL = " "   # real observation (column default)
-IMPUTED_SPLINE   = "S"   # synthetic row created solely to complete SplineComp's calc_* timing grid
-IMPUTED_AUTO     = "A"   # gap filled automatically by Missing Data Interpolation
-IMPUTED_MANUAL   = "M"   # gap filled/refined manually by Missing Data Interpolation
+# Row provenance -- events.imputed_status (per row). Every code must also be
+# registered in IMPUTED_CODES below.
+IMPUTED_ORIGINAL  = " "   # real observation (column default)
+IMPUTED_SPLINE    = "S"   # synthetic row created solely to complete SplineComp's calc_* timing grid
+IMPUTED_AUTO      = "A"   # gap filled automatically by Missing Data Interpolation
+IMPUTED_MANUAL    = "M"   # gap filled/refined manually by Missing Data Interpolation
+IMPUTED_LANE      = "L"   # lane_id reassigned by Lane-Level Anomaly correction; kinematics still measured
+IMPUTED_CORRECTED = "C"   # position and lane replaced by Lane-Level Anomaly midline correction;
+                          # veh_speed / veh_accel recomputed from the corrected position
 IMPUTED_STATUS_COL = "imputed_status"
+
+# Modules that own imputed_status codes. A module may change the code of a
+# row only if the row is IMPUTED_ORIGINAL or carries one of its own codes;
+# superseded_points records (analysis.base_comp) are keyed by this name.
+OWNER_IMPORT       = "import"
+OWNER_SPLINE       = "spline"
+OWNER_GAP          = "gap"
+OWNER_LANE_ANOMALY = "lane_anomaly"
+
+
+@dataclass(frozen=True)
+class ImputedCode:
+    """What one imputed_status code means for the row carrying it.
+
+    Consumers should select rows by these properties (status_codes()) rather
+    than by comparing against code literals, so a new code is handled by
+    declaring its properties here. A new code still needs an audit of every
+    module that owns or reads codes -- the properties make each module's
+    intent explicit, they don't decide it.
+
+    is_placeholder       the row exists only to complete a timing grid and
+                         carries no trajectory value of its own (spline
+                         synthetic rows). Excluded wherever a trajectory is
+                         read as data (measured_rows_clause).
+    kinematics_measured  veh_dist_trav / veh_speed / veh_accel / veh_jerk
+                         hold the original sensor values.
+    lane_measured        lane_id holds the original (imported) value.
+    """
+    code: str
+    label: str
+    owner: str
+    is_placeholder: bool
+    kinematics_measured: bool
+    lane_measured: bool
+
+
+IMPUTED_CODES: Dict[str, ImputedCode] = {c.code: c for c in (
+    ImputedCode(IMPUTED_ORIGINAL,  "original",         OWNER_IMPORT,
+                is_placeholder=False, kinematics_measured=True,  lane_measured=True),
+    ImputedCode(IMPUTED_SPLINE,    "spline timing row", OWNER_SPLINE,
+                is_placeholder=True,  kinematics_measured=False, lane_measured=False),
+    ImputedCode(IMPUTED_AUTO,      "gap fill (auto)",   OWNER_GAP,
+                is_placeholder=False, kinematics_measured=False, lane_measured=False),
+    ImputedCode(IMPUTED_MANUAL,    "gap fill (manual)", OWNER_GAP,
+                is_placeholder=False, kinematics_measured=False, lane_measured=False),
+    ImputedCode(IMPUTED_LANE,      "lane reassigned",   OWNER_LANE_ANOMALY,
+                is_placeholder=False, kinematics_measured=True,  lane_measured=False),
+    ImputedCode(IMPUTED_CORRECTED, "midline corrected", OWNER_LANE_ANOMALY,
+                is_placeholder=False, kinematics_measured=False, lane_measured=False),
+)}
+
+for _c in IMPUTED_CODES.values():
+    # Codes are inlined into SQL as literals (status_in_clause), so they
+    # must be single characters that need no escaping.
+    assert len(_c.code) == 1 and _c.code != "'", f"invalid imputed_status code {_c.code!r}"
+del _c
+
+
+def status_codes(owner: Optional[str] = None, *,
+                 is_placeholder: Optional[bool] = None,
+                 kinematics_measured: Optional[bool] = None,
+                 lane_measured: Optional[bool] = None) -> FrozenSet[str]:
+    """Registered imputed_status codes matching every given property;
+    None means "any". e.g. status_codes(owner=OWNER_GAP) -> {'A', 'M'}."""
+    def keep(c: ImputedCode) -> bool:
+        return ((owner is None or c.owner == owner)
+                and (is_placeholder is None or c.is_placeholder == is_placeholder)
+                and (kinematics_measured is None or c.kinematics_measured == kinematics_measured)
+                and (lane_measured is None or c.lane_measured == lane_measured))
+    return frozenset(c.code for c in IMPUTED_CODES.values() if keep(c))
+
+
+def imputed_label(code: Optional[str]) -> str:
+    """Human-readable name of an imputed_status code, for UI and logs."""
+    c = IMPUTED_CODES.get(code if code is not None else IMPUTED_ORIGINAL)
+    return c.label if c else f"unknown ({code!r})"
+
+
+def status_in_clause(codes: Iterable[str], alias: str = "", negate: bool = False) -> str:
+    """SQL fragment ' AND [alias.]imputed_status [NOT] IN (...)' with the
+    codes inlined as literals. The caller checks the column exists.
+
+    Prefer negate=True (exclude the codes a query must not see) over an
+    allow-list: a code added later, or written by a newer version of the
+    application, is then treated as ordinary trajectory data instead of
+    silently disappearing from the query.
+
+    Empty *codes*: "" when negated (nothing to exclude), otherwise a
+    clause that matches no row."""
+    codes = sorted(set(codes))
+    for c in codes:
+        if len(c) != 1 or c == "'":
+            raise ValueError(f"invalid imputed_status code {c!r}")
+    if not codes:
+        return "" if negate else " AND 0"
+    p = f"{alias}." if alias else ""
+    listed = ", ".join(f"'{c}'" for c in codes)
+    return f" AND {p}{IMPUTED_STATUS_COL} {'NOT IN' if negate else 'IN'} ({listed})"
+
 
 # Trajectory status -- events.traj_status (uniform per event_id, veh_id).
 TRAJ_KEPT      = "K"     # not part of a stitch (column default)
@@ -142,12 +246,15 @@ def active_rows_clause(cols: set, alias: str = "") -> str:
 
 
 def measured_rows_clause(cols: set, alias: str = "") -> str:
-    """SQL fragment excluding SplineComp synthetic rows (no measurement).
-    Falls back to the legacy is_spline_imputed column on databases that
-    predate imputed_status. Starts with ' AND', or "" if neither exists."""
+    """SQL fragment excluding placeholder rows -- registered codes with
+    is_placeholder (today only SplineComp's synthetic timing rows), which
+    carry no trajectory value. Every other row, gap fills and lane
+    corrections included, is trajectory data. Falls back to the legacy
+    is_spline_imputed column on databases that predate imputed_status.
+    Starts with ' AND', or "" if neither exists."""
     p = f"{alias}." if alias else ""
     if IMPUTED_STATUS_COL in cols:
-        return f" AND {p}{IMPUTED_STATUS_COL} <> '{IMPUTED_SPLINE}'"
+        return status_in_clause(status_codes(is_placeholder=True), alias, negate=True)
     if "is_spline_imputed" in cols:
         return f" AND ({p}is_spline_imputed = 0 OR {p}is_spline_imputed IS NULL)"
     return ""

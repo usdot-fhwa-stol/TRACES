@@ -4,27 +4,28 @@ from PyQt6.QtWidgets import (
     QFrame, QSizePolicy, QGraphicsDropShadowEffect
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, QRect
-from PyQt6.QtGui import QColor, QPainter, QBrush, QLinearGradient, QCursor
+from PyQt6.QtGui import QColor, QPainter, QBrush, QCursor
+
+from ui_kit.brand import ACCENT, background_gradient
 
 
 class _GradientWidget(QWidget):
-    """Full-bleed background widget that paints the 135° purple gradient."""
+    """Full-bleed background widget that paints the TRACES brand gradient:
+    Eisenhower blue at the top, pale blue into pale yellow across the
+    middle, CARMA yellow at the bottom (ui_kit.brand.background_gradient)."""
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        grad = QLinearGradient(0, 0, self.width(), self.height())
-        grad.setColorAt(0.0, QColor("#667eea"))
-        grad.setColorAt(1.0, QColor("#764ba2"))
-        painter.fillRect(self.rect(), QBrush(grad))
+        painter.fillRect(self.rect(), QBrush(background_gradient(self.height())))
 
 
 class _ActionCard(QFrame):
     """Clickable card widget matching the .action-card CSS style.
 
     Emits ``clicked`` when the user presses and releases inside the card.
-    Reproduces the hover lift (shadow deepens, border turns #667eea) and
-    the active/press depression using QPropertyAnimation on geometry.
+    Reproduces the hover lift (shadow deepens, border turns the brand
+    accent color) and the active/press depression using
+    QPropertyAnimation on geometry.
     """
 
     clicked = pyqtSignal()
@@ -54,7 +55,7 @@ class _ActionCard(QFrame):
             "QFrame#actionCard {"
             "  background: white;"
             "  border-radius: 10px;"
-            "  border: 2px solid #667eea;"
+            f"  border: 2px solid {ACCENT};"
             "}"
         )
         self.setStyleSheet(self._normal_ss)
@@ -151,7 +152,7 @@ class _RecentFileItem(QFrame):
 
         name_lbl = QLabel(Path(file_path).name)
         name_lbl.setStyleSheet(
-            "font-size: 13px; font-weight: 500; color: #667eea; border: none;"
+            f"font-size: 13px; font-weight: 500; color: {ACCENT}; border: none;"
         )
         layout.addWidget(name_lbl)
 
@@ -191,8 +192,9 @@ class _RecentFileItem(QFrame):
 class HomeWidget(QWidget):
     """Pure-PyQt6 home screen replacing the QWebEngineView / home.html pair.
 
-    Matches the visual design of home.html:
-      - 135° linear gradient background (#667eea → #764ba2)
+    Layout:
+      - Vertical TRACES brand gradient background, Eisenhower blue through
+        pale blue and pale yellow to CARMA yellow (ui_kit.brand)
       - Centred white container (60% of available width) with rounded corners
         and drop shadow; height shrinks to fit content
       - Two action cards (Open Trajectories, Import Data) in a row

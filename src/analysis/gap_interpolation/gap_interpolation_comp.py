@@ -23,23 +23,36 @@ counts as a gap -- see find_gaps:
 
 Measured data and superseded points
 -----------------------------------
-"Measured data" means the original measurements of a trajectory: events
-rows with imputed_status = IMPUTED_ORIGINAL, plus the measured values of
-bridged points saved in the gap_superseded_points table (below).
-Detection and compute_fill's spline fit both read exactly that
-population (_measured_source), so a trajectory's fit always uses all of
-its measured data, and a gap this module has already filled -- bridged
-points included -- is detected again on every rerun.
+"Measured data" here means the trajectory as it reads with this module's
+own fills undone (analysis.base_comp.layer_source with OWNER_GAP): every
+events row that is neither a placeholder (SplineComp's synthetic timing
+rows) nor one of this module's fills (utils.status_codes(owner=OWNER_GAP),
+i.e. IMPUTED_AUTO / IMPUTED_MANUAL), plus the pre-fill values of bridged
+points saved in the shared superseded_points table. Rows other modules
+have corrected -- lane reassignments (IMPUTED_LANE), midline corrections
+(IMPUTED_CORRECTED) -- are part of that data. Detection and compute_fill's
+spline fit both read exactly that population (_measured_source), so a
+trajectory's fit always uses all of its data, and a gap this module has
+already filled -- bridged points included -- is detected again on every
+rerun.
+
+The selection excludes codes rather than listing them, so a code added
+later is treated as trajectory data until this module is told otherwise.
 
 events holds one row per (event_id, veh_id, veh_time), so a bridged
-point cannot keep its measured row next to a fill row. When a fill is
-written over a measured row (write_fill_rows), the row's measured values
-are first saved to gap_superseded_points -- the record that flags that
-measurement as removed -- and the events row then holds the fill, tagged
-IMPUTED_AUTO / IMPUTED_MANUAL like every other fill row, so the imputed
-values supersede the measurement everywhere the events table is read.
-Clearing the fill (Remove, Delete, a rerun's replace) writes the saved
-values back into the row as IMPUTED_ORIGINAL and drops the record.
+point cannot keep its row next to a fill row. When a fill is written over
+an existing row (write_fill_rows), the row's values and imputed_status
+are first saved to superseded_points under OWNER_GAP, and the events row
+then holds the fill, tagged IMPUTED_AUTO / IMPUTED_MANUAL like every
+other fill row, so the imputed values supersede the measurement
+everywhere the events table is read. Clearing the fill (Remove, Delete,
+a rerun's replace) writes the saved values and status back into the row
+and drops the record -- so a bridged lane-corrected point comes back as
+IMPUTED_LANE, not IMPUTED_ORIGINAL.
+
+Databases written before superseded_points existed hold these records in
+gap_superseded_points; they are read in place and migrated on the first
+write (analysis.base_comp.ensure_superseded_table).
 
 The fill itself is compute_fill(), below: it calls
 analysis.spline.spline_comp.apply_spline_fit() directly per gap
@@ -67,13 +80,21 @@ import numpy as np
 
 from utils import event_time_step, events_columns
 from ..base_comp import (
-    BaseComp, ensure_imputed_status_column, IMPUTED_AUTO, IMPUTED_MANUAL, IMPUTED_ORIGINAL,
-    IMPUTED_STATUS_COL,
+    BaseComp, ensure_imputed_status_column, IMPUTED_AUTO, IMPUTED_MANUAL,
+    IMPUTED_STATUS_COL, OWNER_GAP, status_codes, status_in_clause,
+    SUPERSEDED_TABLE, LEGACY_GAP_SUPERSEDED_TABLE, OPTIONAL_KINEMATIC_COLS,
+    ensure_superseded_table, layer_source, restore_superseded, supersede_rows,
+    table_exists,
 )
 from ..spline.spline_comp import apply_spline_fit, nearest_valid_ic
 from ..trajectory_utils import generate_complete_timestamps
 
 logger = logging.getLogger(__name__)
+
+
+# events.imputed_status codes this module writes (and so owns): IMPUTED_AUTO
+# and IMPUTED_MANUAL. Derived from the registry so the two stay in step.
+GAP_FILL_CODES: FrozenSet[str] = status_codes(owner=OWNER_GAP)
 
 
 # ── Gap definition defaults ─────────────────────────────────────────────────
@@ -221,8 +242,8 @@ class GapResult:
     GapConfigDialog renumbers kept gaps to stay chronological.
 
     bridged_rows counts the measured points inside a merged gap (see
-    find_gaps) -- the fill replaces them, and their measured values are
-    kept in gap_superseded_points until the fill is cleared.
+    find_gaps) -- the fill replaces them, and their values are kept in
+    superseded_points until the fill is cleared.
 
     spline_fitting_base/s/k, added_points_json, and status describe a
     fill that hasn't happened yet at detection time (all None / status
@@ -277,29 +298,15 @@ _GAPS_TABLE_COLUMNS: List[Tuple[str, str]] = [
     ("status",                 "TEXT NOT NULL"),
 ]
 
-# Measured values of points a gap fill replaced (bridged points of merged
-# gaps) -- see the module docstring. One row per replaced events row; no
-# gap_id, so renumbering gaps never touches it -- a gap's superseded
-# points are the ones strictly inside its time span.
-SUPERSEDED_TABLE = "gap_superseded_points"
-_SUPERSEDED_COLUMNS: List[Tuple[str, str]] = [
-    ("event_id",      "INTEGER NOT NULL"),
-    ("veh_id",        "INTEGER NOT NULL"),
-    ("veh_time",      "REAL NOT NULL"),
-    ("lane_id",       ""),      # untyped: stored exactly as events holds it
-    ("veh_dist_trav", "REAL"),
-    ("veh_speed",     "REAL"),
-    ("veh_accel",     "REAL"),
-    ("veh_jerk",      "REAL"),
-]
-_SUPERSEDED_VALUE_COLS = ("lane_id", "veh_dist_trav", "veh_speed", "veh_accel", "veh_jerk")
-_OPTIONAL_KINEMATIC_COLS = ("veh_speed", "veh_accel", "veh_jerk")
+# Values of points a gap fill replaced (bridged points of merged gaps) live
+# in the shared superseded_points table under OWNER_GAP -- see the module
+# docstring. One record per replaced events row; no gap_id, so renumbering
+# gaps never touches them -- a gap's superseded points are the ones
+# strictly inside its time span. SUPERSEDED_TABLE / LEGACY_GAP_SUPERSEDED_TABLE
+# are re-exported from analysis.base_comp for callers that name them.
 
-
-def _table_exists(db_connection: sqlite3.Connection, name: str) -> bool:
-    return db_connection.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
-    ).fetchone() is not None
+# Kept for callers that imported the private name.
+_table_exists = table_exists
 
 
 def gaps_table_exists(db_connection: sqlite3.Connection) -> bool:
@@ -307,7 +314,7 @@ def gaps_table_exists(db_connection: sqlite3.Connection) -> bool:
     table. Readers check this instead of creating it, so merely opening
     the dialog never modifies the database before the user has chosen
     where changes are written."""
-    return _table_exists(db_connection, "gaps")
+    return table_exists(db_connection, "gaps")
 
 
 def _gaps_columns(db_connection: sqlite3.Connection) -> set:
@@ -317,56 +324,39 @@ def _gaps_columns(db_connection: sqlite3.Connection) -> set:
 def _ensure_gap_storage(db_connection: sqlite3.Connection) -> None:
     """Bring an existing gap store up to date, without committing: add
     gaps.bridged_rows to a gaps table created before gap merging, and
-    create gap_superseded_points. Called by the write helpers, so a
-    database whose gaps table predates these still works when written to
-    from the review window (which doesn't call ensure_schema). Only ever
-    runs on a write path, after the write target has been resolved."""
+    create superseded_points (migrating a legacy gap_superseded_points
+    table into it). Called by the write helpers, so a database whose gaps
+    table predates these still works when written to from the review
+    window (which doesn't call ensure_schema). Only ever runs on a write
+    path, after the write target has been resolved."""
     if gaps_table_exists(db_connection) and "bridged_rows" not in _gaps_columns(db_connection):
         db_connection.execute(
             "ALTER TABLE gaps ADD COLUMN bridged_rows INTEGER NOT NULL DEFAULT 0")
-    if not _table_exists(db_connection, SUPERSEDED_TABLE):
-        cols_sql = ",\n    ".join(
-            f"{name} {affinity}".rstrip() for name, affinity in _SUPERSEDED_COLUMNS)
-        db_connection.execute(
-            f"CREATE TABLE {SUPERSEDED_TABLE} (\n    {cols_sql},\n"
-            f"    PRIMARY KEY (event_id, veh_id, veh_time)\n"
-            f") WITHOUT ROWID;"
-        )
+    ensure_superseded_table(db_connection)
 
 
-def _original_rows_clause(db_connection: sqlite3.Connection) -> Tuple[str, list]:
-    """(sql_fragment, params) restricting events to original measurements.
-    Empty when imputed_status doesn't exist yet -- then every row is an
-    original measurement."""
+def _gap_fill_rows_clause(db_connection: sqlite3.Connection) -> str:
+    """SQL fragment selecting this module's fill rows (GAP_FILL_CODES).
+    Matches nothing when imputed_status doesn't exist yet -- then no row
+    is a fill."""
     if IMPUTED_STATUS_COL not in events_columns(db_connection):
-        return "", []
-    return f" AND {IMPUTED_STATUS_COL} = ?", [IMPUTED_ORIGINAL]
+        return " AND 0"
+    return status_in_clause(GAP_FILL_CODES)
 
 
 def _measured_source(db_connection: sqlite3.Connection) -> Tuple[str, list]:
     """(sql, params): a parenthesised derived table of every measured point
-    -- original events rows plus superseded points -- with columns
-    event_id, veh_id, veh_time, lane_id, veh_dist_trav, veh_speed,
-    veh_accel, veh_jerk (NULL where events lacks the column). Use as
-    ``SELECT ... FROM {sql} WHERE ...`` with *params* placed before the
-    outer query's own parameters.
+    -- events rows that are neither placeholders nor this module's fills,
+    plus this module's superseded points -- with columns event_id, veh_id,
+    veh_time, lane_id, veh_dist_trav, veh_speed, veh_accel, veh_jerk (NULL
+    where events lacks the column). Use as ``SELECT ... FROM {sql} WHERE
+    ...`` with *params* placed before the outer query's own parameters.
 
     This is the single definition of "measured data" for detection and
     fitting: a fill that replaced measured points doesn't change either.
+    See analysis.base_comp.layer_source.
     """
-    cols = events_columns(db_connection)
-
-    def col(name: str) -> str:
-        return f"{name} AS {name}" if name in cols else f"NULL AS {name}"
-
-    select = ", ".join(["event_id", "veh_id", "veh_time", "lane_id", "veh_dist_trav",
-                        *[col(c) for c in _OPTIONAL_KINEMATIC_COLS]])
-    original, params = _original_rows_clause(db_connection)
-    sql = f"SELECT {select} FROM events WHERE 1 = 1{original}"
-    if _table_exists(db_connection, SUPERSEDED_TABLE):
-        sql += (f" UNION ALL SELECT event_id, veh_id, veh_time, lane_id, veh_dist_trav, "
-                f"veh_speed, veh_accel, veh_jerk FROM {SUPERSEDED_TABLE}")
-    return f"({sql})", params
+    return layer_source(db_connection, OWNER_GAP)
 
 
 # ── Gap fill (spline evaluation at each gap's missing timestamps) ──────────
@@ -474,12 +464,13 @@ class GapInterpolationComp(BaseComp):
 
     @staticmethod
     def ensure_schema(conn: sqlite3.Connection) -> None:
-        """Create the gaps and gap_superseded_points tables if absent
-        (adding gaps.bridged_rows to an older gaps table), and ensure the
-        shared imputed_status column exists on events (analysis/base_comp.py
-        -- also added by SplineComp.ensure_schema; safe to call from
-        either). Modifies the database, so callers run it only after the
-        write target has been resolved."""
+        """Create the gaps and superseded_points tables if absent (adding
+        gaps.bridged_rows to an older gaps table and migrating a legacy
+        gap_superseded_points table), and ensure the shared imputed_status
+        column exists on events (analysis/base_comp.py -- also added by
+        SplineComp.ensure_schema; safe to call from either). Modifies the
+        database, so callers run it only after the write target has been
+        resolved."""
         ensure_imputed_status_column(conn)
 
         if not gaps_table_exists(conn):
@@ -516,13 +507,13 @@ class GapInterpolationComp(BaseComp):
         placeholders = ",".join("?" for _ in veh_ids)
         source, source_params = _measured_source(db_connection)
         cursor = db_connection.cursor()
-        # Measured data only (original rows plus superseded points): this
-        # module's own fills (IMPUTED_AUTO / IMPUTED_MANUAL) still count as
-        # gaps, so a rerun with the same gap definition detects the same
-        # gaps whatever their fill state. SplineComp's synthetic rows
-        # (IMPUTED_SPLINE) are excluded too -- they occupy a timestamp slot
-        # but carry no measurement. veh_dist_trav IS NOT NULL also covers
-        # databases without the imputed_status column yet.
+        # Measured data only (see _measured_source): this module's own
+        # fills (GAP_FILL_CODES) still count as gaps, so a rerun with the
+        # same gap definition detects the same gaps whatever their fill
+        # state. SplineComp's synthetic rows (placeholders) are excluded
+        # too -- they occupy a timestamp slot but carry no measurement.
+        # veh_dist_trav IS NOT NULL also covers databases without the
+        # imputed_status column yet.
         cursor.execute(
             f"SELECT veh_id, veh_time FROM {source} "
             f"WHERE event_id = ? AND veh_id IN ({placeholders}) "
@@ -600,12 +591,12 @@ class GapInterpolationComp(BaseComp):
 
         source, source_params = _measured_source(db_connection)
         cursor = db_connection.cursor()
-        # Measured data only -- excluding IMPUTED_SPLINE, IMPUTED_AUTO and
-        # IMPUTED_MANUAL rows keeps each gap's fit independent of every
-        # other gap's fill state, so results don't depend on the order gaps
-        # happen to be reviewed/applied in. Superseded points are measured
-        # data whose events rows now hold a fill, so they come from
-        # gap_superseded_points instead.
+        # Measured data only -- excluding placeholders and this module's
+        # own fills keeps each gap's fit independent of every other gap's
+        # fill state, so results don't depend on the order gaps happen to
+        # be reviewed/applied in. Superseded points are data whose events
+        # rows now hold a fill, so they come from superseded_points
+        # instead.
         cursor.execute(
             f"SELECT {', '.join(select_cols)} FROM {source} "
             f"WHERE event_id = ? AND veh_id = ? AND veh_dist_trav IS NOT NULL "
@@ -685,7 +676,8 @@ class GapInterpolationComp(BaseComp):
 
             # Lane inherited from the nearest EARLIER measured record, same
             # convention SplineComp uses for its synthetic rows. A bridged
-            # point is its own nearest earlier record, so it keeps its lane.
+            # point is its own nearest earlier record, so it keeps its lane
+            # -- a lane-corrected one keeps its corrected lane.
             idx_earlier = np.clip(np.searchsorted(t, target_t, side="right") - 1, 0, t.size - 1)
 
             for i, tt in enumerate(target_t):
@@ -715,77 +707,29 @@ def _nan_to_none(x):
 
 
 def _supersede_measured(db_connection: sqlite3.Connection, fill_rows: List[FillRow]) -> None:
-    """Save the measured values of every original events row a fill is
-    about to overwrite (a merged gap's bridged points) into
-    gap_superseded_points, flagging that measurement as removed. Rows that
-    are already fills (a refill) or SplineComp synthetic rows have no
-    measurement and are skipped; INSERT OR IGNORE keeps the first saved
-    values if a point is somehow saved twice. Does not commit."""
+    """Save the values and imputed_status of every existing events row a
+    fill is about to overwrite (a merged gap's bridged points) into
+    superseded_points under OWNER_GAP, flagging that measurement as
+    replaced. Rows that are already fills (a refill) or SplineComp
+    synthetic rows have nothing to preserve and are skipped; INSERT OR
+    IGNORE keeps the first saved values if a point is somehow saved twice.
+    Does not commit."""
     _ensure_gap_storage(db_connection)
-    cols = events_columns(db_connection)
-    kinematics = ", ".join(c if c in cols else "NULL" for c in _OPTIONAL_KINEMATIC_COLS)
-    original, original_params = _original_rows_clause(db_connection)
-    db_connection.executemany(
-        f"INSERT OR IGNORE INTO {SUPERSEDED_TABLE} "
-        f"(event_id, veh_id, veh_time, {', '.join(_SUPERSEDED_VALUE_COLS)}) "
-        f"SELECT event_id, veh_id, veh_time, lane_id, veh_dist_trav, {kinematics} "
-        f"FROM events WHERE event_id = ? AND veh_id = ? AND veh_time = ?{original}",
-        [(r.event_id, r.veh_id, r.veh_time, *original_params) for r in fill_rows],
-    )
+    supersede_rows(db_connection, OWNER_GAP,
+                   [(r.event_id, r.veh_id, r.veh_time) for r in fill_rows])
 
 
 def _restore_superseded(db_connection: sqlite3.Connection, event_id: int,
                         veh_id: Optional[int] = None,
                         start_time: Optional[float] = None,
                         end_time: Optional[float] = None) -> int:
-    """Write superseded measured values back into their events rows as
-    IMPUTED_ORIGINAL and drop their gap_superseded_points records -- for
-    one event, optionally narrowed to one vehicle and the open interval
-    (start_time, end_time). Returns the number of points restored. Does
-    not commit.
-
-    UPDATE-in-place (via UPSERT) rather than delete-and-insert, so the
-    row's other columns -- import columns like veh_length, analysis
-    columns -- survive; the UPSERT's INSERT branch only runs if the row
-    has gone missing, which shouldn't happen."""
-    if not _table_exists(db_connection, SUPERSEDED_TABLE):
-        return 0
-    where = "event_id = ?"
-    params: list = [event_id]
-    if veh_id is not None:
-        where += " AND veh_id = ?"
-        params.append(veh_id)
-    if start_time is not None and end_time is not None:
-        where += " AND veh_time > ? AND veh_time < ?"
-        params += [start_time, end_time]
-
-    saved = db_connection.execute(
-        f"SELECT event_id, veh_id, veh_time, {', '.join(_SUPERSEDED_VALUE_COLS)} "
-        f"FROM {SUPERSEDED_TABLE} WHERE {where}", params).fetchall()
-    if not saved:
-        return 0
-
-    cols = events_columns(db_connection)
-    kinematics = [c for c in _OPTIONAL_KINEMATIC_COLS if c in cols]
-    insert_cols = ["event_id", "veh_id", "veh_time", "lane_id", "veh_dist_trav",
-                   *kinematics, IMPUTED_STATUS_COL]
-    update_cols = insert_cols[3:]
-    value_index = {name: 3 + i for i, name in enumerate(_SUPERSEDED_VALUE_COLS)}
-    db_connection.executemany(
-        f"INSERT INTO events ({', '.join(insert_cols)}) "
-        f"VALUES ({','.join('?' for _ in insert_cols)}) "
-        f"ON CONFLICT(event_id, veh_id, veh_time) DO UPDATE SET "
-        f"{', '.join(f'{c} = excluded.{c}' for c in update_cols)}",
-        [
-            (row[0], row[1], row[2], row[value_index["lane_id"]],
-             row[value_index["veh_dist_trav"]],
-             *[row[value_index[c]] for c in kinematics],
-             IMPUTED_ORIGINAL)
-            for row in saved
-        ],
-    )
-    db_connection.execute(f"DELETE FROM {SUPERSEDED_TABLE} WHERE {where}", params)
-    return len(saved)
+    """Write this module's superseded values back into their events rows,
+    with the imputed_status each row had before the fill, and drop their
+    records -- for one event, optionally narrowed to one vehicle and the
+    open interval (start_time, end_time). Returns the number of points
+    restored. Does not commit. See analysis.base_comp.restore_superseded."""
+    return restore_superseded(db_connection, OWNER_GAP, event_id,
+                              veh_id, start_time, end_time)
 
 
 def write_fill_rows(db_connection: sqlite3.Connection, fill_rows: List[FillRow], status: str) -> None:
@@ -799,9 +743,9 @@ def write_fill_rows(db_connection: sqlite3.Connection, fill_rows: List[FillRow],
     other columns of a measured row. ON CONFLICT ... DO UPDATE touches
     only the columns this module owns.
 
-    A measured row about to be overwritten is first saved to
-    gap_superseded_points (_supersede_measured), so the fill supersedes
-    the measurement without losing it.
+    An existing row about to be overwritten is first saved to
+    superseded_points (_supersede_measured), so the fill supersedes the
+    measurement without losing it.
 
     Shared by GapConfigDialog (bulk write, status=IMPUTED_AUTO) and
     GapReviewDialog (one gap at a time, status=IMPUTED_MANUAL) so both
@@ -809,10 +753,12 @@ def write_fill_rows(db_connection: sqlite3.Connection, fill_rows: List[FillRow],
     """
     if not fill_rows:
         return
+    if status not in GAP_FILL_CODES:
+        raise ValueError(f"write_fill_rows: {status!r} is not a gap fill code")
     _supersede_measured(db_connection, fill_rows)
 
     cols = events_columns(db_connection)
-    optional = [c for c in _OPTIONAL_KINEMATIC_COLS if c in cols]
+    optional = [c for c in OPTIONAL_KINEMATIC_COLS if c in cols]
 
     insert_cols = ["event_id", "veh_id", "veh_time", "lane_id", "veh_dist_trav",
                    *optional, IMPUTED_STATUS_COL]
@@ -870,17 +816,16 @@ def delete_gap_row(db_connection: sqlite3.Connection, event_id: int, veh_id: int
 def clear_gap_fill(db_connection: sqlite3.Connection, gap: GapResult) -> None:
     """Undo this module's fill inside *gap*'s span (strictly between its
     two measured boundary timestamps), leaving the gap missing again:
-    measured points the fill superseded get their measured values back,
-    then the remaining fill rows (IMPUTED_AUTO / IMPUTED_MANUAL) are
-    deleted. Original rows and SplineComp's synthetic rows are untouched.
+    points the fill superseded get their previous values and status back,
+    then the remaining fill rows (GAP_FILL_CODES) are deleted. Every other
+    row -- original, SplineComp synthetic, lane-corrected -- is untouched.
     Does not commit."""
     _restore_superseded(db_connection, gap.event_id, gap.veh_id,
                         gap.start_time, gap.end_time)
     db_connection.execute(
         f"DELETE FROM events WHERE event_id = ? AND veh_id = ? "
-        f"AND veh_time > ? AND veh_time < ? AND {IMPUTED_STATUS_COL} IN (?, ?)",
-        (gap.event_id, gap.veh_id, gap.start_time, gap.end_time,
-         IMPUTED_AUTO, IMPUTED_MANUAL),
+        f"AND veh_time > ? AND veh_time < ?{_gap_fill_rows_clause(db_connection)}",
+        (gap.event_id, gap.veh_id, gap.start_time, gap.end_time),
     )
 
 
@@ -952,12 +897,11 @@ def read_gap_rows(db_connection: sqlite3.Connection, event_id: int) -> List[GapR
 
 
 def delete_gap_records(db_connection: sqlite3.Connection, event_id: int) -> None:
-    """Delete every gaps-table row for *event_id*, restore every measured
-    point a fill superseded in that event, and delete every remaining
-    events row this module filled (IMPUTED_AUTO/IMPUTED_MANUAL); commit.
-    Rows with IMPUTED_ORIGINAL or IMPUTED_SPLINE (SplineComp's own
-    synthetic rows) are untouched -- this module only ever owns rows it
-    tagged itself.
+    """Delete every gaps-table row for *event_id*, restore every point a
+    fill superseded in that event, and delete every remaining events row
+    this module filled (GAP_FILL_CODES); commit. Rows of every other code
+    -- original, SplineComp's synthetic rows, lane corrections -- are
+    untouched: this module only ever owns rows it tagged itself.
 
     No longer used by the dialogs, which delete per gap (delete_gaps) so
     manual edits can be kept; retained for callers that want a full reset.
@@ -966,8 +910,8 @@ def delete_gap_records(db_connection: sqlite3.Connection, event_id: int) -> None
         return
     _restore_superseded(db_connection, event_id)
     db_connection.execute(
-        f"DELETE FROM events WHERE event_id = ? AND {IMPUTED_STATUS_COL} IN (?, ?)",
-        (event_id, IMPUTED_AUTO, IMPUTED_MANUAL),
+        f"DELETE FROM events WHERE event_id = ?{_gap_fill_rows_clause(db_connection)}",
+        (event_id,),
     )
     db_connection.execute("DELETE FROM gaps WHERE event_id = ?", (event_id,))
     db_connection.commit()
