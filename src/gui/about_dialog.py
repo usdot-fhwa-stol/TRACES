@@ -61,7 +61,7 @@ class AboutDialog(QDialog):
         layout.addWidget(self._logo)
 
         # Version
-        version = QLabel(f"<b>Version {APP_VERSION} (beta)</b>")
+        version = QLabel(f"<b>Version {APP_VERSION}</b>")
         version.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(version)
 

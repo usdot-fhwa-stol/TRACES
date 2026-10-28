@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 # ── Name ────────────────────────────────────────────────────────────────────
 
 APP_NAME = "TRACES"
-APP_VERSION = "0.1"          # keep in step with APP_VERSION in .github/workflows/build.yml
+APP_VERSION = "1.0"          # keep in step with APP_VERSION in .github/workflows/build.yml
 
 # ── Colors ──────────────────────────────────────────────────────────────────
 
