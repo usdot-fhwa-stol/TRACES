@@ -4,9 +4,9 @@ from PyQt6.QtWidgets import (
     QFrame, QSizePolicy, QGraphicsDropShadowEffect
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, QRect
-from PyQt6.QtGui import QColor, QPainter, QBrush, QCursor
+from PyQt6.QtGui import QColor, QPainter, QBrush, QCursor, QPixmap
 
-from ui_kit.brand import ACCENT, background_gradient
+from ui_kit.brand import ACCENT, APP_NAME, SAXTON_BLUE, background_gradient, logo_pixmap
 
 
 class _GradientWidget(QWidget):
@@ -17,6 +17,55 @@ class _GradientWidget(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.fillRect(self.rect(), QBrush(background_gradient(self.height())))
+
+
+class _LogoWidget(QWidget):
+    """The TRACES logo between the two action cards: exactly as tall as
+    the cards' row (the cards decide the height) and as wide as the
+    logo's proportions need at that height.
+
+    Drawn from the SVG at the widget's size and the screen's pixel
+    density, and redrawn when either changes, so it stays sharp at any
+    window size or display scaling. The lettering keeps the logo's own
+    Saxton blue: the home screen's container is always white, whatever
+    the system theme."""
+
+    _LETTERING = SAXTON_BLUE
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        sample = logo_pixmap(100, 1.0, self._LETTERING)
+        self._aspect = (sample.width() / sample.height()
+                        if not sample.isNull() and sample.height() else 1.0)
+        self._pixmap = QPixmap()
+        self._key = None                       # (width, height, dpr) drawn
+        # Width follows the height (set in resizeEvent); height is
+        # whatever the row gives -- Ignored, so the logo never makes the
+        # row taller than the cards.
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Ignored)
+        self.setFixedWidth(110)                # the cards' minimum height, until laid out
+        self.setAccessibleName(APP_NAME)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        width = max(1, round(self.height() * self._aspect))
+        if abs(self.width() - width) > 1:      # tolerance: no relayout ping-pong
+            self.setFixedWidth(width)
+
+    def paintEvent(self, event):
+        dpr = self.devicePixelRatioF()
+        width = min(self.width(), round(self.height() * self._aspect))
+        key = (width, self.height(), dpr)
+        if key != self._key:                   # new size or another screen's scaling
+            self._pixmap = logo_pixmap(width, dpr, self._LETTERING) if width > 0 else QPixmap()
+            self._key = key
+        if self._pixmap.isNull():
+            return
+        logical_w = self._pixmap.width() / self._pixmap.devicePixelRatio()
+        logical_h = self._pixmap.height() / self._pixmap.devicePixelRatio()
+        x = (self.width() - logical_w) / 2
+        y = (self.height() - logical_h) / 2
+        QPainter(self).drawPixmap(round(x), round(y), self._pixmap)
 
 
 class _ActionCard(QFrame):
@@ -197,7 +246,8 @@ class HomeWidget(QWidget):
         pale blue and pale yellow to CARMA yellow (ui_kit.brand)
       - Centred white container (60% of available width) with rounded corners
         and drop shadow; height shrinks to fit content
-      - Two action cards (Open Trajectories, Import Data) in a row
+      - Two action cards (Open Trajectories, Import Data) in a row, with
+        the TRACES logo between them scaled to the cards' height
       - Recent-files section that grows as items are added
 
     Signals:
@@ -314,8 +364,11 @@ class HomeWidget(QWidget):
         )
         import_card.clicked.connect(self.import_file_requested)
 
-        cards_row.addWidget(open_card)
-        cards_row.addWidget(import_card)
+        # The cards share the row's spare width equally; the logo takes
+        # only what its height needs.
+        cards_row.addWidget(open_card, stretch=1)
+        cards_row.addWidget(_LogoWidget())
+        cards_row.addWidget(import_card, stretch=1)
         inner_layout.addLayout(cards_row)
 
         inner_layout.addSpacing(40)

@@ -257,7 +257,7 @@ class ImportDialog(QDialog):
         self._selected_file_type = ""
         self._worker_thread = None
         # Use get_user_data_path for log file to work in both development and PyInstaller environments
-        self._log_file = get_user_data_path("trajectory_tools.log")
+        self._log_file = get_user_data_path("traces.log")
         self._import_completed = False  # Track if import completed successfully
         self._successful_import_path = ""  # Store path of successful import
         logger.debug("ImportDialog initialized")

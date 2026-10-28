@@ -10,9 +10,10 @@ Bottom: output database path, Undo, Stitch, Cancel.
 
 Traj 1 / Traj 2 are chronological order (not click order). This dialog
 compares two objects, so it deliberately does not use plot_style's
-per-kinematic colors: on every plot Traj 1 is amber and Traj 2 green
-(solid). The split line is purple dashed; overlap and gap bounds are
-black dashed lines, on all three plots.
+per-kinematic colors: on every plot Traj 1 is amber and Traj 2 green --
+solid where the stitch keeps the samples, dashed where it drops them. The
+split line is purple dashed; overlap and gap bounds are black dashed
+lines, on all three plots.
 
 Stitch line. Only a gap leaves a span where the stitched trajectory has
 no observations, so only a gap gets a stitch line: a dark blue dashed
@@ -20,10 +21,17 @@ line ("Stitched" in the legends) from Traj 1's last sample to Traj 2's
 first, across the gap. Dashed because nothing is written there -- the
 stitch keeps both trajectories' rows and adds none in between. An
 overlap or a continuous pair has no stitch line: the trajectories meet
-one sample apart. When the pair overlaps, each trajectory is drawn only
-over the time ranges it contributes at the current split
-(StitchPlan.ranges), so moving the slider moves where Traj 1 stops and
-Traj 2 starts -- the plot always shows exactly what Stitch will write.
+one sample apart.
+
+Overlap. Each trajectory is drawn solid over the time ranges it
+contributes at the current split (StitchPlan.ranges) and dashed, in its
+own color, over the overlap samples the stitch drops ("Traj 1 dropped" /
+"Traj 2 dropped" in the legends): Traj 1's dashed tail runs right of the
+split line, Traj 2's dashed head left of it. Each dashed part starts on
+the trajectory's last kept sample next to it, so solid and dashed join
+without a break. Moving the slider moves where each trajectory turns from
+solid to dashed -- the solid lines always show exactly what Stitch will
+write, and the dashed ones what it leaves out.
 
 The split slider steps through samples, not percentages: one position per
 Traj 2 sample in the overlap (StitchInputs.split_candidates), passed to the
@@ -35,7 +43,7 @@ one sample short; that one-step seam is what the stitch writes.
 
 Series are shown/hidden by clicking their legend entries. The stitch
 line is linked -- hiding it on one plot hides it on all three -- while
-Traj 1 and Traj 2 toggle per plot.
+Traj 1 and Traj 2 (kept and dropped) toggle per plot.
 
 Review and Undo. Given a stitch_record (ManualStitchingComp.prepare_existing),
 the dialog opens in review: it replays that stitch from its recorded split,
@@ -99,6 +107,11 @@ STITCHED_COLOR = "#1F3A93"   # dark blue (dashed stitch line across a gap)
 # role default so the dashes read clearly against the trajectories' ends.
 _STITCH_LINE_WIDTH = 3.0
 
+# Dropped overlap samples: Role.DERIVED's dash pattern in the trajectory's
+# own color, thinner than the kept (solid, 4 px) line so what the stitch
+# keeps stays the dominant line.
+_DROPPED_LINE_WIDTH = 2.5
+
 _STATUS_STYLE = {
     "review": "background: #EEF3FB; border: 1px solid #9DB1D6; padding: 4px;",
     "undone": "background: #EAF6EE; border: 1px solid #8CC5A0; padding: 4px;",
@@ -152,6 +165,21 @@ def _traj_values(tr) -> list:
         "n/a" if speed_missing else _fmt(_first_finite(tr.speed)),
         "n/a" if speed_missing else _fmt(_last_finite(tr.speed)),
     ]
+
+
+def _with_neighbors(mask: np.ndarray) -> np.ndarray:
+    """*mask* widened by one sample on each side, so a dashed dropped
+    section starts and ends on the kept samples next to it and joins the
+    solid line instead of leaving a one-step hole."""
+    out = mask.copy()
+    out[:-1] |= mask[1:]
+    out[1:] |= mask[:-1]
+    return out
+
+
+def _masked(values: dict, mask: np.ndarray) -> dict:
+    return {k: (None if v is None else np.where(mask, v, np.nan))
+            for k, v in values.items()}
 
 
 # ── Dialog ─────────────────────────────────────────────────────────────────
@@ -409,19 +437,37 @@ class StitchingPreviewDialog(QDialog):
                                  ("second", "Traj 2", SECOND_COLOR)):
             self._series[key] = self._plots.add_series(
                 name, Role.MEASURED, color=color, linked=False)
+        # Only an overlap drops samples (see module docstring).
+        if self._inputs.seam.case is TemporalCase.OVERLAP:
+            for key, name, color in (("first_dropped", "Traj 1 dropped", FIRST_COLOR),
+                                     ("second_dropped", "Traj 2 dropped", SECOND_COLOR)):
+                self._series[key] = self._plots.add_series(
+                    name, Role.DERIVED, color=color, linked=False,
+                    width=_DROPPED_LINE_WIDTH)
         self._draw_trajectories(None)
 
     def _draw_trajectories(self, plan: Optional[StitchPlan]):
-        """Draw each trajectory over the time ranges it contributes to
-        *plan* -- only narrower than the whole trajectory when the pair
-        overlaps. With no plan (or no split) both are drawn in full."""
+        """Draw each trajectory solid over the time ranges it contributes
+        to *plan* -- only narrower than the whole trajectory when the pair
+        overlaps -- and dashed over the samples *plan* drops. With no plan
+        (or no split) both are drawn solid in full."""
         for key, tr in (("first", self._inputs.first), ("second", self._inputs.second)):
             values = self._traj_series(tr)
-            if plan is not None and plan.split_time is not None:
-                keep = self._kept_mask(plan, tr)
-                values = {k: (None if v is None else np.where(keep, v, np.nan))
-                          for k, v in values.items()}
-            self._plots.set_data(self._series[key], tr.time, values)
+            dropped_series = self._series.get(f"{key}_dropped")
+            if plan is None or plan.split_time is None:
+                self._plots.set_data(self._series[key], tr.time, values)
+                if dropped_series is not None:
+                    self._plots.clear_data(dropped_series)
+                continue
+            keep = self._kept_mask(plan, tr)
+            self._plots.set_data(self._series[key], tr.time, _masked(values, keep))
+            if dropped_series is not None:
+                drop = ~keep
+                if drop.any():
+                    self._plots.set_data(dropped_series, tr.time,
+                                         _masked(values, _with_neighbors(drop)))
+                else:
+                    self._plots.clear_data(dropped_series)
 
     @staticmethod
     def _kept_mask(plan: StitchPlan, tr) -> np.ndarray:

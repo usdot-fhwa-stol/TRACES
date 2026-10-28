@@ -46,7 +46,7 @@ jobs:
     - name: Build with PyInstaller
       shell: powershell
       run: |
-        pyinstaller --name "trajectory_tools" --onedir --windowed `
+        pyinstaller --name "TRACES" --onedir --windowed `
           --icon src/assets/traces.ico `
           --paths src `
           --add-data "src/config;config" `
@@ -75,16 +75,16 @@ jobs:
       shell: powershell
       run: |
         $required = @(
-          "dist/trajectory_tools/_internal/ui_kit/plot_view.js",
-          "dist/trajectory_tools/_internal/config",
-          "dist/trajectory_tools/_internal/assets/traces_logo.svg",
-          "dist/trajectory_tools/_internal/assets/traces_icon.svg",
+          "dist/TRACES/_internal/ui_kit/plot_view.js",
+          "dist/TRACES/_internal/config",
+          "dist/TRACES/_internal/assets/traces_logo.svg",
+          "dist/TRACES/_internal/assets/traces_icon.svg",
           "src/assets/traces.ico"
         )
         foreach ($path in $required) {
           if (-not (Test-Path $path)) { Write-Error "Missing from build: $path"; exit 1 }
         }
-        $warn = "build/trajectory_tools/warn-trajectory_tools.txt"
+        $warn = "build/TRACES/warn-TRACES.txt"
         $packages = "scipy|numpy|pyqtgraph|superqt|PyQt6|utm"
         $missing = Select-String -Path $warn -Pattern "^missing module named '?($packages)'? -"
         if ($missing) {
@@ -101,15 +101,18 @@ jobs:
       run: |
         $nsis = @'
         Unicode True
-        !define APP_NAME      "Trajectory Tools"
+        ;-- APP_NAME is also the program folder, Start Menu folder,
+        ;-- shortcut and registry key name. APP_VERSION: keep in step
+        ;-- with APP_VERSION in src/ui_kit/brand.py.
+        !define APP_NAME      "TRACES"
         !define APP_VERSION   "0.1"
-        !define APP_EXE       "trajectory_tools.exe"
-        !define INSTALL_REG   "Software\TrajectoryTools"
-        !define UNINSTALL_REG "Software\Microsoft\Windows\CurrentVersion\Uninstall\TrajectoryTools"
+        !define APP_EXE       "TRACES.exe"
+        !define INSTALL_REG   "Software\${APP_NAME}"
+        !define UNINSTALL_REG "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}"
 
         Name "${APP_NAME} ${APP_VERSION}"
-        OutFile "trajectory_tools_setup.exe"
-        InstallDir "$PROGRAMFILES64\TrajectoryTools"
+        OutFile "TRACES_setup.exe"
+        InstallDir "$PROGRAMFILES64\${APP_NAME}"
         InstallDirRegKey HKLM "${INSTALL_REG}" "InstallDir"
         RequestExecutionLevel admin
 
@@ -132,17 +135,17 @@ jobs:
           SetOutPath "$INSTDIR"
 
           ;-- Copy entire PyInstaller onedir output
-          File /r "dist\trajectory_tools\*.*"
+          File /r "dist\TRACES\*.*"
 
           ;-- Start Menu shortcut
-          CreateDirectory "$SMPROGRAMS\TrajectoryTools"
-          CreateShortcut "$SMPROGRAMS\TrajectoryTools\Trajectory Tools.lnk" \
+          CreateDirectory "$SMPROGRAMS\${APP_NAME}"
+          CreateShortcut "$SMPROGRAMS\${APP_NAME}\${APP_NAME}.lnk" \
                          "$INSTDIR\${APP_EXE}"
-          CreateShortcut "$SMPROGRAMS\TrajectoryTools\Uninstall.lnk" \
+          CreateShortcut "$SMPROGRAMS\${APP_NAME}\Uninstall.lnk" \
                          "$INSTDIR\uninstall.exe"
 
           ;-- Desktop shortcut
-          CreateShortcut "$DESKTOP\Trajectory Tools.lnk" "$INSTDIR\${APP_EXE}"
+          CreateShortcut "$DESKTOP\${APP_NAME}.lnk" "$INSTDIR\${APP_EXE}"
 
           ;-- Registry: record install dir and version
           WriteRegStr   HKLM "${INSTALL_REG}" "InstallDir" "$INSTDIR"
@@ -153,7 +156,7 @@ jobs:
           WriteRegStr   HKLM "${UNINSTALL_REG}" "DisplayName"     "${APP_NAME}"
           WriteRegStr   HKLM "${UNINSTALL_REG}" "DisplayVersion"  "${APP_VERSION}"
           WriteRegStr   HKLM "${UNINSTALL_REG}" "DisplayIcon"     "$INSTDIR\${APP_EXE}"
-          WriteRegStr   HKLM "${UNINSTALL_REG}" "Publisher"       "Trajectory Tools"
+          WriteRegStr   HKLM "${UNINSTALL_REG}" "Publisher"       "${APP_NAME}"
           WriteRegStr   HKLM "${UNINSTALL_REG}" "UninstallString" "$INSTDIR\uninstall.exe"
           WriteRegStr   HKLM "${UNINSTALL_REG}" "InstallLocation" "$INSTDIR"
           WriteRegDWORD HKLM "${UNINSTALL_REG}" "NoModify"        1
@@ -168,8 +171,8 @@ jobs:
           RMDir /r "$INSTDIR"
 
           ;-- Remove shortcuts
-          Delete "$DESKTOP\Trajectory Tools.lnk"
-          RMDir /r "$SMPROGRAMS\TrajectoryTools"
+          Delete "$DESKTOP\${APP_NAME}.lnk"
+          RMDir /r "$SMPROGRAMS\${APP_NAME}"
 
           ;-- Remove registry keys
           DeleteRegKey HKLM "${INSTALL_REG}"
@@ -207,13 +210,13 @@ jobs:
     - name: Upload portable build
       uses: actions/upload-artifact@v4
       with:
-        name: trajectory_tools_portable
-        path: dist/trajectory_tools/*
+        name: TRACES_portable
+        path: dist/TRACES/*
         retention-days: 7
 
     - name: Upload installer
       uses: actions/upload-artifact@v4
       with:
-        name: trajectory_tools_installer
-        path: trajectory_tools_setup.exe
+        name: TRACES_installer
+        path: TRACES_setup.exe
         retention-days: 7
