@@ -7,12 +7,15 @@ has chosen where changes are written:
     lane_anomalies    one row per detected anomaly (the spec's unique
                       anomaly ID is anomaly_id; AUTOINCREMENT, so an ID is
                       never reused, even after a rerun replaces it)
-    lane_corrections  one row per applied fix, kept after an Undo
-                      (undone_at set) as history, like the stitches table
+    lane_corrections  one row per vehicle moved by an applied fix (a fix
+                      may move several vehicles; its rows share the
+                      anomaly_id and are undone together), kept after an
+                      Undo (undone_at set) as history, like the stitches
+                      table
 
-Together with analysis.base_comp's superseded_points (the values each
-corrected row held before the fix) they give the spec's traceability:
-original -> detected -> reviewed -> corrected.
+Together with analysis.base_comp's superseded_points (the lane and status
+each corrected row held before the fix) they give the spec's
+traceability: original -> detected -> reviewed -> corrected.
 
 Anomaly status (lane_anomalies.status):
     ANOMALY_DETECTED  detected, no fix in effect
@@ -68,12 +71,11 @@ CREATE TABLE IF NOT EXISTS {CORRECTIONS_TABLE} (
     anomaly_id      INTEGER NOT NULL,
     event_id        INTEGER NOT NULL,
     veh_id          INTEGER NOT NULL,
-    fix_type        TEXT    NOT NULL,   -- e.g. 'lane_reassign', 'midline'
+    fix_type        TEXT    NOT NULL,   -- e.g. 'lane_reassign'
     start_time      REAL    NOT NULL,   -- first corrected sample
     end_time        REAL    NOT NULL,   -- last corrected sample
     from_lanes_json TEXT    NOT NULL,   -- JSON list of the lanes the rows had
     to_lane         INTEGER,
-    weight          REAL,               -- midline slider position, 0 = first lane
     rows_changed    INTEGER NOT NULL,
     applied_at      TEXT    NOT NULL,
     undone_at       TEXT                -- NULL = in effect
@@ -131,7 +133,6 @@ class CorrectionRecord:
     end_time: float
     from_lanes: List[int]
     to_lane: Optional[int]
-    weight: Optional[float]
     rows_changed: int
     applied_at: str
     undone_at: Optional[str]
@@ -284,7 +285,7 @@ def set_anomaly_status(conn: sqlite3.Connection, anomaly_id: int, status: str) -
 # ── Corrections ─────────────────────────────────────────────────────────────
 
 _CORRECTION_COLS = ("correction_id", "anomaly_id", "event_id", "veh_id", "fix_type",
-                    "start_time", "end_time", "from_lanes_json", "to_lane", "weight",
+                    "start_time", "end_time", "from_lanes_json", "to_lane",
                     "rows_changed", "applied_at", "undone_at")
 
 
@@ -297,29 +298,29 @@ def _correction_from_row(row) -> CorrectionRecord:
 def insert_correction(conn: sqlite3.Connection, anomaly: LaneAnomaly, veh_id: int,
                       fix_type: str, start_time: float, end_time: float,
                       from_lanes: Iterable[int], to_lane: Optional[int],
-                      weight: Optional[float], rows_changed: int) -> int:
+                      rows_changed: int) -> int:
     """Record an applied fix. Does not commit."""
     cur = conn.execute(
         f"INSERT INTO {CORRECTIONS_TABLE} (anomaly_id, event_id, veh_id, fix_type, "
-        f"start_time, end_time, from_lanes_json, to_lane, weight, rows_changed, applied_at) "
-        f"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        f"start_time, end_time, from_lanes_json, to_lane, rows_changed, applied_at) "
+        f"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (anomaly.anomaly_id, anomaly.event_id, int(veh_id), fix_type,
          float(start_time), float(end_time),
          json.dumps(sorted({int(v) for v in from_lanes})),
-         None if to_lane is None else int(to_lane),
-         None if weight is None else float(weight), int(rows_changed), _now()))
+         None if to_lane is None else int(to_lane), int(rows_changed), _now()))
     return cur.lastrowid
 
 
-def active_correction(conn: sqlite3.Connection, anomaly_id: int) -> Optional[CorrectionRecord]:
-    """The fix in effect for *anomaly_id*, if any. Read-only."""
+def active_corrections(conn: sqlite3.Connection, anomaly_id: int) -> List[CorrectionRecord]:
+    """The fix in effect for *anomaly_id*: one record per vehicle it moved
+    (a fix may move several), oldest first; empty when none. Read-only."""
     if not table_exists(conn, CORRECTIONS_TABLE):
-        return None
-    row = conn.execute(
+        return []
+    rows = conn.execute(
         f"SELECT {', '.join(_CORRECTION_COLS)} FROM {CORRECTIONS_TABLE} "
         f"WHERE anomaly_id = ? AND undone_at IS NULL "
-        f"ORDER BY correction_id DESC LIMIT 1", (anomaly_id,)).fetchone()
-    return _correction_from_row(row) if row else None
+        f"ORDER BY correction_id", (anomaly_id,)).fetchall()
+    return [_correction_from_row(r) for r in rows]
 
 
 def corrections_in_span(conn: sqlite3.Connection, event_id: int, veh_id: int,

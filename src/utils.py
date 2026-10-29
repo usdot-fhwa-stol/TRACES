@@ -21,11 +21,11 @@ def get_resource_path(relative_path: str) -> str:
 def get_user_data_path(relative_path: str = "") -> Path:
     """Get path for writable user data (configs, logs).
     
-    Points to %APPDATA%\\TrajectoryTools in frozen builds,
+    Points to %APPDATA%\\TRACES in frozen builds,
     or the current working directory in development.
     """
     if getattr(sys, 'frozen', False):
-        base = Path(os.environ.get('APPDATA', Path.home())) / 'TrajectoryTools'
+        base = Path(os.environ.get('APPDATA', Path.home())) / 'TRACES'
     else:
         base = Path(os.path.abspath("."))
     base.mkdir(parents=True, exist_ok=True)
@@ -36,7 +36,7 @@ def initialize_user_config() -> None:
     """Seed the user's config directory from bundled defaults on first run.
     
     Copies all *.json files from the bundled config directory to
-    %APPDATA%\\TrajectoryTools\\config\\ if the destination is empty.
+    %APPDATA%\\TRACES\\config\\ if the destination is empty.
     Existing user configs are never overwritten.
     """
     user_config_dir = get_user_data_path("config")

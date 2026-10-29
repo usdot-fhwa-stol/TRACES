@@ -1,26 +1,33 @@
 """Lane-Level Anomalies review panel -- the spec's Figure 3.
 
-Left: one count label per anomaly type ("Proximity anomalies detected:
-N"), then the selected type's view of the selected anomaly (each type's
-AnomalyView; the built-in ones are kinematic stacks whose distance plot is
-the time-space diagram).
+Left, filling most of the width: the time-space diagram of the selected
+anomaly (AnomalyPlot -- a scatter plot, vehicles by color, lanes by
+symbol).
 
-Right: one button per type ("Proximity Anomalies", "Rapid Lane Change
-Anomaly") acting as tabs, the Selected Anomaly list, and Previous Anomaly
-/ Fix / Undo / Next Anomaly.
+Right, one column, top to bottom:
 
-    Fix   runs the type's fix flow (AnomalyTypeUI.fix); enabled for an
-          anomaly with no fix in effect
-    Undo  reverses the fix in effect (lane_correction.undo_correction),
-          after confirmation; enabled for a fixed anomaly
+    counts             one line per anomaly type: "N detected (M fixed)"
+    type buttons       one per type, acting as tabs
+    Selected Anomaly   the selected type's anomalies
+    Previous | Next
+    fix panel          the selected type's FixPanel: the controls that
+                       build its fix or, for a fixed anomaly, the fix
+                       applied
+    Apply | Undo       Apply passes the panel's pending_fix() to the type's
+                       apply_fix; Undo reverses the selected anomaly's fix
+                       through the type's undo_fix, after confirmation
+    Close
+
+Choosing another anomaly or type, or closing, silently discards a fix
+panel's unapplied choices.
 
 Anomalies are read from the lane_anomalies table, so the panel shows
 exactly what is stored -- including anomalies of types not rerun this
 time. Anomalies on trajectories consumed by a stitch are hidden.
 
-data_changed(event_id) is emitted once, when the panel closes, if a Fix
-or Undo changed the events table; MainWindow reloads the time-space plot
-on it.
+data_changed(event_id) is emitted once, when the panel closes, if an
+Apply or Undo changed the events table; MainWindow reloads the time-space
+plot on it.
 """
 
 import logging
@@ -30,16 +37,18 @@ from typing import Dict, List, Optional
 from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import (
     QButtonGroup, QComboBox, QDialog, QHBoxLayout, QLabel, QMessageBox,
-    QPushButton, QStackedWidget, QVBoxLayout, QWidget,
+    QPushButton, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget,
 )
 
 from .anomaly_registry import anomaly_types
+from .anomaly_ui import AnomalyPlot, anomaly_window
 from .lane_anomaly_store import LaneAnomaly, read_anomalies
-from .lane_correction import undo_correction
+from .lane_correction import vehicle_rows
 
 logger = logging.getLogger(__name__)
 
 _TITLE = "Lane-Level Anomalies"
+_COLUMN_WIDTH = 360
 
 
 class LaneAnomalyReviewDialog(QDialog):
@@ -94,59 +103,80 @@ class LaneAnomalyReviewDialog(QDialog):
 
     def _build_ui(self):
         main = QHBoxLayout(self)
+        self._plot = AnomalyPlot(self._db_connection, self._event_id)
+        main.addWidget(self._plot, stretch=1)
 
-        left = QVBoxLayout()
+        column = QWidget()
+        column.setFixedWidth(_COLUMN_WIDTH)
+        right = QVBoxLayout(column)
+        right.setContentsMargins(0, 0, 0, 0)
+
         self._count_labels: Dict[str, QLabel] = {}
         for t in self._types:
             label = QLabel()
-            left.addWidget(label)
+            right.addWidget(label)
             self._count_labels[t.KEY] = label
-        self._stack = QStackedWidget()
-        self._views = {}
-        for t in self._types:
-            view = self._uis[t.KEY].create_view(self, self._db_connection, self._event_id)
-            self._stack.addWidget(view)
-            self._views[t.KEY] = view
-        left.addWidget(self._stack, stretch=1)
-        main.addLayout(left, stretch=1)
+        right.addSpacing(8)
 
-        right = QVBoxLayout()
-        type_row = QHBoxLayout()
         self._type_group = QButtonGroup(self)
         self._type_group.setExclusive(True)
         self._type_buttons: Dict[str, QPushButton] = {}
         for t in self._types:
             button = QPushButton(self._uis[t.KEY].BUTTON_TEXT or f"{t.LABEL} Anomalies")
             button.setCheckable(True)
+            button.setAutoDefault(False)
             button.clicked.connect(lambda _checked=False, k=t.KEY: self._select_type(k))
             self._type_group.addButton(button)
-            type_row.addWidget(button)
+            right.addWidget(button)
             self._type_buttons[t.KEY] = button
-        right.addLayout(type_row)
+        right.addSpacing(8)
 
         right.addWidget(QLabel("Selected Anomaly"))
         self._combo = QComboBox()
+        self._combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self._combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._combo.currentIndexChanged.connect(self._on_combo_changed)
         right.addWidget(self._combo)
 
         nav = QHBoxLayout()
-        self._prev_btn = QPushButton("Previous Anomaly")
+        self._prev_btn = QPushButton("Previous")
         self._prev_btn.clicked.connect(lambda: self._step(-1))
-        self._fix_btn = QPushButton("Fix")
-        self._fix_btn.clicked.connect(self._on_fix)
+        self._next_btn = QPushButton("Next")
+        self._next_btn.clicked.connect(lambda: self._step(1))
+        for b in (self._prev_btn, self._next_btn):
+            b.setAutoDefault(False)
+            nav.addWidget(b)
+        right.addLayout(nav)
+
+        self._panels = QStackedWidget()
+        self._fix_panels = {}
+        for t in self._types:
+            panel = self._uis[t.KEY].create_fix_panel(self, self._db_connection, self._event_id)
+            panel.preview_changed.connect(
+                lambda preview, k=t.KEY: self._on_preview(k, preview))
+            panel.pending_changed.connect(lambda _pending: self._update_buttons())
+            self._panels.addWidget(panel)
+            self._fix_panels[t.KEY] = panel
+        right.addWidget(self._panels, stretch=1)
+
+        actions = QHBoxLayout()
+        self._apply_btn = QPushButton("Apply")
+        self._apply_btn.setToolTip("Apply the fix set up in the fix panel.")
+        self._apply_btn.clicked.connect(self._on_apply)
         self._undo_btn = QPushButton("Undo")
         self._undo_btn.setToolTip("Reverse the fix applied to this anomaly.")
         self._undo_btn.clicked.connect(self._on_undo)
-        self._next_btn = QPushButton("Next Anomaly")
-        self._next_btn.clicked.connect(lambda: self._step(1))
-        for b in (self._prev_btn, self._fix_btn, self._undo_btn, self._next_btn):
-            nav.addWidget(b)
-        right.addLayout(nav)
-        right.addStretch(1)
+        for b in (self._apply_btn, self._undo_btn):
+            b.setAutoDefault(False)
+            actions.addWidget(b)
+        right.addLayout(actions)
 
-        panel = QWidget()
-        panel.setLayout(right)
-        main.addWidget(panel)
+        close = QPushButton("Close")
+        close.setAutoDefault(False)
+        close.clicked.connect(self.accept)
+        right.addWidget(close)
+
+        main.addWidget(column)
 
     # ── State ─────────────────────────────────────────────────────────
 
@@ -172,7 +202,7 @@ class LaneAnomalyReviewDialog(QDialog):
     def _select_type(self, key: str):
         self._current_key = key
         self._type_buttons[key].setChecked(True)
-        self._stack.setCurrentWidget(self._views[key])
+        self._panels.setCurrentWidget(self._fix_panels[key])
         self._populate_combo()
         self._load(self._index[key])
 
@@ -185,19 +215,26 @@ class LaneAnomalyReviewDialog(QDialog):
         self._combo.blockSignals(False)
 
     def _load(self, index: int):
+        """Show anomaly *index* of the current type on the plot and in its
+        fix panel (discarding any unapplied choices)."""
         items = self._current_list()
-        view = self._views[self._current_key]
-        if not items:
-            self._index[self._current_key] = 0
-            view.show_anomaly(None)
-            self._update_buttons()
-            return
-        index = max(0, min(index, len(items) - 1))
-        self._index[self._current_key] = index
-        self._combo.blockSignals(True)
-        self._combo.setCurrentIndex(index)
-        self._combo.blockSignals(False)
-        view.show_anomaly(items[index])
+        key = self._current_key
+        anomaly = None
+        if items:
+            index = max(0, min(index, len(items) - 1))
+            anomaly = items[index]
+            self._combo.blockSignals(True)
+            self._combo.setCurrentIndex(index)
+            self._combo.blockSignals(False)
+        self._index[key] = index if items else 0
+
+        rows = {}
+        if anomaly is not None:
+            t0, t1 = anomaly_window(anomaly)
+            rows = {v: vehicle_rows(self._db_connection, anomaly.event_id, v, t0, t1)
+                    for v in anomaly.veh_ids}
+        self._plot.show_anomaly(anomaly, self._uis[key], rows)
+        self._fix_panels[key].show_anomaly(anomaly, rows)
         self._update_buttons()
 
     def _update_buttons(self):
@@ -207,8 +244,10 @@ class LaneAnomalyReviewDialog(QDialog):
         self._combo.setEnabled(bool(items))
         self._prev_btn.setEnabled(bool(items) and index > 0)
         self._next_btn.setEnabled(bool(items) and index < len(items) - 1)
-        self._fix_btn.setEnabled(current is not None and not current.is_fixed)
         self._undo_btn.setEnabled(current is not None and current.is_fixed)
+        panel = self._fix_panels.get(self._current_key)
+        self._apply_btn.setEnabled(current is not None and not current.is_fixed
+                                   and panel is not None and panel.has_pending_fix())
 
     def _on_combo_changed(self, index: int):
         if index >= 0:
@@ -229,19 +268,30 @@ class LaneAnomalyReviewDialog(QDialog):
 
     # ── Fix / Undo ────────────────────────────────────────────────────
 
-    def _on_fix(self):
+    def _on_preview(self, key: str, preview):
+        if key == self._current_key:
+            self._plot.set_preview(preview)
+
+    def _on_apply(self):
         anomaly = self._current()
         if anomaly is None or anomaly.is_fixed:
             return
+        fix = self._fix_panels[self._current_key].pending_fix()
+        if not fix:
+            self._load(self._index[self._current_key])   # the data changed; refresh
+            return
         try:
-            applied = self._uis[self._current_key].fix(self, self._db_connection, anomaly)
-        except sqlite3.Error as exc:
-            logger.exception("LaneAnomalyReviewDialog: fix failed")
-            QMessageBox.critical(self, _TITLE, f"The fix failed:\n{exc}")
-            applied = False
-        if applied:
-            self._changed = True
-            self._refresh_after_change(anomaly.anomaly_id)
+            self._uis[self._current_key].type.apply_fix(self._db_connection, anomaly, fix)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Apply Fix", str(exc))
+            return
+        except (sqlite3.Error, RuntimeError) as exc:
+            logger.exception("LaneAnomalyReviewDialog: apply failed")
+            QMessageBox.critical(self, "Apply Fix",
+                                 f"The fix could not be saved:\n{exc}\n\nNothing was changed.")
+            return
+        self._changed = True
+        self._refresh_after_change(anomaly.anomaly_id)
 
     def _on_undo(self):
         anomaly = self._current()
@@ -250,16 +300,13 @@ class LaneAnomalyReviewDialog(QDialog):
         reply = QMessageBox.question(
             self, "Undo Fix?",
             f"Undo the fix applied to anomaly #{anomaly.anomaly_id}?\n\n"
-            f"The corrected samples get their previous values and lanes back. "
-            f"If the fix changed positions, the spline fit and internal "
-            f"consistency values it cleared are not restored; rerun those "
-            f"analyses if you need them.",
+            f"Every vehicle it moved gets its previous lanes back.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No)
         if reply != QMessageBox.StandardButton.Yes:
             return
         try:
-            undo_correction(self._db_connection, anomaly)
+            self._uis[self._current_key].type.undo_fix(self._db_connection, anomaly)
         except ValueError as exc:
             QMessageBox.warning(self, "Undo Fix", str(exc))
             return

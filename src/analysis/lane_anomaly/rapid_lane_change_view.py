@@ -1,82 +1,84 @@
-"""Qt side of the Rapid Lane Change anomaly: Figure 2 row, Figure 3 view,
-Fix flow.
+"""Qt side of the Rapid Lane Change anomaly: Figure 2 row, review panel
+text, and fix panel.
 
-View: the vehicle on the kinematic stack (distance = time-space diagram),
-its samples split into one series per lane of the anomaly, each lane in
-its own color with sample markers -- so every point where the lane
-assignment switches is visible, even one-sample runs.
-
-Fix: fits the midline model (rapid_lane_change.fit_midline) and opens
-MidlineFixDialog (midline_fix_dialog.py).
+Fix panel: the segment (Start / End, default the anomaly span) and the
+lane to put the vehicle in for it -- the anomaly's two lanes as radio
+buttons, each with its sample count in the span, the one holding more
+preselected; or "Other lane" with a combo of the event's remaining lanes.
+Apply moves every sample of the segment not already in that lane. Lane
+only; positions are unchanged (rapid_lane_change's module docstring).
 """
 
-from typing import Optional
+from typing import List
 
-import numpy as np
-from PyQt6.QtWidgets import QDialog, QDoubleSpinBox, QMessageBox, QWidget
-
-from ui_kit.plot_style import Role
-from .anomaly_ui import (
-    AnomalyTypeUI, AnomalyView, ConfigRow, IntervalPlotView, lane_color,
+from PyQt6.QtWidgets import (
+    QButtonGroup, QComboBox, QDoubleSpinBox, QHBoxLayout, QRadioButton,
+    QVBoxLayout, QWidget,
 )
+
+from .anomaly_ui import AnomalyTypeUI, ConfigRow, FixPanel, SegmentFixPanel
 from .lane_anomaly_store import LaneAnomaly
-from .lane_correction import vehicle_rows
-from .rapid_lane_change import RAPID_LANE_CHANGE_KEY, fit_midline
+from .lane_correction import LaneMove
+from .rapid_lane_change import RAPID_LANE_CHANGE_KEY
 
 
-def add_lane_series(plots, name: str, color):
-    """A per-lane series drawn with sample markers in *color*."""
-    series = plots.add_series(name, Role.MEASURED, color=color, width=2.0)
-    for item in series.items.values():
-        item.setSymbol("o")
-        item.setSymbolSize(5)
-        item.setSymbolBrush(color)
-        item.setSymbolPen(None)
-    return series
+class RapidLaneChangeFixPanel(SegmentFixPanel):
 
+    def _build_choices(self, layout: QVBoxLayout) -> None:
+        self._group = QButtonGroup(self)
+        self._lane_a = QRadioButton()
+        self._lane_b = QRadioButton()
+        self._other = QRadioButton("Other lane:")
+        self._other_combo = QComboBox()
+        for button in (self._lane_a, self._lane_b, self._other):
+            self._group.addButton(button)
+            button.toggled.connect(self._changed)
+        layout.addWidget(self._lane_a)
+        layout.addWidget(self._lane_b)
+        row = QHBoxLayout()
+        row.addWidget(self._other)
+        row.addWidget(self._other_combo, stretch=1)
+        layout.addLayout(row)
+        self._other.toggled.connect(self._other_combo.setEnabled)
+        self._other_combo.currentIndexChanged.connect(self._changed)
 
-def lane_values(rows, lane) -> dict:
-    """rows' kinematics with every sample outside *lane* set to NaN."""
-    mask = np.array([l == lane for l in rows["lane"]], dtype=bool)
-    return {k: np.where(mask, rows[src], np.nan)
-            for k, src in (("dist", "dist"), ("speed", "speed"), ("accel", "accel"))}
+    def _load_choices(self, anomaly: LaneAnomaly) -> None:
+        lane_a, lane_b = (int(l) for l in anomaly.lane_ids[:2])
+        n_a = anomaly.metrics.get("samples_lane_a")
+        n_b = anomaly.metrics.get("samples_lane_b")
+        self._lane_a.setText(f"Lane {lane_a}" + (f"  ({n_a} samples)" if n_a is not None else ""))
+        self._lane_b.setText(f"Lane {lane_b}" + (f"  ({n_b} samples)" if n_b is not None else ""))
+        self._lane_a.setProperty("lane", lane_a)
+        self._lane_b.setProperty("lane", lane_b)
 
+        self._other_combo.clear()
+        for lane in self._type.fix_target_lanes(self._conn, anomaly):
+            if int(lane) not in (lane_a, lane_b):
+                self._other_combo.addItem(f"Lane {lane}", int(lane))
+        self._other.setEnabled(self._other_combo.count() > 0)
 
-class RapidLaneChangeView(IntervalPlotView):
+        default = self._type.default_target_lane(self._conn, anomaly, anomaly.veh_id)
+        (self._lane_b if default == lane_b else self._lane_a).setChecked(True)
+        self._other_combo.setEnabled(False)
 
-    def __init__(self, conn, event_id: int, parent: Optional[QWidget] = None):
-        super().__init__(conn, event_id, parent)
-        self._lane_a = add_lane_series(self.plots, "Lane A", lane_color(0))
-        self._lane_b = add_lane_series(self.plots, "Lane B", lane_color(1))
+    def _target(self):
+        if self._other.isChecked():
+            return self._other_combo.currentData()
+        for button in (self._lane_a, self._lane_b):
+            if button.isChecked():
+                return button.property("lane")
+        return None
 
-    def show_anomaly(self, anomaly: Optional[LaneAnomaly]) -> None:
-        if anomaly is None:
-            self.plots.clear_data(self._lane_a)
-            self.plots.clear_data(self._lane_b)
-            self.show_empty()
-            return
-        self.show_plots()
-        t0, t1 = self.window(anomaly)
-        rows = vehicle_rows(self._conn, anomaly.event_id, anomaly.veh_id, t0, t1)
-        lane_a, lane_b = anomaly.lane_ids[0], anomaly.lane_ids[1]
-        self.plots.set_data(self._lane_a, rows["time"], lane_values(rows, lane_a))
-        self.plots.set_data(self._lane_b, rows["time"], lane_values(rows, lane_b))
-        self.plots.rename_series(self._lane_a, f"Lane {lane_a}")
-        self.plots.rename_series(self._lane_b, f"Lane {lane_b}")
-
-        changes = anomaly.metrics.get("changes")
-        title = (f"Anomaly #{anomaly.anomaly_id} -- vehicle {anomaly.veh_id}"
-                 + (f", {changes} lane changes" if changes else "")
-                 + f" between lanes {lane_a} and {lane_b}"
-                 + (" -- fixed" if anomaly.is_fixed else ""))
-        self.plots.set_title("dist", title)
-        self.shade(anomaly)
-        self.zoom(anomaly)
+    def _moves(self) -> List[LaneMove]:
+        lane = self._target()
+        if lane is None:
+            return []
+        lo, hi = self._seg
+        return [LaneMove(int(self._anomaly.veh_id), lo, hi, int(lane))]
 
 
 class RapidLaneChangeUI(AnomalyTypeUI):
-    BUTTON_TEXT = "Rapid Lane Change Anomaly"
-    COUNT_TEXT = "Rapid lane change anomalies detected: {n}"
+    BUTTON_TEXT = "Rapid Lane Change Anomalies"
 
     def create_config_row(self, parent: QWidget) -> ConfigRow:
         spin = QDoubleSpinBox()
@@ -92,18 +94,16 @@ class RapidLaneChangeUI(AnomalyTypeUI):
         return ConfigRow(RAPID_LANE_CHANGE_KEY, "Rapid Lane Change", "max_interval_s",
                          "Max Time Between Changes", "s", spin, parent)
 
-    def create_view(self, parent: QWidget, conn, event_id: int) -> AnomalyView:
-        return RapidLaneChangeView(conn, event_id, parent)
+    def create_fix_panel(self, parent: QWidget, conn, event_id: int) -> FixPanel:
+        return RapidLaneChangeFixPanel(self, conn, event_id, parent)
 
-    def fix(self, parent: QWidget, conn, anomaly: LaneAnomaly) -> bool:
-        try:
-            model = fit_midline(conn, anomaly)
-        except ValueError as exc:
-            QMessageBox.warning(parent, "Rapid Lane Change Fix", str(exc))
-            return False
-        from .midline_fix_dialog import MidlineFixDialog
-        dlg = MidlineFixDialog(parent, conn, anomaly, model)
-        return dlg.exec() == QDialog.DialogCode.Accepted
+    def title(self, anomaly: LaneAnomaly) -> str:
+        changes = anomaly.metrics.get("changes")
+        lane_a, lane_b = anomaly.lane_ids[0], anomaly.lane_ids[1]
+        return (f"Anomaly #{anomaly.anomaly_id} -- vehicle {anomaly.veh_id}"
+                + (f", {changes} lane changes" if changes else "")
+                + f" between lanes {lane_a} and {lane_b}"
+                + (" -- fixed" if anomaly.is_fixed else ""))
 
 
 ANOMALY_UI = RapidLaneChangeUI(RAPID_LANE_CHANGE_KEY)

@@ -18,10 +18,10 @@ other_veh_id the leader.
 
 Fix
 ---
-If a lane assignment error is suspected, the user picks one of the two
-vehicles, a segment of it and a neighboring lane; apply_fix() moves that
-segment (lane_correction.apply_lane_reassignment -> IMPUTED_LANE,
-kinematics unchanged). Otherwise the UI shows "Fix Under Development."
+The user may move either vehicle, or both, to any lane of the event over
+one time segment (default: the anomaly span) -- one LaneMove per vehicle
+moved, applied together (lane_correction.apply_lane_reassignments ->
+IMPUTED_LANE, kinematics unchanged).
 """
 
 import sqlite3
@@ -33,7 +33,6 @@ import numpy as np
 from utils import events_columns, active_rows_clause, measured_rows_clause
 from .anomaly_registry import AnomalyType, register_anomaly_type
 from .lane_anomaly_store import LaneAnomaly
-from .lane_correction import apply_lane_reassignment
 
 PROXIMITY_KEY = "proximity"
 DEFAULT_THRESHOLD_M = 5.0
@@ -111,14 +110,6 @@ class ProximityType(AnomalyType):
         return text if spacing is None else text.replace(
             "  (lane", f"  min {spacing:.1f} m  (lane", 1)
 
-    @staticmethod
-    def apply_fix(conn: sqlite3.Connection, anomaly: LaneAnomaly, veh_id: int,
-                  start_time: float, end_time: float, to_lane: int) -> int:
-        """Reassign a segment of one of the anomaly's vehicles to *to_lane*."""
-        if veh_id not in anomaly.veh_ids:
-            raise ValueError(f"Vehicle {veh_id} is not part of anomaly #{anomaly.anomaly_id}.")
-        return apply_lane_reassignment(conn, anomaly, veh_id, start_time, end_time, to_lane)
-
 
 def _run_anomaly(event_id: int, lane_id: float, run: list, params: dict,
                  min_samples: int) -> List[LaneAnomaly]:
@@ -136,34 +127,6 @@ def _run_anomaly(event_id: int, lane_id: float, run: list, params: dict,
                  "mean_spacing_m": round(float(np.mean(spacings)), 4),
                  "samples": len(run)},
     )]
-
-
-def load_lane_window(conn: sqlite3.Connection, event_id: int, lanes: Iterable[int],
-                     start_time: float, end_time: float
-                     ) -> Dict[int, Dict[str, np.ndarray]]:
-    """Every active trajectory sample in *lanes* within [start, end], per
-    vehicle: {veh_id: {"time", "dist", "lane"}} -- the neighbor-lane
-    context for the Proximity fix window. Read-only."""
-    lanes = [int(l) for l in lanes]
-    if not lanes:
-        return {}
-    cols = events_columns(conn)
-    marks = ",".join("?" for _ in lanes)
-    rows = conn.execute(
-        f"SELECT veh_id, veh_time, veh_dist_trav, lane_id FROM events "
-        f"WHERE event_id = ? AND lane_id IN ({marks}) AND veh_time BETWEEN ? AND ? "
-        f"AND veh_dist_trav IS NOT NULL{active_rows_clause(cols)}{measured_rows_clause(cols)} "
-        f"ORDER BY veh_id, veh_time",
-        (event_id, *lanes, float(start_time), float(end_time))).fetchall()
-    out: Dict[int, Dict[str, list]] = defaultdict(lambda: {"time": [], "dist": [], "lane": []})
-    for v, tt, d, l in rows:
-        out[v]["time"].append(tt)
-        out[v]["dist"].append(d)
-        out[v]["lane"].append(l)
-    return {v: {"time": np.asarray(x["time"], dtype=np.float64),
-                "dist": np.asarray(x["dist"], dtype=np.float64),
-                "lane": np.asarray(x["lane"], dtype=object)}
-            for v, x in out.items()}
 
 
 register_anomaly_type(ProximityType())

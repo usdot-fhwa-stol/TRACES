@@ -18,46 +18,31 @@ The anomaly spans from the last sample before the first change to the
 first sample after the last change -- the samples whose lane assignment is
 in question. lane_ids is [lane before the first change, the other lane].
 
-Fix: midline
-------------
-fit_midline() fits, by least squares over the anomaly span plus a margin
-of measured data on either side, one smooth curve g(t) (cubic B-spline)
-for the first lane's samples and the same curve plus a constant offset
-delta for the second lane's:
+Fix
+---
+A lane reassignment, like every built-in lane-anomaly fix: the vehicle's
+samples in the span (or a segment the user narrows it to) are moved into
+one lane -- lane_id only, positions unchanged (IMPUTED_LANE). The UI
+offers the anomaly's two lanes first, preselecting the one holding more
+of the span's samples (lane A on a tie), and any other lane of the event.
 
-    dist ~ g(t) + delta * [sample is in the second lane]
-
-so g is the trajectory "as if in lane A" and g + delta "as if in lane B".
-The midline at slider weight w (0 = lane A, 1 = lane B) is
-g(t) + w * delta. veh_speed and veh_accel of the corrected rows are
-recomputed as g'(t) and g''(t) -- the offset is constant, so they don't
-depend on w. veh_jerk is left as measured.
-
-The corrected rows get the lane the slider leans toward: lane A for
-w < 0.5, lane B for w > 0.5, and at exactly 0.5 the lane holding more of
-the span's samples (lane A on a tie). They are tagged IMPUTED_CORRECTED.
+Task 9.3 describes this fix as a midline trajectory with a slider between
+the two lanes. Per customer direction (2026-10-29) lane-level fixes only
+reassign lane_id, so no position is generated or written.
 """
 
 import sqlite3
-from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 import numpy as np
-from scipy.interpolate import BSpline
 
-from utils import (
-    events_columns, active_rows_clause, measured_rows_clause, IMPUTED_CORRECTED,
-)
+from utils import events_columns, active_rows_clause, measured_rows_clause
 from .anomaly_registry import AnomalyType, register_anomaly_type
 from .lane_anomaly_store import LaneAnomaly
-from .lane_correction import FIX_MIDLINE, apply_correction, vehicle_rows
 
 RAPID_LANE_CHANGE_KEY = "rapid_lane_change"
 DEFAULT_MAX_INTERVAL_S = 2.0
 DEFAULT_MIN_CHANGES = 3
-
-MIDLINE_MARGIN_S = 2.0          # measured data either side of the span used in the fit
-_KNOT_SPACING_S = 1.0           # B-spline interior knot spacing (seconds)
 
 
 class RapidLaneChangeType(AnomalyType):
@@ -111,16 +96,17 @@ class RapidLaneChangeType(AnomalyType):
         return text if changes is None else text.replace(
             "  (lane", f"  {changes} changes  (lane", 1)
 
-    @staticmethod
-    def apply_fix(conn: sqlite3.Connection, anomaly: LaneAnomaly,
-                  plan: "MidlinePlan") -> int:
-        """Write a midline plan (IMPUTED_CORRECTED)."""
-        values = {"veh_dist_trav": plan.dist, "veh_speed": plan.speed,
-                  "veh_accel": plan.accel}
-        return apply_correction(
-            conn, anomaly, anomaly.veh_id, FIX_MIDLINE, plan.times, IMPUTED_CORRECTED,
-            lanes=[plan.lane] * len(plan.times), values=values,
-            to_lane=plan.lane, weight=plan.weight)
+    # ── Fix ───────────────────────────────────────────────────────────
+
+    def fix_vehicles(self, anomaly: LaneAnomaly) -> Sequence[int]:
+        return (anomaly.veh_id,)
+
+    def default_target_lane(self, conn: sqlite3.Connection, anomaly: LaneAnomaly,
+                            veh_id: int) -> Optional[int]:
+        lane_a, lane_b = (int(l) for l in anomaly.lane_ids[:2])
+        n_a = int(anomaly.metrics.get("samples_lane_a") or 0)
+        n_b = int(anomaly.metrics.get("samples_lane_b") or 0)
+        return lane_b if n_b > n_a else lane_a
 
 
 def find_rapid_changes(event_id: int, veh_id: int, t: np.ndarray, lanes: List[int],
@@ -150,18 +136,16 @@ def find_rapid_changes(event_id: int, veh_id: int, t: np.ndarray, lanes: List[in
             chain.append(c)
             continue
         if len(chain) >= min_changes:
-            out.append(_chain_anomaly(event_id, veh_id, t, lanes, changes, chain,
-                                      max_interval, params or {}))
+            out.append(_chain_anomaly(event_id, veh_id, t, lanes, chain, params or {}))
         chain = [c] if c is not None and eligible(c) else []
     return out
 
 
-def _chain_anomaly(event_id, veh_id, t, lanes, changes, chain, max_interval, params):
+def _chain_anomaly(event_id, veh_id, t, lanes, chain, params):
     first, last = chain[0], chain[-1]
     # From the last sample before the first change to the first sample
     # after the last change: the samples whose lane assignment is in
-    # question. Steady data either side is left alone (the midline fit
-    # still uses it, see fit_midline's margin).
+    # question. Steady data either side is left alone.
     i0, i1 = first - 1, last
 
     lane_a = lanes[first - 1]
@@ -177,101 +161,6 @@ def _chain_anomaly(event_id, veh_id, t, lanes, changes, chain, max_interval, par
                  "samples_lane_a": span.count(lane_a),
                  "samples_lane_b": span.count(lane_b)},
     )
-
-
-# ── Midline fix ─────────────────────────────────────────────────────────────
-
-@dataclass
-class MidlinePlan:
-    """Rows a midline fix writes, for one slider weight."""
-    weight: float
-    lane: int
-    times: np.ndarray
-    dist: np.ndarray
-    speed: np.ndarray
-    accel: np.ndarray
-
-
-@dataclass
-class MidlineModel:
-    """The fitted lane-A curve g and lane offset delta for one anomaly,
-    plus the samples used, for preview plots. Cheap to re-plan."""
-    anomaly: LaneAnomaly
-    lane_a: int
-    lane_b: int
-    spline: BSpline
-    delta: float
-    span_times: np.ndarray       # samples the fix rewrites
-    span_lanes: np.ndarray
-    fit_times: np.ndarray        # samples the fit used (span + margins)
-    fit_dist: np.ndarray
-    fit_lanes: np.ndarray
-    fit_speed: np.ndarray
-    fit_accel: np.ndarray
-
-    def curve(self, weight: float, times: np.ndarray) -> np.ndarray:
-        return self.spline(times) + float(weight) * self.delta
-
-    def lane_for(self, weight: float) -> int:
-        if weight < 0.5:
-            return self.lane_a
-        if weight > 0.5:
-            return self.lane_b
-        n_a = int(np.sum(self.span_lanes == self.lane_a))
-        n_b = int(np.sum(self.span_lanes == self.lane_b))
-        return self.lane_b if n_b > n_a else self.lane_a
-
-    def plan(self, weight: float) -> MidlinePlan:
-        w = min(max(float(weight), 0.0), 1.0)
-        t = self.span_times
-        return MidlinePlan(
-            weight=w, lane=self.lane_for(w), times=t.copy(),
-            dist=self.curve(w, t),
-            speed=self.spline.derivative(1)(t),
-            accel=self.spline.derivative(2)(t))
-
-
-def fit_midline(conn: sqlite3.Connection, anomaly: LaneAnomaly,
-                margin_s: float = MIDLINE_MARGIN_S) -> MidlineModel:
-    """Fit the midline model for a Rapid Lane Change anomaly (module
-    docstring). Raises ValueError (user-facing) when the data can't
-    support a fit."""
-    lane_a, lane_b = int(anomaly.lane_ids[0]), int(anomaly.lane_ids[1])
-    rows = vehicle_rows(conn, anomaly.event_id, anomaly.veh_id,
-                        anomaly.start_time - margin_s, anomaly.end_time + margin_s)
-    lanes = np.array([np.nan if l is None else l for l in rows["lane"]], dtype=np.float64)
-    keep = np.isfinite(rows["dist"]) & ((lanes == lane_a) | (lanes == lane_b))
-    t, d, lane = rows["time"][keep], rows["dist"][keep], lanes[keep].astype(int)
-    in_b = (lane == lane_b).astype(np.float64)
-    if not np.any(in_b) or np.all(in_b):
-        raise ValueError(f"Vehicle {anomaly.veh_id} needs samples in both lane {lane_a} "
-                         f"and lane {lane_b} around this anomaly to fit a midline.")
-
-    k = 3
-    t0, t1 = float(t[0]), float(t[-1])
-    span = t1 - t0
-    n_interior = int(span // _KNOT_SPACING_S)
-    # Basis functions + 1 offset column must not outnumber the samples.
-    n_interior = max(0, min(n_interior, t.size - (k + 1) - 1 - 1))
-    if t.size < k + 3 or span <= 0:
-        raise ValueError(f"Too few samples of vehicle {anomaly.veh_id} around this "
-                         f"anomaly to fit a midline.")
-    interior = np.linspace(t0, t1, n_interior + 2)[1:-1]
-    knots = np.concatenate([[t0] * (k + 1), interior, [t1] * (k + 1)])
-    basis = BSpline.design_matrix(t, knots, k).toarray()
-    design = np.column_stack([basis, in_b])
-    coef, *_ = np.linalg.lstsq(design, d, rcond=None)
-    spline = BSpline(knots, coef[:-1], k, extrapolate=True)
-
-    in_span = (rows["time"] >= anomaly.start_time) & (rows["time"] <= anomaly.end_time)
-    span_lanes = np.array([np.nan if l is None else l for l in rows["lane"][in_span]],
-                          dtype=np.float64)
-    return MidlineModel(
-        anomaly=anomaly, lane_a=lane_a, lane_b=lane_b, spline=spline,
-        delta=float(coef[-1]),
-        span_times=rows["time"][in_span], span_lanes=span_lanes,
-        fit_times=t, fit_dist=d, fit_lanes=lane,
-        fit_speed=rows["speed"][keep], fit_accel=rows["accel"][keep])
 
 
 register_anomaly_type(RapidLaneChangeType())

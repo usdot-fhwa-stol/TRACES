@@ -10,7 +10,7 @@ from ui_kit.brand import apply_application_branding
  
 
 def main():
-    """Entry point for the Trajectory Tools application."""
+    """Entry point for the TRACES application."""
 
     # Enable Qt debug messages
     os.environ['QT_LOGGING_RULES'] = '*.critical=true;*.warning=true;qt.qpa.*=false;qt.gui.*=false'
