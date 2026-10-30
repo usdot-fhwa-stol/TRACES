@@ -20,7 +20,7 @@ def get_resource_path(relative_path: str) -> str:
 
 def get_user_data_path(relative_path: str = "") -> Path:
     """Get path for writable user data (configs, logs).
-    
+
     Points to %APPDATA%\\TRACES in frozen builds,
     or the current working directory in development.
     """
@@ -34,7 +34,7 @@ def get_user_data_path(relative_path: str = "") -> Path:
 
 def initialize_user_config() -> None:
     """Seed the user's config directory from bundled defaults on first run.
-    
+
     Copies all *.json files from the bundled config directory to
     %APPDATA%\\TRACES\\config\\ if the destination is empty.
     Existing user configs are never overwritten.
@@ -126,8 +126,6 @@ IMPUTED_SPLINE    = "S"   # synthetic row created solely to complete SplineComp'
 IMPUTED_AUTO      = "A"   # gap filled automatically by Missing Data Interpolation
 IMPUTED_MANUAL    = "M"   # gap filled/refined manually by Missing Data Interpolation
 IMPUTED_LANE      = "L"   # lane_id reassigned by Lane-Level Anomaly correction; kinematics still measured
-IMPUTED_CORRECTED = "C"   # position and lane replaced by Lane-Level Anomaly midline correction;
-                          # veh_speed / veh_accel recomputed from the corrected position
 IMPUTED_STATUS_COL = "imputed_status"
 
 # Modules that own imputed_status codes. A module may change the code of a
@@ -176,8 +174,6 @@ IMPUTED_CODES: Dict[str, ImputedCode] = {c.code: c for c in (
                 is_placeholder=False, kinematics_measured=False, lane_measured=False),
     ImputedCode(IMPUTED_LANE,      "lane reassigned",   OWNER_LANE_ANOMALY,
                 is_placeholder=False, kinematics_measured=True,  lane_measured=False),
-    ImputedCode(IMPUTED_CORRECTED, "midline corrected", OWNER_LANE_ANOMALY,
-                is_placeholder=False, kinematics_measured=False, lane_measured=False),
 )}
 
 for _c in IMPUTED_CODES.values():

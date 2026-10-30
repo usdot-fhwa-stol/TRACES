@@ -67,7 +67,10 @@ class CustomViewBox(pg.ViewBox):
         #
         # A callback of None in a sub-item produces a disabled action in the submenu.
         self._context_menu_registry = [
-            {'filter': 'ASO', 'label': 'Statistics',         'callback': self._generate_statistics},
+            {'filter': 'ASO', 'label': 'Statistics', 'submenu': [
+                {'label': 'Trajectory Statistics', 'callback': self._generate_statistics},
+                {'label': 'Advanced Statistics',   'callback': self._run_advanced_statistics},
+            ]},
             {'filter': 'ASO', 'label': 'Plots', 'submenu': [
                 {'filter': 'SO', 'label': 'Time-Speed Plot', 'callback': self._show_time_speed_dialog, 'requires_column': 'veh_speed'},
                 {'filter': 'SO', 'label': 'Time-Accel Plot', 'callback': self._show_time_accel_dialog, 'requires_column': 'veh_accel'},
@@ -570,7 +573,8 @@ class CustomViewBox(pg.ViewBox):
         logger.debug(f"Opened time-acceleration dialog for {len(veh_ids)} vehicles")
 
     def _generate_statistics(self):
-        """Generate and display statistics for vehicles based on current context."""
+        """Statistics > Trajectory Statistics: speed and acceleration
+        statistics for vehicles based on current context."""
         if not self.parent_widget._db_connection or self.parent_widget._current_event_id is None:
             logger.warning("No database connection or event ID available for statistics")
             return
@@ -591,6 +595,30 @@ class CustomViewBox(pg.ViewBox):
                                 self.parent_widget._current_event_id,
                                 mode)
         dialog.exec()
+
+    def _run_advanced_statistics(self):
+        """Statistics > Advanced Statistics (Task 9.4). Unlike the other
+        right-click analyses, the "All" context means every active vehicle
+        of the event, across all lanes -- not only the lane in view -- so
+        it passes veh_ids=None. Leaders and followers always come from the
+        whole event."""
+        if not self.parent_widget._db_connection or self.parent_widget._current_event_id is None:
+            logger.warning("No database connection or event ID available for advanced statistics")
+            return
+        mode = self._get_statistics_mode()
+        veh_ids = None if mode == "All" else self._get_target_vehicle_ids()
+        if veh_ids is not None and not veh_ids:
+            return
+
+        from analysis.advanced_statistics import AdvancedStatisticsDialog
+        dlg = AdvancedStatisticsDialog(
+            self.parent_widget,
+            self.parent_widget._db_connection,
+            event_ids=[self.parent_widget._current_event_id],
+            veh_ids=veh_ids,
+            mode=mode,
+        )
+        dlg.exec()
 
     def _get_target_vehicle_ids(self):
         """Get the list of vehicle IDs based on current context.

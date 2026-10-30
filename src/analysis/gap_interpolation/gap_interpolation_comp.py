@@ -29,8 +29,8 @@ events row that is neither a placeholder (SplineComp's synthetic timing
 rows) nor one of this module's fills (utils.status_codes(owner=OWNER_GAP),
 i.e. IMPUTED_AUTO / IMPUTED_MANUAL), plus the pre-fill values of bridged
 points saved in the shared superseded_points table. Rows other modules
-have corrected -- lane reassignments (IMPUTED_LANE), midline corrections
-(IMPUTED_CORRECTED) -- are part of that data. Detection and compute_fill's
+have corrected -- lane reassignments (IMPUTED_LANE), 
+ -- are part of that data. Detection and compute_fill's
 spline fit both read exactly that population (_measured_source), so a
 trajectory's fit always uses all of its data, and a gap this module has
 already filled -- bridged points included -- is detected again on every

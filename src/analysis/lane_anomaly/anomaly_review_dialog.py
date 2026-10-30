@@ -18,6 +18,12 @@ Right, one column, top to bottom:
                        through the type's undo_fix, after confirmation
     Close
 
+The column is as wide as the widest entry the Selected Anomaly list can
+show -- across every type, each measured both unfixed and with its
+"[fixed]" mark, so the column doesn't move when a type is switched or a
+fix applied -- or as its other controls need, whichever is wider, and at
+most half the dialog (_fit_column_width). The plot takes the rest.
+
 Choosing another anomaly or type, or closing, silently discards a fix
 panel's unapplied choices.
 
@@ -30,25 +36,27 @@ Apply or Undo changed the events table; MainWindow reloads the time-space
 plot on it.
 """
 
+import dataclasses
 import logging
 import sqlite3
 from typing import Dict, List, Optional
 
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import QSize, pyqtSignal
 from PyQt6.QtWidgets import (
     QButtonGroup, QComboBox, QDialog, QHBoxLayout, QLabel, QMessageBox,
-    QPushButton, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget,
+    QPushButton, QSizePolicy, QStackedWidget, QStyle, QStyleOptionComboBox,
+    QVBoxLayout, QWidget,
 )
 
 from .anomaly_registry import anomaly_types
 from .anomaly_ui import AnomalyPlot, anomaly_window
-from .lane_anomaly_store import LaneAnomaly, read_anomalies
+from .lane_anomaly_store import ANOMALY_FIXED, LaneAnomaly, read_anomalies
 from .lane_correction import vehicle_rows
 
 logger = logging.getLogger(__name__)
 
 _TITLE = "Lane-Level Anomalies"
-_COLUMN_WIDTH = 360
+_MAX_COLUMN_FRACTION = 0.2    # of the dialog's width
 
 
 class LaneAnomalyReviewDialog(QDialog):
@@ -107,7 +115,8 @@ class LaneAnomalyReviewDialog(QDialog):
         main.addWidget(self._plot, stretch=1)
 
         column = QWidget()
-        column.setFixedWidth(_COLUMN_WIDTH)
+        column.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
+        self._column = column
         right = QVBoxLayout(column)
         right.setContentsMargins(0, 0, 0, 0)
 
@@ -133,7 +142,10 @@ class LaneAnomalyReviewDialog(QDialog):
 
         right.addWidget(QLabel("Selected Anomaly"))
         self._combo = QComboBox()
+        # Width comes from _fit_column_width, not from the current items,
+        # so it doesn't change with the type shown.
         self._combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self._combo.setMinimumContentsLength(1)
         self._combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._combo.currentIndexChanged.connect(self._on_combo_changed)
         right.addWidget(self._combo)
@@ -189,6 +201,32 @@ class LaneAnomalyReviewDialog(QDialog):
     def _reload_all(self):
         for t in self._types:
             self._reload(t.KEY)
+        self._fit_column_width()
+
+    def _combo_width_for(self, texts: List[str]) -> int:
+        """Width a QComboBox needs to show the widest of *texts* in full:
+        the text plus the style's frame, padding and drop-down arrow."""
+        fm = self._combo.fontMetrics()
+        text_w = max((fm.horizontalAdvance(t) for t in texts), default=0)
+        option = QStyleOptionComboBox()
+        self._combo.initStyleOption(option)
+        size = self._combo.style().sizeFromContents(
+            QStyle.ContentsType.CT_ComboBox, option, QSize(text_w, fm.height()), self._combo)
+        return size.width()
+
+    def _fit_column_width(self):
+        """Size the right column to the widest Selected Anomaly entry of
+        any type -- fixed or not -- or to what its other controls need,
+        whichever is wider; at most _MAX_COLUMN_FRACTION of the dialog."""
+        texts = []
+        for t in self._types:
+            for a in self._anomalies[t.KEY]:
+                texts.append(t.describe(a))
+                texts.append(t.describe(dataclasses.replace(a, status=ANOMALY_FIXED)))
+        margins = self._column.layout().contentsMargins()
+        needed = max(self._combo_width_for(texts) + margins.left() + margins.right(),
+                     self._column.minimumSizeHint().width())
+        self._column.setFixedWidth(min(needed, int(self.width() * _MAX_COLUMN_FRACTION)))
 
     def _current_list(self) -> List[LaneAnomaly]:
         return self._anomalies.get(self._current_key, []) if self._current_key else []
