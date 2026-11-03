@@ -1,9 +1,10 @@
 """Trajectory analysis modules.
 
-Each analysis lives in its own subpackage (gap_interpolation,
-internal_consistency, jerk, manual_stitching, missing_data, shockwave,
-spline) and is split into a Qt-free ``*_comp`` module that computes
-results and dialog modules that collect parameters and show results.
+Each analysis lives in its own subpackage (advanced_statistics,
+gap_interpolation, internal_consistency, jerk, lane_anomaly,
+manual_stitching, missing_data, shockwave, spline) and is split into
+Qt-free computation modules and dialog modules that collect parameters
+and show results.
 
 The modules at this level are shared by every analysis:
     base_comp             BaseComp and the events-table schema helpers (Qt-free)

@@ -1,7 +1,11 @@
-"""Reusable UI building blocks shared by the plot and analysis packages.
+"""Reusable UI building blocks shared by the analysis, plot and gui packages.
 
+    brand                          app name, version, colors, logo and icon
+    db_target_row                  write-target row for dialogs that modify
+                                   the open database
     kinematic_stacked_plot_widget  stacked distance/speed/accel/jerk plots
     box_plot_item                  box-and-whisker pyqtgraph item
+    box_plot_grid_dialog           grid of box plots with hover statistics
     gap_point_editor               click/drag point editor for one plot
     point_edit_utils               click-vs-drag and nearest-point helpers
     plot_style                     shared pens, colors and line roles
@@ -12,9 +16,12 @@
 
 plot_export reads plot_view.js with importlib.resources from this package,
 so this must stay a regular package (keep this file) and frozen builds
-must bundle plot_view.js as data.
+must bundle plot_view.js as data. brand draws the logo and icon from
+assets/traces_logo.svg and assets/traces_icon.svg, which frozen builds
+must also bundle.
 
-Dependency rule: ui_kit imports nothing from analysis, plot or gui.
+Dependency rule: ui_kit imports only utils; nothing from data_import,
+analysis, plot or gui.
 """
 
 from importlib import import_module
@@ -25,6 +32,25 @@ from typing import TYPE_CHECKING
 # loaded on first access (PEP 562). Importing one submodule therefore never
 # pulls in its siblings, and these re-exports add no import cycles.
 _EXPORTS = {
+    "APP_NAME": ".brand",
+    "APP_VERSION": ".brand",
+    "ACCENT": ".brand",
+    "SAXTON_BLUE": ".brand",
+    "HEADING_COLOR": ".brand",
+    "logo_pixmap": ".brand",
+    "app_icon": ".brand",
+    "apply_application_branding": ".brand",
+    "background_gradient": ".brand",
+    "DbTargetRow": ".db_target_row",
+    "TargetResolver": ".db_target_row",
+    "DB_FILE_FILTER": ".db_target_row",
+    "db_file_path": ".db_target_row",
+    "same_file": ".db_target_row",
+    "in_place_resolver": ".db_target_row",
+    "BoxPlotGridDialog": ".box_plot_grid_dialog",
+    "BoxPlotPanel": ".box_plot_grid_dialog",
+    "BoxStats": ".box_plot_grid_dialog",
+    "box_stats": ".box_plot_grid_dialog",
     "KinematicStackedPlotWidget": ".kinematic_stacked_plot_widget",
     "Series": ".kinematic_stacked_plot_widget",
     "KinematicSpec": ".kinematic_stacked_plot_widget",
@@ -35,6 +61,7 @@ _EXPORTS = {
     "find_nearest_point": ".point_edit_utils",
     "Role": ".plot_style",
     "ROLE_STYLES": ".plot_style",
+    "REGION_RGBA": ".plot_style",
     "KINEMATIC_COLORS": ".plot_style",
     "PROPOSAL_COLOR": ".plot_style",
     "HALO_COLOR": ".plot_style",
@@ -76,6 +103,31 @@ def __dir__():
 # Never runs. Read by IDEs and type checkers ("X as X" marks a re-export),
 # and by PyInstaller's import scan, which can't follow import_module() above.
 if TYPE_CHECKING:
+    from .brand import (
+        APP_NAME as APP_NAME,
+        APP_VERSION as APP_VERSION,
+        ACCENT as ACCENT,
+        SAXTON_BLUE as SAXTON_BLUE,
+        HEADING_COLOR as HEADING_COLOR,
+        logo_pixmap as logo_pixmap,
+        app_icon as app_icon,
+        apply_application_branding as apply_application_branding,
+        background_gradient as background_gradient,
+    )
+    from .db_target_row import (
+        DbTargetRow as DbTargetRow,
+        TargetResolver as TargetResolver,
+        DB_FILE_FILTER as DB_FILE_FILTER,
+        db_file_path as db_file_path,
+        same_file as same_file,
+        in_place_resolver as in_place_resolver,
+    )
+    from .box_plot_grid_dialog import (
+        BoxPlotGridDialog as BoxPlotGridDialog,
+        BoxPlotPanel as BoxPlotPanel,
+        BoxStats as BoxStats,
+        box_stats as box_stats,
+    )
     from .kinematic_stacked_plot_widget import (
         KinematicStackedPlotWidget as KinematicStackedPlotWidget,
         Series as Series,
@@ -91,6 +143,7 @@ if TYPE_CHECKING:
     from .plot_style import (
         Role as Role,
         ROLE_STYLES as ROLE_STYLES,
+        REGION_RGBA as REGION_RGBA,
         KINEMATIC_COLORS as KINEMATIC_COLORS,
         PROPOSAL_COLOR as PROPOSAL_COLOR,
         HALO_COLOR as HALO_COLOR,
