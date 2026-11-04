@@ -1,8 +1,8 @@
-# Trajectory Tools — JSON Configuration File User Guide
+# Trajectory Research, Analysis, Correction, Exploration, and Simulation (TRACES) — JSON Configuration File User Guide
 
 ## Overview
 
-The Trajectory Tools application imports vehicle trajectory data from CSV files into a standardized SQLite database for visualization and analysis. Each CSV file format requires a corresponding JSON configuration file that tells the application what columns to expect, how to interpret them, and what database columns to create.
+The TRACES application imports vehicle trajectory data from CSV files into a standardized SQLite database for visualization and analysis. Each CSV file format requires a corresponding JSON configuration file that tells the application what columns to expect, how to interpret them, and what database columns to create.
 
 The configuration file is an instruction list for the application: it defines both the structure of the database (which columns exist and their types) and the import rules (how each column is populated from the CSV file). The database schema is entirely configuration-driven — apart from a small set of required columns, users are free to define database columns for their own purposes.
 

@@ -1,8 +1,8 @@
-# Trajectory Tools — Developer Guide
+# Trajectory Research, Analysis, Correction, Exploration, and Simulation (TRACES) — Developer Guide
 
 ## 1. Purpose & Audience
 
-This guide is for software engineers extending Trajectory Tools — adding new file-format importers, new computational analyses, or new interactive plot behaviors. It describes how the application's modules fit together and documents the extension points in depth.
+This guide is for software engineers extending TRACES — adding new file-format importers, new computational analyses, or new interactive plot behaviors. It describes how the application's modules fit together and documents the extension points in depth.
 
 It intentionally does not restate material that already has its own document:
 
@@ -11,7 +11,7 @@ It intentionally does not restate material that already has its own document:
 
 ## 2. Architecture Overview
 
-Trajectory Tools is a PyQt6 desktop application built around a single SQLite database per opened trajectory dataset. Data flows in one direction, with two points where computation writes back into the database:
+TRACES is a PyQt6 desktop application built around a single SQLite database per opened trajectory dataset. Data flows in one direction, with two points where computation writes back into the database:
 
 ```
 Source file (CSV, ...)
