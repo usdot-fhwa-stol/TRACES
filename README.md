@@ -1,8 +1,8 @@
-# Trajectory Tools
+# Trajectory Research, Analysis, Correction, Exploration, and Simulation (TRACES)
 
-Trajectory Tools is a pre-release desktop application for importing, exploring, and analyzing vehicle trajectory data. It uses JSON import profiles to normalize different CSV layouts into SQLite databases, then provides an interactive time-space plot, trajectory-quality analyses, and data export tools through a PyQt6 interface.
+TRACES is a pre-release desktop application for importing, exploring, and analyzing vehicle trajectory data. It uses JSON import profiles to normalize different CSV layouts into SQLite databases, then provides an interactive time-space plot, trajectory-quality analyses, and data export tools through a PyQt6 interface.
 
-![Trajectory Tools displaying vehicle trajectories on a time-space plot](docs/images/01-main-window-overview.png)
+![TRACES displaying vehicle trajectories on a time-space plot](docs/images/01-main-window-overview.png)
 
 ## Features
 
@@ -51,9 +51,9 @@ The `events` table is configuration-driven, but every imported dataset must prov
 
 `gui` is the orchestration layer: `main_window.py` owns the menu bar and the SQLite connection, and constructs whichever `data_import`, `comp`, or `plot` component an action requires. Those three packages do not import from each other directly — they only share data through the `events`/`ranges` tables and small cross-cutting helpers in `utils.py`. Two exceptions are called out below: `ExportDialog` writes CSV straight from `events`, and Shockwave fitting is built incrementally through a direct `comp` ↔ `plot` link rather than through the database.
 
-![Trajectory Tools module architecture: gui orchestrates data_import, comp, and plot around a shared SQLite database, with ExportDialog writing CSV directly from events and a direct comp-to-plot link for interactive Shockwave fitting](docs/images/architecture-diagram.svg)
+![TRACES module architecture: gui orchestrates data_import, comp, and plot around a shared SQLite database, with ExportDialog writing CSV directly from events and a direct comp-to-plot link for interactive Shockwave fitting](docs/images/architecture-diagram.svg)
 
-*Figure: Trajectory Tools module architecture.*
+*Figure: TRACES module architecture.*
 
 Each package is an independent extension point: new file formats implement `BaseProcess`, new analyses implement `BaseComp`, and new plot interactions implement `InteractionMode`. See the [Developer Guide](docs/trajectory-tools-developer-guide.md) for the full architecture overview, data model, and extension recipes.
 
@@ -164,7 +164,7 @@ The included [GitHub Actions workflow](.github/workflows/build.yml) uses Python 
 
 ## Project status
 
-Trajectory Tools is a version 0.1 proof of concept and should be treated as pre-release software. The current implementation includes the semi-automatic shockwave workflow. Manual and fully automatic shockwave modes are not implemented, and the visible Platoon Consistency and Spectral Analysis actions are disabled placeholders.
+TRACES is a version 0.1 proof of concept and should be treated as pre-release software. The current implementation includes the semi-automatic shockwave workflow. Manual and fully automatic shockwave modes are not implemented, and the visible Platoon Consistency and Spectral Analysis actions are disabled placeholders.
 
 ## License
 

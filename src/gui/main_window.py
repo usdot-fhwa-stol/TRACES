@@ -11,7 +11,7 @@ from .database_session import DatabaseSession
 logger = logging.getLogger(__name__)
 
 class MainWindow(QMainWindow):
-    """Main window for the Trajectory Tools application.
+    """Main window for the TRACES application.
 
     Manages the main GUI window, menu bar, configuration file handling,
     and SQLite database connections for trajectory data.
@@ -61,7 +61,7 @@ class MainWindow(QMainWindow):
 
     def _setup_ui(self):
         """Set up the main window UI including menu bar and initial settings."""
-        self.setWindowTitle("Trajectory Tools")
+        self.setWindowTitle("TRACES")
 
         # Create menu bar
         menu_bar = QMenuBar()
@@ -162,6 +162,10 @@ class MainWindow(QMainWindow):
         gap_interp_action.triggered.connect(self._run_gap_interpolation)
         self._data_menu.addAction(gap_interp_action)
 
+        lane_anomaly_action = QAction("&Lane-Level Anomalies", self)
+        lane_anomaly_action.triggered.connect(self._run_lane_anomalies)
+        self._data_menu.addAction(lane_anomaly_action)
+
         # Analysis menu
         self._analysis_menu = QMenu("&Analysis", self)
         menu_bar.addMenu(self._analysis_menu)
@@ -210,10 +214,10 @@ class MainWindow(QMainWindow):
     def _load_settings(self):
         """Load window settings and recent files from configuration file.
 
-        Reads from 'trajectory_tools.conf' in the application directory.
+        Reads from 'traces.conf' in the application directory.
         Sets default window size (80% of desktop) if config is invalid or missing.
         """
-        config_path = get_user_data_path("trajectory_tools.conf")
+        config_path = get_user_data_path("traces.conf")
         desktop = QApplication.primaryScreen()
         screen_rect = desktop.availableGeometry()
         default_width = int(screen_rect.width() * 0.8)
@@ -272,7 +276,7 @@ class MainWindow(QMainWindow):
 
     def _save_settings(self):
         """Save window settings and recent files to configuration file."""
-        config_path = get_user_data_path("trajectory_tools.conf")
+        config_path = get_user_data_path("traces.conf")
         maximized = 'true' if self.isMaximized() else 'false'
         geometry = self.normalGeometry() if not self.isMaximized() else self.geometry()
         config_data = [f"{geometry.x()},{geometry.y()},{geometry.width()},{geometry.height()},{maximized}"]
@@ -334,7 +338,7 @@ class MainWindow(QMainWindow):
 
         if self._check_database(file_path):
             self.add_recent_file(file_path)
-            self.setWindowTitle(f"Trajectory Tools - {file_path}")
+            self.setWindowTitle(f"TRACES - {file_path}")
 
             # Show settings dialog before creating plot widget
             from plot.time_space_plot_settings_dialog import TimeSpacePlotSettingsDialog
@@ -366,7 +370,7 @@ class MainWindow(QMainWindow):
 
         if self._check_database(file_path):
             self.add_recent_file(file_path)
-            self.setWindowTitle(f"Trajectory Tools - {file_path}")
+            self.setWindowTitle(f"TRACES - {file_path}")
 
             # Show settings dialog before creating plot widget
             from plot.time_space_plot_settings_dialog import TimeSpacePlotSettingsDialog
@@ -403,7 +407,7 @@ class MainWindow(QMainWindow):
         if output_path and self._check_database(output_path):
             print(output_path)
             self.add_recent_file(output_path)
-            self.setWindowTitle(f"Trajectory Tools - {output_path}")
+            self.setWindowTitle(f"TRACES - {output_path}")
 
             # Use QTimer to delay showing settings dialog to allow import dialog to close
             QTimer.singleShot(200, lambda: self._show_settings_for_imported_file())
@@ -439,7 +443,7 @@ class MainWindow(QMainWindow):
         self._db_session.close()
 
         # Reset window title
-        self.setWindowTitle("Trajectory Tools")
+        self.setWindowTitle("TRACES")
 
         # Remove plot widget if it exists and show home page
         if self._plot_widget:
@@ -468,7 +472,7 @@ class MainWindow(QMainWindow):
         if self._plot_widget is not None:
             self._plot_widget.set_db_connection(new_conn)
         self.add_recent_file(new_path)
-        self.setWindowTitle(f"Trajectory Tools - {new_path}")
+        self.setWindowTitle(f"TRACES - {new_path}")
         logger.info(f"Now working in {new_path}")
 
     def _close_dialogs_using(self, conn):
@@ -739,6 +743,16 @@ class MainWindow(QMainWindow):
         # usually outlives it, so connect to that window directly as it
         # is created rather than relaying through the closed config dialog.
         dlg.data_changed.connect(self._on_event_data_changed)
+        dlg.review_opened.connect(
+            lambda review: review.data_changed.connect(self._on_event_data_changed))
+        dlg.exec()
+
+    def _run_lane_anomalies(self):
+        """Handle the Data > Lane-Level Anomalies menu action."""
+        event_id = self._plot_widget._current_event_id
+        from analysis.lane_anomaly import LaneAnomalyConfigDialog
+        dlg = LaneAnomalyConfigDialog(self, self._db_connection, event_ids=[event_id],
+                                      resolve_target=self._db_session.ensure_write_target)
         dlg.review_opened.connect(
             lambda review: review.data_changed.connect(self._on_event_data_changed))
         dlg.exec()

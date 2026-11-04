@@ -1,4 +1,4 @@
-# Trajectory Tools User Guide
+# Trajectory Research, Analysis, Correction, Exploration, and Simulation (TRACES) — User Guide
 
 ## Table of Contents
 
@@ -23,7 +23,7 @@
 
 | Figure | Title | Section |
 |---|---|---|
-| Figure  1 | Trajectory Tools main window showing a populated time-space plot | [1. Introduction](#1-introduction) |
+| Figure  1 | TRACES main window showing a populated time-space plot | [1. Introduction](#1-introduction) |
 | Figure  2 | Start screen with no recent files | [2. Getting Started](#2-getting-started) |
 | Figure  3 | Start screen with recent files populated | [2. Getting Started](#2-getting-started) |
 | Figure  4 | File menu showing Open, Recent, and Import | [3. Opening a Database vs. Importing CSV Data](#3-opening-a-database-vs-importing-csv-data) |
@@ -61,17 +61,17 @@
 
 ## 1. Introduction
 
-Trajectory Tools is a desktop application for importing, visualizing, and analyzing vehicle trajectory data — the detailed, time-stamped position records produced by cameras, radar, connected-vehicle systems, and other sensing technologies used in traffic research.
+TRACES is a desktop application for importing, visualizing, and analyzing vehicle trajectory data — the detailed, time-stamped position records produced by cameras, radar, connected-vehicle systems, and other sensing technologies used in traffic research.
 
-As trajectory data has become more widely available, so has the need for a tool that can bring data from different sources into one consistent format and make it usable without custom scripting for every dataset. Trajectory Tools addresses that need with a modular, configuration-driven approach: any CSV file whose columns are described in a JSON configuration file can be imported into a common SQLite database structure, then explored and analyzed the same way regardless of where the data originated.
+As trajectory data has become more widely available, so has the need for a tool that can bring data from different sources into one consistent format and make it usable without custom scripting for every dataset. TRACES addresses that need with a modular, configuration-driven approach: any CSV file whose columns are described in a JSON configuration file can be imported into a common SQLite database structure, then explored and analyzed the same way regardless of where the data originated.
 
-Once data is imported, Trajectory Tools centers on an interactive **time-space plot** — vehicle position plotted against time — that supports panning, zooming, trajectory selection, and a set of interaction modes for tasks like measuring gaps and headways or identifying shockwaves. A set of built-in analyses (jerk, missing data, internal consistency, spline-based smoothing) can be run against one or more events, with results shown as tables, statistics, and plots that can exported to HTML and CSV files for use elsewhere.
+Once data is imported, TRACES centers on an interactive **time-space plot** — vehicle position plotted against time — that supports panning, zooming, trajectory selection, and a set of interaction modes for tasks like measuring gaps and headways or identifying shockwaves. A set of built-in analyses (jerk, missing data, internal consistency, spline-based smoothing) can be run against one or more events, with results shown as tables, statistics, and plots that can exported to HTML and CSV files for use elsewhere.
 
 This guide is intended for those with a background in vehicle kinematic probe data and related statistical analysis methods. It walks through the application in the order you're likely to use it: importing data, visualizing data plots, running analyses, and exporting results. For details on writing a JSON configuration file for a new CSV format, see the separate [Configuration Guide](trajectory-tools-config-guide.md).
 
-![Trajectory Tools main window showing a populated time-space plot](images/01-main-window-overview.png)
+![TRACES main window showing a populated time-space plot](images/01-main-window-overview.png)
 
-*Figure 1 Trajectory Tools main window showing a populated time-space plot*
+*Figure 1 TRACES main window showing a populated time-space plot*
 
 ---
 
@@ -79,11 +79,11 @@ This guide is intended for those with a background in vehicle kinematic probe da
 
 ### Launching the Application
 
-Start Trajectory Tools from its shortcut or executable like any other desktop application. On first launch the window opens at 80% of your screen size, centered; on subsequent launches it restores the size and position (including maximized state) from your last session.
+Start TRACES from its shortcut or executable like any other desktop application. On first launch the window opens at 80% of your screen size, centered; on subsequent launches it restores the size and position (including maximized state) from your last session.
 
 ### The Start Screen
 
-Trajectory Tools opens to a start screen with two options and a recent-files list:
+TRACES opens to a start screen with two options and a recent-files list:
 
 - **Open Trajectories** — open an existing trajectory database (a `.sqlite` file previously created by importing CSV data).
 - **Import Data** — import a new CSV file into a new trajectory database.
@@ -103,7 +103,7 @@ These same two actions are also available from the **File** menu (**Open** and *
 
 ## 3. Opening a Database vs. Importing CSV Data
 
-Trajectory Tools works with two kinds of files:
+TRACES works with two kinds of files:
 
 - **CSV files** — raw trajectory data as originally collected, in whatever column layout your source provides.
 - **SQLite databases** (`.sqlite`) — the application's own standardized format, created by importing a CSV file once. All of the plotting, analysis, and export features work against this database, not the original CSV.
@@ -118,7 +118,7 @@ You'll typically import a CSV once, then reopen the resulting database directly 
 
 Use **File → Open**, choose an entry from **File → Recent** (up to seven, most recent first), or click **Open Trajectories** on the start screen. All three lead to the same place.
 
-For File → Open, a standard file dialog is filtered to `.sqlite` / `.db` files. Once a file is chosen, Trajectory Tools validates it before doing anything else:
+For File → Open, a standard file dialog is filtered to `.sqlite` / `.db` files. Once a file is chosen, TRACES validates it before doing anything else:
 
 - it must contain an `events` table with the required columns (`event_id`, `veh_id`, `veh_time`, `lane_id`, `veh_dist_trav`),
 - it must contain a `ranges` table (this is written last during import, so its presence confirms the import completed),
@@ -126,13 +126,13 @@ For File → Open, a standard file dialog is filtered to `.sqlite` / `.db` files
 
 If any check fails, an error dialog explains specifically what's wrong (e.g. a missing `ranges` table suggests the source import didn't finish and should be re-run) and the file is not opened.
 
-On success, the window title updates to show the file path, the file moves to the top of the Recent list, and the **[Time Space Plot Settings dialog](#4-selecting-an-event-to-plot)** opens automatically so you can choose what to plot. If you cancel that dialog instead of applying settings, the database is closed again and you're returned to the start screen — Trajectory Tools never leaves a database "open" in the background without a plot attached to it.
+On success, the window title updates to show the file path, the file moves to the top of the Recent list, and the **[Time Space Plot Settings dialog](#4-selecting-an-event-to-plot)** opens automatically so you can choose what to plot. If you cancel that dialog instead of applying settings, the database is closed again and you're returned to the start screen — TRACES never leaves a database "open" in the background without a plot attached to it.
 
 ### 3.2 Importing CSV Data
 
 Use **File → Import** or click **Import Data** on the start screen to open the Import dialog.
 
-**Configuration files.** Before anything can be imported, Trajectory Tools needs at least one JSON configuration file describing a CSV layout, kept in the application's `config` folder. On opening, the dialog scans that folder, validates each `.json` file it finds, and lists the valid ones as available file types (by filename). Configurations that fail validation are excluded and reported in the log. Writing these configuration files is covered in the separate **[Configuration Guide](trajectory-tools-config-guide.md)** — this guide only covers using the Import dialog itself.
+**Configuration files.** Before anything can be imported, TRACES needs at least one JSON configuration file describing a CSV layout, kept in the application's `config` folder. On opening, the dialog scans that folder, validates each `.json` file it finds, and lists the valid ones as available file types (by filename). Configurations that fail validation are excluded and reported in the log. Writing these configuration files is covered in the separate **[Configuration Guide](trajectory-tools-config-guide.md)** — this guide only covers using the Import dialog itself.
 
 ![Import dialog with input file selected, ready to import](images/05-import-dialog-ready.png)
 
@@ -163,7 +163,7 @@ Duplicate records (identical `event_id`, `veh_id`, and `veh_time`) are silently 
 
 ## 4. Selecting an Event to Plot
 
-Whenever a database is opened — via File → Open, a Recent entry, or right after a successful import — Trajectory Tools shows the **Time Space Plot Settings** dialog before displaying anything. This dialog is where you choose *which* event to look at and *how much* of it to plot. It reappears any time you click the **event button** at the top of the plot itself, so you can change events or narrow your range later without starting over.
+Whenever a database is opened — via File → Open, a Recent entry, or right after a successful import — TRACES shows the **Time Space Plot Settings** dialog before displaying anything. This dialog is where you choose *which* event to look at and *how much* of it to plot. It reappears any time you click the **event button** at the top of the plot itself, so you can change events or narrow your range later without starting over.
 
 ![Time Space Plot Settings dialog for a newly opened database](images/08-plot-settings-dialog-initial.png)
 
@@ -197,7 +197,7 @@ If you click **Apply** while over the limit, a warning dialog tells you how many
 **Apply** is always enabled. Once confirmed (directly, or after accepting the over-limit warning), the dialog closes and the main window either builds the time-space plot for the first time or updates the existing one with the new event/range.
 
 If you cancel this dialog instead:
-- **On first open** (right after opening or importing a database, before any plot exists), the database is closed and you're returned to the start screen — Trajectory Tools doesn't leave a database open with nothing plotted.
+- **On first open** (right after opening or importing a database, before any plot exists), the database is closed and you're returned to the start screen — TRACES doesn't leave a database open with nothing plotted.
 - **On later reopens** (via the plot's event button), canceling simply leaves the plot exactly as it was; nothing is lost.
 
 ### Reopening Later
@@ -212,7 +212,7 @@ Before diving into each feature in depth, here's the layout of the main window: 
 
 ### Window Title and Database State
 
-The title bar reads **"Trajectory Tools"** at the start screen and becomes **"Trajectory Tools — `<file path>`"** once a database is open. Opening a different database while one is already active (via File → Open, Recent, or Import) doesn't open a second window — it reuses the same plot area, closing the previous connection and loading the newly opened database's data in place once you confirm an event in the settings dialog.
+The title bar reads **"TRACES"** at the start screen and becomes **"TRACES — `<file path>`"** once a database is open. Opening a different database while one is already active (via File → Open, Recent, or Import) doesn't open a second window — it reuses the same plot area, closing the previous connection and loading the newly opened database's data in place once you confirm an event in the settings dialog.
 
 ### Menu Availability at a Glance
 
@@ -405,7 +405,7 @@ Shockwave mode identifies traffic shockwaves — lines of constant speed drawn t
 
 ## 9. Data Menu — Spline Fitting
 
-Spline fitting fits a smooth curve to one kinematic quantity of a trajectory — position, speed, acceleration, or jerk — then derives the other three from that single curve mathematically. It's useful for smoothing noisy measurements and, optionally, filling small timing gaps. Trajectory Tools has two separate entry points for this, serving different purposes:
+Spline fitting fits a smooth curve to one kinematic quantity of a trajectory — position, speed, acceleration, or jerk — then derives the other three from that single curve mathematically. It's useful for smoothing noisy measurements and, optionally, filling small timing gaps. TRACES has two separate entry points for this, serving different purposes:
 
 | | **Data → Spline Fitting** | **Right-click → Filter → Spline Fitting** |
 |---|---|---|
@@ -498,7 +498,7 @@ All three run their computation on a background thread so the dialog stays respo
 **Parameters:**
 
 - **Missing value gap threshold** (points, default 10) — the number of consecutive missing records required before a stretch counts as a reportable "gap."
-- **Time step** — leave **Auto-calculate Dataset Time Increment** checked to let Trajectory Tools infer the expected sampling interval from the data itself (the most common time step across the dataset), or uncheck it to enter a manual increment.
+- **Time step** — leave **Auto-calculate Dataset Time Increment** checked to let TRACES infer the expected sampling interval from the data itself (the most common time step across the dataset), or uncheck it to enter a manual increment.
 
 ![Missing Data parameter dialog](images/27-missing-data-dialog.png)
 
@@ -533,7 +533,7 @@ Requires the `veh_dist_trav` column, which is always present since it's required
 
 ## 11. Exporting Data
 
-File → Export gathers every way to get data back out of Trajectory Tools as CSV. The submenu itself is disabled until a database is open (see [§5](#5-main-window-tour)):
+File → Export gathers every way to get data back out of TRACES as CSV. The submenu itself is disabled until a database is open (see [§5](#5-main-window-tour)):
 
 - **Export All** — every column, every record, the whole database.
 - **Export Selected** — chosen columns for one event.
@@ -553,7 +553,7 @@ Lets you export a subset of columns for a single event:
 - Choose which **columns** to include from the multi-select list, or use **Select All** / **Select None**. At least one column is required.
 - Your column selection is remembered for next time you open this dialog (though not across different Export Selected sessions where you've since changed it).
 
-A note in the dialog reminds you that the resulting file only contains the selected columns for one event and **cannot be re-imported** back into Trajectory Tools — this path is for taking a slice of data out to another tool, not for round-tripping.
+A note in the dialog reminds you that the resulting file only contains the selected columns for one event and **cannot be re-imported** back into TRACES — this path is for taking a slice of data out to another tool, not for round-tripping.
 
 ![Export Selected dialog](images/29-export-selected-dialog.png)
 
@@ -590,7 +590,7 @@ Because it's modeless, it stays open alongside the plot rather than blocking int
 1. Type digits into the search field. The list below live-filters to every vehicle ID that *contains* those digits anywhere (not just as a prefix), capped at 200 results with a "Showing N of M matches" note if there are more.
 2. Click (or double-click/press Enter on) a result to select it.
 
-**What happens on selection:** if the vehicle already has loaded data in the currently displayed lane, it's selected and framed immediately. If it's on a different lane, Trajectory Tools finds the lane where that vehicle first appears, switches to it, then selects and frames the vehicle there. Framing snaps the time and distance sliders to the vehicle's exact trajectory extent (no padding) — the slider *ranges* only expand if the trajectory falls completely outside the current view, so you don't lose your broader context unnecessarily. The found vehicle becomes the sole selection, dimming every other trajectory.
+**What happens on selection:** if the vehicle already has loaded data in the currently displayed lane, it's selected and framed immediately. If it's on a different lane, TRACES finds the lane where that vehicle first appears, switches to it, then selects and frames the vehicle there. Framing snaps the time and distance sliders to the vehicle's exact trajectory extent (no padding) — the slider *ranges* only expand if the trajectory falls completely outside the current view, so you don't lose your broader context unnecessarily. The found vehicle becomes the sole selection, dimming every other trajectory.
 
 ![Vehicle Search dialog with a filtered result list](images/32-vehicle-search-dialog.png)
 
@@ -612,4 +612,4 @@ If the log file is cleared out from under it — for instance, the Import dialog
 
 ---
 
-This covers Trajectory Tools end to end, from opening the start screen through importing data, plotting and interacting with trajectories, running analyses, and exporting results. For the format of the JSON configuration files referenced throughout the import sections, see the **[Configuration Guide](trajectory-tools-config-guide.md)**.
+This covers TRACES end to end, from opening the start screen through importing data, plotting and interacting with trajectories, running analyses, and exporting results. For the format of the JSON configuration files referenced throughout the import sections, see the **[Configuration Guide](trajectory-tools-config-guide.md)**.

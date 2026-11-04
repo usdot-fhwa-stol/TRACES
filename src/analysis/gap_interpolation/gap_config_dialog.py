@@ -47,7 +47,11 @@ renumbered in chronological order so gap numbers stay 1, 2, 3, ...
 
 "Include manual edits" is disabled when the event has no gap records
 and is reset to unchecked whenever the dialog opens or Skip becomes
-available, so the default rerun preserves manual work.
+available, so the default rerun preserves manual work. Beside it, a
+color swatch and "(manually filled and removed gaps)" form a separate
+legend -- the color of manually filled gaps in the review window. The
+legend is not part of the checkbox: clicking it does nothing, and it
+stays in full color whether or not the checkbox is enabled.
 
 Change notification
 -------------------
@@ -84,11 +88,11 @@ import sqlite3
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtGui import QColor, QPainter, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QHBoxLayout, QLabel, QMessageBox,
-    QPushButton, QSpinBox, QWidget,
+    QPushButton, QSpinBox,
 )
 
 from ui_kit.db_target_row import DbTargetRow, TargetResolver, db_file_path, in_place_resolver
@@ -136,20 +140,6 @@ def _region_swatch(name: str, size: int) -> QPixmap:
     painter.drawRect(0, 0, size - 1, size - 1)
     painter.end()
     return pixmap
-
-
-class _CheckBoxCaption(QLabel):
-    """A label that toggles *check_box* when clicked, so the swatch and
-    the text after it act as part of the checkbox's own label."""
-
-    def __init__(self, check_box: QCheckBox, *args):
-        super().__init__(*args)
-        self._check_box = check_box
-
-    def mouseReleaseEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton and self.isEnabled():
-            self._check_box.toggle()
-        super().mouseReleaseEvent(event)
 
 
 def _status_counts(gaps: List[GapResult]) -> Dict[str, int]:
@@ -284,34 +274,36 @@ class GapConfigDialog(BaseAnalysisDialog):
             self._db_connection, browse_title="Write Gap Interpolation Changes To")
         layout.insertWidget(layout.count() - 1, self._target_row)
 
-        # "Include manual edits ■ (manually filled and removed gaps)" -- the
-        # swatch is the manual gap band's color in the review window. A
-        # QCheckBox label can't hold an image mid-text, so the swatch and
-        # the parenthetical are clickable labels beside a shorter checkbox
-        # label, in one row that is enabled / disabled as a unit.
-        tooltip = ("Unchecked: Apply refills only automatic and unfilled gaps, and "
-                   "Delete deletes only those -- manually filled and removed gaps "
-                   "are kept.\nChecked: Apply replaces and Delete deletes every gap.\n"
-                   "The swatch is the color of manually filled gaps in the review window.")
+        # "Include manual edits   ■ (manually filled and removed gaps)": the
+        # checkbox, then a separate legend -- the swatch is the manual gap
+        # band's color in the review window. Only the checkbox is enabled /
+        # disabled (_refresh_state); the legend is plain labels, not part of
+        # the control, so it keeps its color and isn't clickable.
         self._include_manual_check = QCheckBox("Include manual edits")
+        self._include_manual_check.setToolTip(
+            "Unchecked: Apply refills only automatic and unfilled gaps, and "
+            "Delete deletes only those -- manually filled and removed gaps "
+            "are kept.\nChecked: Apply replaces and Delete deletes every gap.")
         self._include_manual_check.toggled.connect(self._on_include_manual_toggled)
-        swatch_size = max(10, self.fontMetrics().ascent())
-        swatch = _CheckBoxCaption(self._include_manual_check)
-        swatch.setPixmap(_region_swatch("manual", swatch_size))
-        caption = _CheckBoxCaption(self._include_manual_check,
-                                   "(manually filled and removed gaps)")
 
-        self._include_manual_row = QWidget()
-        row = QHBoxLayout(self._include_manual_row)
+        swatch_size = max(10, self.fontMetrics().ascent())
+        legend_tip = "Color of manually filled gaps in the review window."
+        self._manual_swatch = QLabel()
+        self._manual_swatch.setPixmap(_region_swatch("manual", swatch_size))
+        self._manual_swatch.setFixedSize(swatch_size, swatch_size)
+        self._manual_caption = QLabel("(manually filled and removed gaps)")
+        for w in (self._manual_swatch, self._manual_caption):
+            w.setToolTip(legend_tip)
+
+        row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(4)
         row.addWidget(self._include_manual_check)
-        row.addWidget(swatch)
-        row.addWidget(caption)
+        row.addSpacing(8)
+        row.addWidget(self._manual_swatch)
+        row.addWidget(self._manual_caption)
         row.addStretch(1)
-        for w in (self._include_manual_check, swatch, caption):
-            w.setToolTip(tooltip)
-        layout.insertWidget(layout.count() - 1, self._include_manual_row)
+        layout.insertLayout(layout.count() - 1, row)
 
         # The button row is the last item of BaseAnalysisDialog's layout.
         btn_row = layout.itemAt(layout.count() - 1).layout()
@@ -373,7 +365,7 @@ class GapConfigDialog(BaseAnalysisDialog):
         if reset_include_manual or not has_records:
             self._include_manual_check.setChecked(False)
         self._include_manual_check.blockSignals(False)
-        self._include_manual_row.setEnabled(has_records)
+        self._include_manual_check.setEnabled(has_records)
 
         self._skip_btn.setEnabled(has_records)
         self._delete_btn.setEnabled(bool(self._gaps_in_scope()))
@@ -671,7 +663,7 @@ class GapConfigDialog(BaseAnalysisDialog):
         if enabled:
             self._refresh_state()   # Skip / Delete / checkbox follow the records
         else:
-            for w in (self._include_manual_row, self._skip_btn, self._delete_btn):
+            for w in (self._include_manual_check, self._skip_btn, self._delete_btn):
                 w.setEnabled(False)
 
     def _create_worker(self, db_path, event_ids, veh_ids, params, dest_path):
