@@ -93,8 +93,74 @@ jobs:
           exit 1
         }
 
+    # NSIS: use a copy already on the runner image if there is one;
+    # otherwise install it with Chocolatey, retrying (its feed sometimes
+    # times out -- and then "choco install" still exits 0 with nothing
+    # installed); as a last resort, download the portable NSIS zip from
+    # SourceForge. Success is judged by finding makensis.exe, never by an
+    # exit code, and its path is passed to the next steps as MAKENSIS.
     - name: Install NSIS
-      run: choco install nsis --yes --no-progress
+      shell: powershell
+      run: |
+        function Find-Makensis {
+          $candidates = @(
+            (Get-Command makensis.exe -ErrorAction SilentlyContinue).Source,
+            "${env:ProgramFiles(x86)}\NSIS\makensis.exe",
+            "${env:ProgramFiles(x86)}\NSIS\Bin\makensis.exe",
+            "$env:ProgramFiles\NSIS\makensis.exe",
+            "$env:ProgramFiles\NSIS\Bin\makensis.exe"
+          ) | Where-Object { $_ -and (Test-Path $_) }
+          $found = $candidates | Select-Object -First 1
+          if (-not $found) {
+            $roots = @("${env:ProgramFiles(x86)}", "$env:ProgramFiles", "$env:ProgramData\chocolatey") |
+                     Where-Object { $_ -and (Test-Path $_) }
+            $found = Get-ChildItem -Path $roots -Filter makensis.exe -Recurse -Depth 4 `
+                       -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+          }
+          return $found
+        }
+
+        $makensis = Find-Makensis
+        if ($makensis) { Write-Host "NSIS already installed: $makensis" }
+
+        for ($attempt = 1; -not $makensis -and $attempt -le 3; $attempt++) {
+          Write-Host "choco install nsis, attempt $attempt"
+          choco install nsis --yes --no-progress
+          $makensis = Find-Makensis
+          if (-not $makensis -and $attempt -lt 3) { Start-Sleep -Seconds (30 * $attempt) }
+        }
+
+        if (-not $makensis) {
+          # Portable NSIS: the zip holds makensis.exe with its Include and
+          # Contrib folders (MUI2.nsh), so it runs without installing.
+          $version = "3.11"
+          $url = "https://downloads.sourceforge.net/project/nsis/NSIS%203/$version/nsis-$version.zip"
+          $zip = Join-Path $env:RUNNER_TEMP "nsis-$version.zip"
+          $dest = Join-Path $env:RUNNER_TEMP "nsis"
+          $ProgressPreference = "SilentlyContinue"   # the progress bar slows Invoke-WebRequest
+          for ($attempt = 1; -not $makensis -and $attempt -le 3; $attempt++) {
+            Write-Host "Downloading NSIS $version from SourceForge, attempt $attempt"
+            try {
+              Invoke-WebRequest -Uri $url -OutFile $zip -UserAgent "Wget" -MaximumRedirection 10
+              Expand-Archive -Path $zip -DestinationPath $dest -Force
+              $makensis = Get-ChildItem -Path $dest -Filter makensis.exe -Recurse |
+                          Select-Object -First 1 -ExpandProperty FullName
+            } catch {
+              Write-Host "Download failed: $($_.Exception.Message)"
+            }
+            if (-not $makensis -and $attempt -lt 3) { Start-Sleep -Seconds (30 * $attempt) }
+          }
+        }
+
+        if (-not $makensis) {
+          Write-Error "NSIS could not be installed (Chocolatey and SourceForge both failed); re-run the job."
+          exit 1
+        }
+        Write-Host "Using $makensis"
+        & $makensis /VERSION
+        # Windows PowerShell's "Out-File -Encoding utf8" writes a byte-order
+        # mark; write GITHUB_ENV without one.
+        [System.IO.File]::AppendAllText($env:GITHUB_ENV, "MAKENSIS=$makensis`n")
 
     - name: Write NSIS script
       shell: powershell
@@ -181,30 +247,12 @@ jobs:
         '@
         $nsis | Out-File -FilePath installer.nsi -Encoding utf8
 
-    # makensis.exe's location varies with the runner image and the NSIS
-    # package version (Program Files vs. Program Files (x86), with or
-    # without a Bin folder), so find it rather than hard-code a path.
+    # MAKENSIS is set by the Install NSIS step.
     - name: Build installer
       shell: powershell
       run: |
-        $candidates = @(
-          (Get-Command makensis.exe -ErrorAction SilentlyContinue).Source,
-          "${env:ProgramFiles(x86)}\NSIS\makensis.exe",
-          "${env:ProgramFiles(x86)}\NSIS\Bin\makensis.exe",
-          "$env:ProgramFiles\NSIS\makensis.exe",
-          "$env:ProgramFiles\NSIS\Bin\makensis.exe"
-        ) | Where-Object { $_ -and (Test-Path $_) }
-        $makensis = $candidates | Select-Object -First 1
-        if (-not $makensis) {
-          # Last resort: search the usual install roots a few levels deep.
-          $roots = @("${env:ProgramFiles(x86)}", "$env:ProgramFiles", "$env:ProgramData\chocolatey") |
-                   Where-Object { $_ -and (Test-Path $_) }
-          $makensis = Get-ChildItem -Path $roots -Filter makensis.exe -Recurse -Depth 4 `
-                        -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
-        }
-        if (-not $makensis) { Write-Error "makensis.exe not found after installing NSIS"; exit 1 }
-        Write-Host "Using $makensis"
-        & $makensis installer.nsi
+        Write-Host "Using $env:MAKENSIS"
+        & $env:MAKENSIS installer.nsi
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
     - name: Upload portable build
