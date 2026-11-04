@@ -20,42 +20,171 @@ jobs:
     - name: Show installed versions
       run: pip list
 
+    # traces.ico (the .exe, installer and uninstaller icon) is generated
+    # from src/assets/traces_icon.svg with PyQt6's SVG renderer, so the
+    # icon always matches the artwork and needs no separate tool.
+    - name: Generate Windows icon
+      run: python src/assets/make_icons.py
+
+    # Packages are collected as compiled modules, not copied as source:
+    # --collect-submodules bundles every module of a package, including
+    # those PyInstaller can't see from import statements -- the lazy
+    # (PEP 562) re-exports in each package's __init__.py, and the
+    # data_import processor classes ImportDialog loads by name from the
+    # JSON configs. Package order follows the dependency order
+    # (utils, data_import, ui_kit, analysis, plot, gui); utils.py is a
+    # top-level module and is found from the entry script's imports.
+    #
+    # Data files: config/ and assets/ are read through
+    # utils.get_resource_path; ui_kit/plot_view.js is read through
+    # importlib.resources (ui_kit.plot_export.load_asset) and must sit in
+    # a ui_kit folder. Only the two SVGs the application draws are bundled
+    # from assets/ -- not make_icons.py or the generated traces.ico.
+    #
+    # --icon sets the .exe's icon (Explorer, shortcuts, taskbar pins);
+    # the window icon at run time comes from traces_icon.svg.
     - name: Build with PyInstaller
       shell: powershell
       run: |
-        pyinstaller --name "trajectory_tools" --onedir --windowed `
+        pyinstaller --name "TRACES" --onedir --windowed `
+          --icon src/assets/traces.ico `
+          --paths src `
           --add-data "src/config;config" `
-          --add-data "src/data_import;data_import" `
-          --add-data "src/gui;gui" `
-          --add-data "src/plot;plot" `
+          --add-data "src/assets/traces_logo.svg;assets" `
+          --add-data "src/assets/traces_icon.svg;assets" `
+          --add-data "src/ui_kit/plot_view.js;ui_kit" `
+          --collect-submodules data_import `
+          --collect-submodules ui_kit `
+          --collect-submodules analysis `
+          --collect-submodules plot `
+          --collect-submodules gui `
           --hidden-import PyQt6 `
+          --hidden-import PyQt6.QtSvg `
           --hidden-import pyqtgraph `
           --hidden-import superqt `
           --hidden-import utm `
-          --hidden-import data_import.base_process `
-          --hidden-import data_import.csv_algorithms `
-          --hidden-import data_import.csv_process `
-          src/trajectory_tools.py
+          src/traces.py
 
+    # PyInstaller records modules it couldn't find in a warn file instead of
+    # failing the build -- a package missing from requirements.txt (as scipy
+    # once was) shows up only there. Fail on any required package listed as
+    # missing; optional ones (e.g. OpenGL for pyqtgraph.opengl) are ignored.
+    # A missing logo or icon SVG wouldn't stop the application -- it logs a
+    # warning and runs unbranded -- so check for them here too.
+    - name: Check bundled data files and packages
+      shell: powershell
+      run: |
+        $required = @(
+          "dist/TRACES/_internal/ui_kit/plot_view.js",
+          "dist/TRACES/_internal/config",
+          "dist/TRACES/_internal/assets/traces_logo.svg",
+          "dist/TRACES/_internal/assets/traces_icon.svg",
+          "src/assets/traces.ico"
+        )
+        foreach ($path in $required) {
+          if (-not (Test-Path $path)) { Write-Error "Missing from build: $path"; exit 1 }
+        }
+        $warn = "build/TRACES/warn-TRACES.txt"
+        $packages = "scipy|numpy|pyqtgraph|superqt|PyQt6|utm"
+        $missing = Select-String -Path $warn -Pattern "^missing module named '?($packages)'? -"
+        if ($missing) {
+          $missing | ForEach-Object { Write-Host $_.Line }
+          Write-Error "Required package(s) missing from the build; check requirements.txt"
+          exit 1
+        }
+
+    # NSIS: use a copy already on the runner image if there is one;
+    # otherwise install it with Chocolatey, retrying (its feed sometimes
+    # times out -- and then "choco install" still exits 0 with nothing
+    # installed); as a last resort, download the portable NSIS zip from
+    # SourceForge. Success is judged by finding makensis.exe, never by an
+    # exit code, and its path is passed to the next steps as MAKENSIS.
     - name: Install NSIS
-      run: choco install nsis --yes --no-progress
+      shell: powershell
+      run: |
+        function Find-Makensis {
+          $candidates = @(
+            (Get-Command makensis.exe -ErrorAction SilentlyContinue).Source,
+            "${env:ProgramFiles(x86)}\NSIS\makensis.exe",
+            "${env:ProgramFiles(x86)}\NSIS\Bin\makensis.exe",
+            "$env:ProgramFiles\NSIS\makensis.exe",
+            "$env:ProgramFiles\NSIS\Bin\makensis.exe"
+          ) | Where-Object { $_ -and (Test-Path $_) }
+          $found = $candidates | Select-Object -First 1
+          if (-not $found) {
+            $roots = @("${env:ProgramFiles(x86)}", "$env:ProgramFiles", "$env:ProgramData\chocolatey") |
+                     Where-Object { $_ -and (Test-Path $_) }
+            $found = Get-ChildItem -Path $roots -Filter makensis.exe -Recurse -Depth 4 `
+                       -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+          }
+          return $found
+        }
+
+        $makensis = Find-Makensis
+        if ($makensis) { Write-Host "NSIS already installed: $makensis" }
+
+        for ($attempt = 1; -not $makensis -and $attempt -le 3; $attempt++) {
+          Write-Host "choco install nsis, attempt $attempt"
+          choco install nsis --yes --no-progress
+          $makensis = Find-Makensis
+          if (-not $makensis -and $attempt -lt 3) { Start-Sleep -Seconds (30 * $attempt) }
+        }
+
+        if (-not $makensis) {
+          # Portable NSIS: the zip holds makensis.exe with its Include and
+          # Contrib folders (MUI2.nsh), so it runs without installing.
+          $version = "3.11"
+          $url = "https://downloads.sourceforge.net/project/nsis/NSIS%203/$version/nsis-$version.zip"
+          $zip = Join-Path $env:RUNNER_TEMP "nsis-$version.zip"
+          $dest = Join-Path $env:RUNNER_TEMP "nsis"
+          $ProgressPreference = "SilentlyContinue"   # the progress bar slows Invoke-WebRequest
+          for ($attempt = 1; -not $makensis -and $attempt -le 3; $attempt++) {
+            Write-Host "Downloading NSIS $version from SourceForge, attempt $attempt"
+            try {
+              Invoke-WebRequest -Uri $url -OutFile $zip -UserAgent "Wget" -MaximumRedirection 10
+              Expand-Archive -Path $zip -DestinationPath $dest -Force
+              $makensis = Get-ChildItem -Path $dest -Filter makensis.exe -Recurse |
+                          Select-Object -First 1 -ExpandProperty FullName
+            } catch {
+              Write-Host "Download failed: $($_.Exception.Message)"
+            }
+            if (-not $makensis -and $attempt -lt 3) { Start-Sleep -Seconds (30 * $attempt) }
+          }
+        }
+
+        if (-not $makensis) {
+          Write-Error "NSIS could not be installed (Chocolatey and SourceForge both failed); re-run the job."
+          exit 1
+        }
+        Write-Host "Using $makensis"
+        & $makensis /VERSION
+        # Windows PowerShell's "Out-File -Encoding utf8" writes a byte-order
+        # mark; write GITHUB_ENV without one.
+        [System.IO.File]::AppendAllText($env:GITHUB_ENV, "MAKENSIS=$makensis`n")
 
     - name: Write NSIS script
       shell: powershell
       run: |
         $nsis = @'
         Unicode True
-        !define APP_NAME      "Trajectory Tools"
+        ;-- APP_NAME is also the program folder, Start Menu folder,
+        ;-- shortcut and registry key name. APP_VERSION: keep in step
+        ;-- with APP_VERSION in src/ui_kit/brand.py.
+        !define APP_NAME      "TRACES"
         !define APP_VERSION   "0.1"
-        !define APP_EXE       "trajectory_tools.exe"
-        !define INSTALL_REG   "Software\TrajectoryTools"
-        !define UNINSTALL_REG "Software\Microsoft\Windows\CurrentVersion\Uninstall\TrajectoryTools"
+        !define APP_EXE       "TRACES.exe"
+        !define INSTALL_REG   "Software\${APP_NAME}"
+        !define UNINSTALL_REG "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}"
 
         Name "${APP_NAME} ${APP_VERSION}"
-        OutFile "trajectory_tools_setup.exe"
-        InstallDir "$PROGRAMFILES64\TrajectoryTools"
+        OutFile "TRACES_setup.exe"
+        InstallDir "$PROGRAMFILES64\${APP_NAME}"
         InstallDirRegKey HKLM "${INSTALL_REG}" "InstallDir"
         RequestExecutionLevel admin
+
+        ;-- Installer and uninstaller icons (generated by make_icons.py)
+        !define MUI_ICON   "src\assets\traces.ico"
+        !define MUI_UNICON "src\assets\traces.ico"
 
         ;-- Modern UI pages
         !include "MUI2.nsh"
@@ -72,26 +201,28 @@ jobs:
           SetOutPath "$INSTDIR"
 
           ;-- Copy entire PyInstaller onedir output
-          File /r "dist\trajectory_tools\*.*"
+          File /r "dist\TRACES\*.*"
 
           ;-- Start Menu shortcut
-          CreateDirectory "$SMPROGRAMS\TrajectoryTools"
-          CreateShortcut "$SMPROGRAMS\TrajectoryTools\Trajectory Tools.lnk" \
+          CreateDirectory "$SMPROGRAMS\${APP_NAME}"
+          CreateShortcut "$SMPROGRAMS\${APP_NAME}\${APP_NAME}.lnk" \
                          "$INSTDIR\${APP_EXE}"
-          CreateShortcut "$SMPROGRAMS\TrajectoryTools\Uninstall.lnk" \
+          CreateShortcut "$SMPROGRAMS\${APP_NAME}\Uninstall.lnk" \
                          "$INSTDIR\uninstall.exe"
 
           ;-- Desktop shortcut
-          CreateShortcut "$DESKTOP\Trajectory Tools.lnk" "$INSTDIR\${APP_EXE}"
+          CreateShortcut "$DESKTOP\${APP_NAME}.lnk" "$INSTDIR\${APP_EXE}"
 
           ;-- Registry: record install dir and version
           WriteRegStr   HKLM "${INSTALL_REG}" "InstallDir" "$INSTDIR"
           WriteRegStr   HKLM "${INSTALL_REG}" "Version"    "${APP_VERSION}"
 
-          ;-- Registry: Add/Remove Programs entry
+          ;-- Registry: Add/Remove Programs entry (DisplayIcon: the icon
+          ;-- shown in Settings > Apps, taken from the .exe)
           WriteRegStr   HKLM "${UNINSTALL_REG}" "DisplayName"     "${APP_NAME}"
           WriteRegStr   HKLM "${UNINSTALL_REG}" "DisplayVersion"  "${APP_VERSION}"
-          WriteRegStr   HKLM "${UNINSTALL_REG}" "Publisher"       "Trajectory Tools"
+          WriteRegStr   HKLM "${UNINSTALL_REG}" "DisplayIcon"     "$INSTDIR\${APP_EXE}"
+          WriteRegStr   HKLM "${UNINSTALL_REG}" "Publisher"       "${APP_NAME}"
           WriteRegStr   HKLM "${UNINSTALL_REG}" "UninstallString" "$INSTDIR\uninstall.exe"
           WriteRegStr   HKLM "${UNINSTALL_REG}" "InstallLocation" "$INSTDIR"
           WriteRegDWORD HKLM "${UNINSTALL_REG}" "NoModify"        1
@@ -106,8 +237,8 @@ jobs:
           RMDir /r "$INSTDIR"
 
           ;-- Remove shortcuts
-          Delete "$DESKTOP\Trajectory Tools.lnk"
-          RMDir /r "$SMPROGRAMS\TrajectoryTools"
+          Delete "$DESKTOP\${APP_NAME}.lnk"
+          RMDir /r "$SMPROGRAMS\${APP_NAME}"
 
           ;-- Remove registry keys
           DeleteRegKey HKLM "${INSTALL_REG}"
@@ -116,23 +247,24 @@ jobs:
         '@
         $nsis | Out-File -FilePath installer.nsi -Encoding utf8
 
+    # MAKENSIS is set by the Install NSIS step.
     - name: Build installer
       shell: powershell
       run: |
-        $makensis = "C:\Program Files (x86)\NSIS\makensis.exe"
-        & $makensis installer.nsi
+        Write-Host "Using $env:MAKENSIS"
+        & $env:MAKENSIS installer.nsi
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
     - name: Upload portable build
       uses: actions/upload-artifact@v4
       with:
-        name: trajectory_tools_portable
-        path: dist/trajectory_tools/*
+        name: TRACES_portable
+        path: dist/TRACES/*
         retention-days: 7
 
     - name: Upload installer
       uses: actions/upload-artifact@v4
       with:
-        name: trajectory_tools_installer
-        path: trajectory_tools_setup.exe
+        name: TRACES_installer
+        path: TRACES_setup.exe
         retention-days: 7

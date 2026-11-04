@@ -20,7 +20,7 @@ class LogViewerDialog(QDialog):
     for the lifetime of the application and is never written to the config file.
 
     Attributes:
-        _log_path (Path):        Absolute path to trajectory_tools.log.
+        _log_path (Path):        Absolute path to traces.log.
         _text_edit (QTextEdit):  Read-only scrolling text area.
         _poll_timer (QTimer):    Fires every 500 ms to check for new log lines.
         _last_size (int):        Byte offset of the last character read, used to
@@ -40,7 +40,7 @@ class LogViewerDialog(QDialog):
         super().__init__(parent, Qt.WindowType.Window)   # Window flag gives all three OS buttons
         self.setWindowTitle("System Log Viewer")
 
-        self._log_path = get_user_data_path("trajectory_tools.log")
+        self._log_path = get_user_data_path("traces.log")
         self._last_size = 0
         self._poll_timer = QTimer(self)
 
