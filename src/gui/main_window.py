@@ -535,7 +535,12 @@ class MainWindow(QMainWindow):
         # Set database connection and apply settings with all parameters
         self._plot_widget.set_database(self._db_connection)
         self._plot_widget._apply_settings(event_id, time_min, time_max, dist_min, dist_max, event_summary)
-        self.setCentralWidget(self._plot_widget)
+        if self.centralWidget() is not self._plot_widget:
+            # setCentralWidget() deletes the widget it replaces. Take the
+            # home page out first so it survives for
+            # _close_database_and_reset() to show again.
+            self.takeCentralWidget()
+            self.setCentralWidget(self._plot_widget)
 
     def _export_all(self):
         """Handle the Export All menu action."""
