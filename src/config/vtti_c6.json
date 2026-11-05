@@ -1,16 +1,16 @@
 {
   "col_defs": 
   {
-    "veh_id": {"src_col": 0, "type": "int"}, 
-    "veh_time": {"src_col": 1}, 
-    "veh_speed": {"src_col": 2},
-    "veh_accel": {"src_col": 3},
-    "veh_dist_trav": {"src_col": 4},
-    "lane_id": {"func": "copy", "parms": [1]},
-    "orig_lane_id": {"func": "copy", "parms": [1]},
-    "event_id": {"func": "copy", "parms": [1]},
-    "event_name": {"func": "copy", "parms": ["run index: 1"]},
-    "x_map_loc": {"func": "copy", "parms": [0.0]},
-    "y_map_loc": {"func": "copy", "parms": [0.0]}
+    "veh_id": {"func": "copy", "parms": [0], "type": "int"},
+    "veh_time": {"func": "copy", "parms": [1]},
+    "veh_speed": {"func": "copy", "parms": [2]},
+    "veh_accel": {"func": "copy", "parms": [3]},
+    "veh_dist_trav": {"func": "copy", "parms": [4]},
+    "lane_id": {"func": "const", "parms": [1], "type": "int"},
+    "orig_lane_id": {"func": "const", "parms": [1], "type": "int"},
+    "event_id": {"func": "const", "parms": [1], "type": "int"},
+    "event_name": {"func": "const", "parms": ["run index: 1"], "type": "text"},
+    "x_map_loc": {"func": "const", "parms": [0.0]},
+    "y_map_loc": {"func": "const", "parms": [0.0]}
   }
 }

@@ -734,7 +734,10 @@ class ImportDialog(QDialog):
         """Handle database URI file selection and processing."""
         
         # 1. Build the exact same file types string as the normal input button
-        file_types = ";;".join([f"{ft} (*.{config['file_ext']})" for ft, config in self._configs.items()])
+        file_types = ";;".join(
+            f"{ft} (*.{entry['config']['file_ext']})"
+            for ft, entry in self._configs.items()
+        )
         
         # 2. Open the file dialog, allowing the user to select the URI CSV AND the config type
         file_path, selected_filter = QFileDialog.getOpenFileName(

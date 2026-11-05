@@ -1,12 +1,9 @@
-DROP TABLE IF EXISTS catalog_table;
-
-CREATE TABLE catalog_table AS
+-- Run in the isu_c6 database. Assumes the source table is public.c6.
+-- trip_duration uses the original units of "vtti.timestamp".
+CREATE TABLE public.catalog_table AS
 SELECT
-    release_key,
-    MAX(driver_id) as driver_id,
-    MAX(local_datetime) as local_datetime,
-    ROUND((MAX(t_rel_sec) - MIN(t_rel_sec))::numeric, 1) AS trip_duration_sec,
-    COUNT(DISTINCT lead_target_id) FILTER (WHERE has_lead) AS total_leaders
-
-FROM c6_ego_wfleet_radartargets
-GROUP BY release_key;
+    "vtti.file_id",
+    "ROUTE_ID",
+    MAX("vtti.timestamp") - MIN("vtti.timestamp") AS trip_duration
+FROM public.c6
+GROUP BY "vtti.file_id", "ROUTE_ID";

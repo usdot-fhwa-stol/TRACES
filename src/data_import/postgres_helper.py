@@ -1,133 +1,100 @@
-import pandas as pd
-from sqlalchemy import create_engine
-import tempfile
 import csv
 import os
+import tempfile
+
+import pandas as pd
+from sqlalchemy import create_engine
 from PyQt6.QtWidgets import QInputDialog
 
-def process_postgres_csv(parent_widget, file_path: str) -> str:
-    """
-    Reads a URI from a one-line CSV, shows a customized dropdown of the catalog, 
-    queries the required columns for the selected trip using the hidden release_key, 
-    and returns the path to a temporary CSV for the application to import.
-    """
-    try:
-        # 1. Safely read the URI from the one-line CSV
-        with open(file_path, 'r', newline='', encoding='utf-8') as f:
-            reader = csv.reader(f)
-            uri = next(reader)[0].strip() 
 
-        # 2. Connect to DB and pull the catalog table
+def process_postgres_csv(parent_widget, file_path: str) -> str:
+    """Export one ISU file/route pair, converting milliseconds to seconds.
+
+    Milepost is converted from miles to meters; speed remains in km/h.
+    Catalog duration remains
+    stored in milliseconds; only its displayed value is converted.
+    """
+    engine = None
+    try:
+        with open(file_path, 'r', newline='', encoding='utf-8') as f:
+            uri = next(csv.reader(f))[0].strip()
+
         print("Connecting to Postgres...")
         engine = create_engine(uri)
-            
-        catalog_df = pd.read_sql("SELECT release_key, local_datetime, trip_duration_sec, total_leaders FROM catalog_table;", engine)
-
-        # 3. Create the custom display string (made to handle nana
-        # Example output: "2026-07-19 08:15:30 | Duration: 452.5s | Leaders: 3"
-        catalog_df['release_key'] = catalog_df['release_key'].fillna("Error")
-        catalog_df['local_datetime'] = catalog_df['local_datetime'].fillna("Unknown Date")
-        catalog_df['trip_duration_sec'] = catalog_df['trip_duration_sec'].fillna(0.0)
-        catalog_df['total_leaders'] = catalog_df['total_leaders'].fillna(0)
-
-        catalog_df['display_name'] = catalog_df.apply(
-            lambda row: f"ID: {row['release_key']} | Date: {row['local_datetime']} | Duration: {row['trip_duration_sec']}s | Leaders: {row['total_leaders']}",
-            axis=1
+        catalog_df = pd.read_sql(
+            '''SELECT "vtti.file_id", "ROUTE_ID", trip_duration
+               FROM public.catalog_table
+               ORDER BY "vtti.file_id", "ROUTE_ID";''',
+            engine,
         )
+        if catalog_df.empty:
+            print("No trips found in public.catalog_table.")
+            return ""
 
-        options = catalog_df['display_name'].astype(str).tolist()
-                
-        # 4. Produce the Catalog Drop Box
-        item, ok = QInputDialog.getItem(
-            parent_widget, 
-            "Database Selection", 
-            "Select a trip to import:", 
-            options, 
-            0, 
-            False
-        )
-
-        # 5. If selected, extract the hidden key and pull the main data
-        if ok and item:
-            # Map the user's text selection back to the hidden release_key
-            trip_key = catalog_df.loc[catalog_df['display_name'] == item, 'release_key'].iloc[0]
-            
-            # Use the stable release_key to query the 1.2 billion row table safely
-            # Note: Update the SELECT columns to match your tgsim-L1.json requirements            
-            print(f"Querying C6 table for trip {trip_key}...")
-            query = """
-            WITH TimeDiffData AS (
-                SELECT 
-                    driver_id,
-                    t_rel_sec,
-                    speed_used_mps,
-                    accel_long_ms2,
-                    has_lead,
-                    lead_target_id,
-                    lead_x_m,
-                    lead_vx_mps,
-                    lead_ax_mps2,
-                    lead_headway_s,
-                    jerk_ms3,
-                    COALESCE(t_rel_sec - LAG(t_rel_sec) OVER (PARTITION BY driver_id ORDER BY t_rel_sec), 0) AS dt
-                FROM c6_ego_wfleet_radartargets
-                WHERE release_key = %(key)s
-            ),
-            BaseData AS (
-                SELECT
-                    driver_id,
-                    t_rel_sec,
-                    speed_used_mps,
-                    accel_long_ms2,
-                    has_lead,
-                    lead_target_id,
-                    lead_x_m,
-                    lead_vx_mps,
-                    lead_ax_mps2,
-                    lead_headway_s,
-                    jerk_ms3,
-                    SUM(speed_used_mps * dt) OVER (PARTITION BY driver_id ORDER BY t_rel_sec) AS ego_dist_trav
-                FROM TimeDiffData
+        # Number labels to associate each selection with exactly one catalog row.
+        options = [
+            f"{index + 1}. File: {file_id} | Route: {route_id} | "
+            f"Duration: {duration / 1000.0:.1f}s"
+            for index, (file_id, route_id, duration) in enumerate(
+                catalog_df.itertuples(index=False, name=None)
             )
+        ]
+        item, ok = QInputDialog.getItem(
+            parent_widget, "Database Selection",
+            "Select a file and route to import:", options, 0, False,
+        )
+        if not ok or not item:
+            return ""
 
-            -- EXTRACT EGO ROWS
+        selected = catalog_df.iloc[options.index(item)]
+        file_id = selected['vtti.file_id']
+        route_id = selected['ROUTE_ID']
+        # Use native Python values for psycopg2 parameters.
+        params = {
+            "file_id": None if pd.isna(file_id) else int(file_id),
+            "route_id": None if pd.isna(route_id) else str(route_id),
+        }
+        print(f"Querying C6 for file {params['file_id']}, route {params['route_id']}...")
+        query = '''
             SELECT
-                driver_id AS veh_id,                
-                t_rel_sec AS veh_time,              
-                speed_used_mps AS veh_speed,          
-                accel_long_ms2 AS veh_accel,        
-                ego_dist_trav AS veh_dist_trav      
-            FROM BaseData
-
-            UNION ALL
-
-            -- EXTRACT LEADER ROWS
-            SELECT
-                lead_target_id AS veh_id,                    
-                t_rel_sec AS veh_time,                        
-                (speed_used_mps + lead_vx_mps) AS veh_speed,  
-                (accel_long_ms2 + lead_ax_mps2) AS veh_accel,
-                (ego_dist_trav + (speed_used_mps * lead_headway_s)) AS veh_dist_trav  
-            FROM BaseData
-            WHERE has_lead
-
+                "TARGET_ID" AS veh_id,
+                "vtti.timestamp" / 1000.0 AS veh_time,
+                "SPEED_KMPH" AS veh_speed,
+                NULL::double precision AS veh_accel,
+                "MILEPOST" * 1609.344 AS veh_dist_trav,
+                COALESCE(
+                    "vtti.timestamp" - LAG("vtti.timestamp") OVER (
+                        PARTITION BY "TARGET_ID"
+                        ORDER BY "vtti.timestamp"
+                    ),
+                    0
+                ) / 1000.0 AS dt
+            FROM public.c6
+            WHERE "vtti.file_id" IS NOT DISTINCT FROM %(file_id)s
+              AND "ROUTE_ID" IS NOT DISTINCT FROM %(route_id)s
             ORDER BY veh_time, veh_id;
-            """
+        '''
+        trip_data = pd.read_sql(query, engine, params=params)
 
-            # trip_key is string as VTTI keys are alphanumeric
-            trip_data = pd.read_sql(query, engine, params={"key": str(trip_key)})
+        # Reserve 9999 for ego without merging it with a real target ID.
+        target_ids = pd.to_numeric(trip_data['veh_id'], errors='coerce')
+        if target_ids.eq(9999).any():
+            raise ValueError(
+                "TARGET_ID 9999 already exists in this trip; "
+                "choose another reserved ID for ego."
+            )
+        trip_data['veh_id'] = trip_data['veh_id'].replace({'ego': 9999})
 
-            # 6. Save the result to a temporary CSV
-            print("Generating Temp CSV")
-            temp_fd, temp_csv = tempfile.mkstemp(suffix=".csv")
-            os.close(temp_fd)
-            trip_data.to_csv(temp_csv, index=False)
-        
-            engine.dispose()
-            print(f"Test CSV created at: {temp_csv}")
-            return temp_csv  
-        
+        # Preserve the existing five-column order and append dt.
+        # No acceleration mapping was specified, so leave that column empty.
+        temp_fd, temp_csv = tempfile.mkstemp(suffix=".csv")
+        os.close(temp_fd)
+        trip_data.to_csv(temp_csv, index=False)
+        print(f"Trajectory CSV created at: {temp_csv}")
+        return temp_csv
     except Exception as e:
         print(f"Postgres Helper Error: {e}")
-        
-    return ""
+        return ""
+    finally:
+        if engine is not None:
+            engine.dispose()
