@@ -24,7 +24,6 @@
 - [18. Vehicle Search](#18-vehicle-search)
 - [19. System Log Viewer](#19-system-log-viewer)
 - [20. About Dialog](#20-about-dialog)
-- [Configuration Guide](trajectory-tools-config-guide.md)
 
 ---
 
@@ -101,7 +100,7 @@ Once data is imported, TRACES centers on an interactive **time-space plot** — 
 
 TRACES can also **correct** trajectory data: fill missing observations by spline interpolation, reassign lanes where lane-level anomalies are found, and stitch together trajectory segments that belong to the same vehicle. Corrections never delete the original observations — each changed row is marked, the values it replaced are kept, and every correction can be undone (see [Section 10](#10-changing-data-write-targets-and-row-status)).
 
-This guide is intended for those with a background in vehicle kinematic probe data and related statistical analysis methods. It walks through the application in the order you're likely to use it: importing data, visualizing data plots, correcting data, running analyses, and exporting results. For details on writing a JSON configuration file for a new CSV format, see the separate [Configuration Guide](trajectory-tools-config-guide.md).
+This guide is intended for those with a background in vehicle kinematic probe data and related statistical analysis methods. It walks through the application in the order you're likely to use it: importing data, visualizing data plots, correcting data, running analyses, and exporting results. For details on writing a JSON configuration file for a new CSV format, see the separate *TRACES Configuration Guide*.
 
 ![TRACES main window showing a populated time-space plot](images/01-main-window-overview.png)
 
@@ -212,7 +211,7 @@ On success, the window title updates to show the file path, the file moves to th
 
 Use **File → Import** or click **Import Data** on the start screen to open the Import dialog.
 
-**Configuration files.** Before anything can be imported, TRACES needs at least one JSON configuration file describing a CSV layout, kept in the application's `config` folder. On first launch, TRACES copies its bundled configurations into that folder; your own configurations there are never overwritten. On opening, the dialog scans the folder, validates each `.json` file it finds, and lists the valid ones as available file types (by filename). Configurations that fail validation are excluded and reported in the log. Writing these configuration files is covered in the separate **[Configuration Guide](trajectory-tools-config-guide.md)** — this guide only covers using the Import dialog itself.
+**Configuration files.** Before anything can be imported, TRACES needs at least one JSON configuration file describing a CSV layout, kept in the application's `config` folder. On first launch, TRACES copies its bundled configurations into that folder; your own configurations there are never overwritten. On opening, the dialog scans the folder, validates each `.json` file it finds, and lists the valid ones as available file types (by filename). Configurations that fail validation are excluded and reported in the log. Writing these configuration files is covered in the separate *TRACES Configuration Guide* — this guide only covers using the Import dialog itself.
 
 ![Import dialog with input file selected, ready to import](images/07-import-dialog-ready.png)
 
@@ -377,7 +376,7 @@ As described in [Section 3](#3-working-with-plots), the time and distance slider
 
 ### Hovering for Detail
 
-Hovering near a point shows a tooltip with that vehicle's ID, time, lane, distance, speed, acceleration, automation status, and length (where those columns are present in your imported data — see the [Configuration Guide](trajectory-tools-config-guide.md#data-dictionary) for which columns are optional).
+Hovering near a point shows a tooltip with that vehicle's ID, time, lane, distance, speed, acceleration, automation status, and length (where those columns are present in your imported data — see the *TRACES Configuration Guide*, section "Data Dictionary", for which columns are optional).
 
 ### Selecting Trajectories
 
@@ -1103,4 +1102,4 @@ If the log file is cleared out from under it — for instance, the Import dialog
 
 ---
 
-This covers TRACES end to end, from the start screen through importing data, plotting and interacting with trajectories, correcting data, running analyses, and exporting results. For the format of the JSON configuration files referenced throughout the import sections, see the **[Configuration Guide](trajectory-tools-config-guide.md)**.
+This covers TRACES end to end, from the start screen through importing data, plotting and interacting with trajectories, correcting data, running analyses, and exporting results. For the format of the JSON configuration files referenced throughout the import sections, see the *TRACES Configuration Guide*.

@@ -30,6 +30,7 @@ import os
 import re
 from typing import Any, Callable, Dict, List
 
+from utils import IMPUTED_STATUS_COL, TRAJ_STATUS_COL
 from .base_process import BaseProcess, LogFn
 from .csv_algorithms import CsvAlgorithms
 from .units import Units
@@ -42,12 +43,27 @@ _KEY_RE = re.compile(r"^[a-z]+(_[a-z]+)*$")
 # Must be present, with a populating function, in every definition set.
 _REQUIRED_COLS = ("event_id", "veh_id", "veh_time", "lane_id", "veh_dist_trav")
 
-# Created internally by analysis modules; may never appear in a configuration.
+# Created internally by the application; may never appear in a configuration.
+# Keep in step with the events columns the application adds: the row and
+# trajectory status columns (utils) and analysis.base_comp's
+# DERIVED_EVENTS_COLUMNS (not imported here: data_import may not depend on
+# analysis). A configured column of the same name would already exist when
+# the module adds its own, so the module would use the configured column --
+# for imputed_status, a column of nulls that every row filter rejects.
 _INTERNAL_RESERVED = {
-    "time_diff", "veh_speed_cal", "veh_accel_cal", "spacing_cal",
-    "veh_jerk_cal", "is_spline_imputed", "summary_json",
+    # Row provenance and trajectory status (utils, analysis.base_comp)
+    IMPUTED_STATUS_COL, TRAJ_STATUS_COL,
+    # Internal Consistency results
+    "veh_speed_cal", "veh_accel_cal", "veh_jerk_cal",
+    "speed_error", "accel_error", "jerk_error",
+    # Legacy spline imputation flag (migrated to imputed_status)
+    "is_spline_imputed",
+    # ranges table column
+    "summary_json",
+    # Reserved for future analysis results
+    "time_diff", "spacing_cal",
 }
-_INTERNAL_RESERVED_PREFIXES = ("calc_",)
+_INTERNAL_RESERVED_PREFIXES = ("calc_",)   # Spline Fitting results
 
 # Recognized reserved columns whose storage type is forced regardless of the
 # configured "type". Any reserved column not listed as int/text is float.
@@ -63,6 +79,11 @@ _FORCED_FLOAT_COLS = {
     "x_map_loc", "y_map_loc", "x_frenet_loc", "y_frenet_loc",
     "x_map_origin", "y_map_origin", "veh_lat", "veh_lon",
 }
+
+# Primary key of the events table: every record needs a value for each.
+_KEY_COLS = ("event_id", "veh_id", "veh_time")
+# Skipped records listed individually in the import log before summarizing.
+_MAX_SKIP_MESSAGES = 10
 
 _SQL_AFFINITY = {"int": "INTEGER", "float": "REAL", "text": "TEXT"}
 _VALID_TYPES = frozenset(_SQL_AFFINITY)
@@ -493,12 +514,26 @@ class CsvProcess(BaseProcess):
             row_count = 0
             batch_size = 1000
             batch_records = []
+            skipped = 0             # records with no value for a key column
+
+            def insert(records) -> bool:
+                """Insert *records*. INSERT OR IGNORE already skips
+                duplicate keys, so any error here is real and ends the
+                import (the dialog removes the partial database)."""
+                try:
+                    db_connection.executemany(insert_query, records)
+                    db_connection.commit()
+                    return True
+                except sqlite3.Error as e:
+                    worker.log_signal.emit(
+                        f"Error: Database insert failed near row {row_count}: {e}", False)
+                    return False
 
             for row in reader:
                 if worker.interrupt_flag:
                     break
 
-                for col_def_set in self._col_defs:
+                for j, col_def_set in enumerate(self._col_defs):
                     record = default_record.copy()
                     for key, col_def in col_def_set.items():
                         func_name = col_def.get("func")
@@ -518,33 +553,43 @@ class CsvProcess(BaseProcess):
                             )
                             return 1
 
+                    # The primary-key columns may not be null. INSERT OR
+                    # IGNORE would drop such a record without a message, so
+                    # skip it here and report it.
+                    missing = [k for k in _KEY_COLS if record[k] is None]
+                    if missing:
+                        skipped += 1
+                        if skipped <= _MAX_SKIP_MESSAGES:
+                            where = f"col_defs[{j}] " if len(self._col_defs) > 1 else ""
+                            worker.log_signal.emit(
+                                f"Warning: Row {row_count + 1} skipped: {where}"
+                                f"produced no value for {', '.join(missing)}.", False)
+                        continue
+
                     batch_records.append([record[col] for col in columns])
 
                 row_count += 1
 
                 if len(batch_records) >= batch_size:
-                    try:
-                        db_connection.executemany(insert_query, batch_records)
-                        db_connection.commit()
-                    except sqlite3.Error as e:
-                        worker.log_signal.emit(f"Error: Database insert failed: {str(e)}", False)
-                        # Continue processing, ignore duplicate key errors
-
+                    if not insert(batch_records):
+                        return 1
                     batch_records = []
                     progress = int((tracker.bytes_read / file_size) * 100)
                     worker.progress_signal.emit(progress)
 
             if batch_records and not worker.interrupt_flag:
-                try:
-                    db_connection.executemany(insert_query, batch_records)
-                    db_connection.commit()
-                except sqlite3.Error:
-                    pass  # Ignore duplicate key errors
-
+                if not insert(batch_records):
+                    return 1
                 progress = int((tracker.bytes_read / file_size) * 100)
                 worker.progress_signal.emit(progress)
 
+        if skipped > _MAX_SKIP_MESSAGES:
+            worker.log_signal.emit(
+                f"Warning: {skipped - _MAX_SKIP_MESSAGES} more record(s) skipped "
+                f"for missing key values (not listed).", False)
         if not worker.interrupt_flag:
-            worker.log_signal.emit(f"Info: {row_count} rows successfully imported", True)
+            note = (f"; {skipped} record(s) skipped for missing event_id, "
+                    f"veh_id or veh_time" if skipped else "")
+            worker.log_signal.emit(f"Info: {row_count} rows read{note}", True)
 
         return 0
