@@ -79,6 +79,13 @@ _HINT = ("Wheel: zoom (over an axis: that axis only) · Drag: pan · "
 
 # ── Assets ─────────────────────────────────────────────────────────────────
 
+def export_plot_to_svg(plot_widget) -> str:
+    """Return a pyqtgraph PlotWidget as SVG for spectral plot downloads."""
+    from pyqtgraph.exporters import SVGExporter
+    svg = SVGExporter(plot_widget.getPlotItem()).export(toBytes=True)
+    return svg.decode("utf-8") if isinstance(svg, (bytes, bytearray)) else svg
+
+
 def load_asset(name: str) -> str:
     """Text of a file in the ui_kit package (e.g. plot_view.js)."""
     return files(_ASSET_PACKAGE).joinpath(name).read_text(encoding="utf-8")

@@ -12,7 +12,7 @@ TRACES is a pre-release desktop application for importing, exploring, and analyz
 - Select individual trajectories or groups of trajectories for statistics and time-series plots.
 - Measure gaps and headways directly on the plot.
 - Identify and fit shockwaves with the semi-automatic interaction mode.
-- Run jerk, missing-data, internal-consistency, and B-spline fitting analyses.
+- Run jerk, missing-data, internal-consistency, platoon-consistency, spectral, and B-spline fitting analyses.
 - Export complete or selected datasets and analysis results to CSV.
 - Export supported analysis plots as self-contained HTML files with embedded SVG.
 
@@ -49,22 +49,20 @@ The `events` table is configuration-driven, but every imported dataset must prov
 
 ## Architecture
 
-`gui` is the orchestration layer: `main_window.py` owns the menu bar and the SQLite connection, and constructs whichever `data_import`, `comp`, or `plot` component an action requires. Those three packages do not import from each other directly — they only share data through the `events`/`ranges` tables and small cross-cutting helpers in `utils.py`. Two exceptions are called out below: `ExportDialog` writes CSV straight from `events`, and Shockwave fitting is built incrementally through a direct `comp` ↔ `plot` link rather than through the database.
+`gui` is the orchestration layer: `main_window.py` owns the menu bar and the SQLite connection, and constructs whichever `data_import`, `analysis`, or `plot` component an action requires. Those three packages do not import from each other directly — they only share data through the `events`/`ranges` tables and small cross-cutting helpers in `utils.py`. Two exceptions are called out below: `ExportDialog` writes CSV straight from `events`, and Shockwave fitting is built incrementally through a direct `analysis` ↔ `plot` link rather than through the database.
 
 ![TRACES module architecture: gui orchestrates data_import, comp, and plot around a shared SQLite database, with ExportDialog writing CSV directly from events and a direct comp-to-plot link for interactive Shockwave fitting](docs/images/architecture-diagram.svg)
 
 *Figure: TRACES module architecture.*
 
-Each package is an independent extension point: new file formats implement `BaseProcess`, new analyses implement `BaseComp`, and new plot interactions implement `InteractionMode`. See the [Developer Guide](docs/trajectory-tools-developer-guide.md) for the full architecture overview, data model, and extension recipes.
+Each package is an independent extension point: new file formats implement `BaseProcess`, new analyses implement `BaseComp`, and new plot interactions implement `InteractionMode`. See the [Developer Guide](docs/TRACES-developer-guide.md) for the full architecture overview, data model, and extension recipes.
 
 ## Requirements
 
 - Python 3.12
 - A desktop environment capable of running PyQt6
 - Runtime packages listed in [`requirements.txt`](requirements.txt)
-- SciPy 1.15 or newer for spline fitting
-
-> **Dependency note:** the spline module imports SciPy, but SciPy is not yet declared in `requirements.txt`. Install it separately as shown below if you need the full feature set.
+- SciPy for spline fitting (included in `requirements.txt`).
 
 ## Run from source
 
@@ -75,14 +73,13 @@ python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
-python -m pip install "scipy>=1.15"
 cd src
-python trajectory_tools.py
+python traces.py
 ```
 
 On Windows, use `py -3.12` to create the environment and `.venv\Scripts\Activate.ps1` to activate it.
 
-> **Working-directory note:** run the development entry point with `src` as the current directory. Development builds currently resolve import profiles, settings, and logs relative to the working directory; running `python src/trajectory_tools.py` from the repository root will not discover the profiles in `src/config`.
+> **Working-directory note:** run the development entry point with `src` as the current directory. Development builds currently resolve import profiles, settings, and logs relative to the working directory; running `python src/traces.py` from the repository root will not discover the profiles in `src/config`.
 
 The repository does not include sample CSV or SQLite data. To use the application, provide either:
 
@@ -98,7 +95,7 @@ The repository does not include sample CSV or SQLite data. To use the applicatio
 4. Explore trajectories with the plot controls, right-click tools, and **Mode**, **Data**, and **Analysis** menus.
 5. Use **File → Export** to save data or analysis results.
 
-See the [User Guide](docs/trajectory-tools-user-guide.md) for the complete illustrated workflow.
+See the [User Guide](docs/TRACES-user-guide.md) for the complete illustrated workflow.
 
 ## Import profiles
 
@@ -109,7 +106,7 @@ Import profiles live in [`src/config`](src/config) and define the processor clas
 
 These profiles are layout adapters, not a restriction on the application. New CSV layouts can be supported with another JSON profile, and new file formats can be added by implementing the `BaseProcess` interface.
 
-For the complete profile schema, supported transformations, unit conversions, and data dictionary, read the [JSON Configuration Guide](docs/trajectory-tools-config-guide.md).
+For the complete profile schema, supported transformations, unit conversions, and data dictionary, read the [JSON Configuration Guide](docs/TRACES-config-guide.md).
 
 ### Configuration locations
 
@@ -122,19 +119,19 @@ Packaged builds copy the bundled profiles into the user configuration directory 
 
 | Guide | Audience and contents |
 |---|---|
-| [User Guide](docs/trajectory-tools-user-guide.md) | Importing, plotting, selecting, analyzing, searching, and exporting through the GUI. |
-| [JSON Configuration Guide](docs/trajectory-tools-config-guide.md) | Import-profile structure, required fields, functions, units, and the trajectory data dictionary. |
-| [Developer Guide](docs/trajectory-tools-developer-guide.md) | Architecture, data model, extension interfaces, and recipes for new importers, analyses, and interaction modes. |
+| [User Guide](docs/TRACES-user-guide.md) | Importing, plotting, selecting, analyzing, searching, and exporting through the GUI. |
+| [JSON Configuration Guide](docs/TRACES-config-guide.md) | Import-profile structure, required fields, functions, units, and the trajectory data dictionary. |
+| [Developer Guide](docs/TRACES-developer-guide.md) | Architecture, data model, extension interfaces, and recipes for new importers, analyses, and interaction modes. |
 
 ## Repository layout
 
 | Path | Purpose |
 |---|---|
-| `src/trajectory_tools.py` | Application entry point. |
+| `src/traces.py` | Application entry point. |
 | `src/gui/` | Main window, start screen, and import/export dialogs. |
 | `src/data_import/` | Import interfaces, CSV processing, transformations, and unit conversion. |
 | `src/plot/` | Time-space plotting, supporting plots, selection, and interaction modes. |
-| `src/comp/` | Jerk, missing-data, internal-consistency, shockwave, and spline computations. |
+| `src/analysis/` | Trajectory analyses, including platoon consistency, spectral analysis, shockwave, and spline computations. |
 | `src/config/` | Bundled JSON import profiles. |
 | `tests/` | Unit and GUI tests. |
 | `docs/` | User, configuration, and developer guides with screenshots. |
@@ -156,7 +153,7 @@ For a headless Linux environment:
 QT_QPA_PLATFORM=offscreen python -m pytest -q
 ```
 
-Some tests at the current revision still target earlier importer and GUI interfaces, so the suite is not yet fully green. When changing behavior, update the corresponding tests and documentation together. The [Developer Guide](docs/trajectory-tools-developer-guide.md) describes the main extension points.
+Some tests at the current revision still target earlier importer and GUI interfaces, so the suite is not yet fully green. When changing behavior, update the corresponding tests and documentation together. The [Developer Guide](docs/TRACES-developer-guide.md) describes the main extension points.
 
 ## Windows packaging
 
@@ -164,8 +161,21 @@ The included [GitHub Actions workflow](.github/workflows/build.yml) uses Python 
 
 ## Project status
 
-TRACES is a version 0.1 proof of concept and should be treated as pre-release software. The current implementation includes the semi-automatic shockwave workflow. Manual and fully automatic shockwave modes are not implemented, and the visible Platoon Consistency and Spectral Analysis actions are disabled placeholders.
+TRACES is a version 0.1 proof of concept and should be treated as pre-release software. The current implementation includes the semi-automatic shockwave workflow. Manual and fully automatic shockwave modes are not implemented. Platoon Consistency and Spectral Analysis are available under **Analysis → Noise**, with CSV exports under **File → Export → Export Analysis**.
 
 ## License
 
 Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for the full text.
+
+## Contact
+
+For more information, contact ITSAMS@dot.gov.
+
+## Platoon Consistency
+
+See [Platoon Consistency](docs/platoon-consistency.md) for the Module 3 workflow, calculation conventions, and validation command.
+
+## Spectral Analysis
+
+See [Spectral Analysis](docs/spectral-analysis.md) for the Module 5 workflow,
+DFT conventions, magnitude/amplitude/power plots, CSV export, and validation command.

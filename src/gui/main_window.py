@@ -117,11 +117,12 @@ class MainWindow(QMainWindow):
         export_ic_action.triggered.connect(self._export_internal_consistency)
         export_analysis_menu.addAction(export_ic_action)
 
-        # placeholders for future noise analysis modules
-        placeholder = QAction("&Platoon Consistency", self)
-        placeholder.setEnabled(False)
-        export_analysis_menu.addAction(placeholder)
-        # spectral analysis only available from top-level menu
+        export_platoon_action = QAction("&Platoon Consistency", self)
+        export_platoon_action.triggered.connect(self._export_platoon_consistency)
+        export_analysis_menu.addAction(export_platoon_action)
+        export_spectral_action = QAction("&Spectral Analysis", self)
+        export_spectral_action.triggered.connect(self._export_spectral_analysis)
+        export_analysis_menu.addAction(export_spectral_action)
 
         file_menu.addSeparator()
 
@@ -187,14 +188,13 @@ class MainWindow(QMainWindow):
         ic_action.triggered.connect(self._run_internal_consistency)
         noise_menu.addAction(ic_action)
 
-        # placeholders for future noise analysis modules
-        placeholder = QAction("&Platoon Consistency", self)
-        placeholder.setEnabled(False)
-        noise_menu.addAction(placeholder)
+        platoon_action = QAction("&Platoon Consistency", self)
+        platoon_action.triggered.connect(self._run_platoon_consistency)
+        noise_menu.addAction(platoon_action)
 
-        placeholder = QAction("S&pectral Analysis", self)
-        placeholder.setEnabled(False)
-        noise_menu.addAction(placeholder)
+        spectral_action = QAction("S&pectral Analysis", self)
+        spectral_action.triggered.connect(self._run_spectral_analysis)
+        noise_menu.addAction(spectral_action)
 
         self._mode_menu = QMenu("&Mode", self)
         menu_bar.addMenu(self._mode_menu)
@@ -593,6 +593,50 @@ class MainWindow(QMainWindow):
         from analysis.jerk import JerkCompDialog
         jerk_dlg = JerkCompDialog(self, self._db_connection, event_ids=event_ids, export_mode=True)
         jerk_dlg.exec()
+
+    def _export_spectral_analysis(self):
+        if not self._db_connection:
+            QMessageBox.warning(self, "Warning", "No database is currently open.")
+            return
+        from gui.event_selection_dialog import EventSelectionDialog
+        from analysis.spectral import SpectralDialog
+        selection = EventSelectionDialog(self, self._db_connection)
+        if selection.exec() != QDialog.DialogCode.Accepted or not selection.selected_event_ids:
+            return
+        dlg = SpectralDialog(self, self._db_connection,
+                             event_ids=selection.selected_event_ids, export_mode=True)
+        dlg.exec()
+
+    def _run_spectral_analysis(self):
+        if not self._db_connection or self._plot_widget._current_event_id is None:
+            return
+        from analysis.spectral import SpectralDialog
+        dlg = SpectralDialog(self, self._db_connection,
+                             event_ids=[self._plot_widget._current_event_id])
+        dlg.exec()
+
+    def _export_platoon_consistency(self):
+        if not self._db_connection:
+            QMessageBox.warning(self, "Warning", "No database is currently open.")
+            return
+        from gui.event_selection_dialog import EventSelectionDialog
+        from analysis.platoon import PlatoonConsistencyDialog
+        selection = EventSelectionDialog(self, self._db_connection)
+        if selection.exec() != QDialog.DialogCode.Accepted or not selection.selected_event_ids:
+            return
+        dlg = PlatoonConsistencyDialog(
+            self, self._db_connection,
+            event_ids=selection.selected_event_ids, export_mode=True)
+        dlg.exec()
+
+    def _run_platoon_consistency(self):
+        if not self._db_connection or self._plot_widget._current_event_id is None:
+            return
+        from analysis.platoon import PlatoonConsistencyDialog
+        dlg = PlatoonConsistencyDialog(
+            self, self._db_connection,
+            event_ids=[self._plot_widget._current_event_id])
+        dlg.exec()
 
     def _export_internal_consistency(self):
         if not self._db_connection:

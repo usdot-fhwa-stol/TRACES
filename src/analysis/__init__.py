@@ -2,7 +2,7 @@
 
 Each analysis lives in its own subpackage (advanced_statistics,
 gap_interpolation, internal_consistency, jerk, lane_anomaly,
-manual_stitching, missing_data, shockwave, spline) and is split into
+manual_stitching, missing_data, platoon, shockwave, spectral, spline) and is split into
 Qt-free computation modules and dialog modules that collect parameters
 and show results.
 
