@@ -92,6 +92,7 @@ class CsvAlgorithms:
                 return _convert(parms[1], col_type)
             return None
 
+
         return _convert(row[src], col_type)
 
     @source_cols(lambda parms: [])
