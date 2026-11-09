@@ -12,8 +12,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 from PyQt6.QtWidgets import QApplication, QDialog
 
-from comp.platoon.platoon_comp import PlatoonConsistencyComp
-from comp.platoon.platoon_dialog import PlatoonConsistencyDialog, PlatoonResultsDialog, write_csv
+from analysis.platoon.platoon_comp import PlatoonConsistencyComp
+from analysis.platoon.platoon_dialog import PlatoonConsistencyDialog, PlatoonResultsDialog, write_csv
 
 
 class PlatoonDialogTests(unittest.TestCase):
@@ -71,7 +71,7 @@ class PlatoonDialogTests(unittest.TestCase):
         from gui.main_window import MainWindow
         parent = SimpleNamespace(_db_connection=self.conn,
                                  _plot_widget=SimpleNamespace(_current_event_id=1))
-        with patch('comp.platoon.PlatoonConsistencyDialog') as dialog:
+        with patch('analysis.platoon.PlatoonConsistencyDialog') as dialog:
             MainWindow._run_platoon_consistency(parent)
             self.assertEqual(dialog.call_args.kwargs['event_ids'], [1])
             with patch('gui.event_selection_dialog.EventSelectionDialog') as selection:
@@ -85,7 +85,7 @@ class PlatoonDialogTests(unittest.TestCase):
         from plot.custom_view_box import CustomViewBox
         parent = SimpleNamespace(_db_connection=self.conn, _current_event_id=1)
         view = SimpleNamespace(parent_widget=parent, _get_target_vehicle_ids=Mock(return_value=[1]))
-        with patch('comp.platoon.PlatoonConsistencyDialog') as dialog:
+        with patch('analysis.platoon.PlatoonConsistencyDialog') as dialog:
             CustomViewBox._run_platoon_rightclick(view)
             self.assertEqual(dialog.call_args.kwargs['veh_ids'], [1])
             view._get_target_vehicle_ids.return_value = []

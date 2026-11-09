@@ -1,10 +1,13 @@
 # Platoon Consistency
 
+Removed trajectories and synthetic placeholder rows are excluded from both
+followers and leader candidates; actual gap fills and lane corrections remain.
+
 Implements Module 3 of `NoiseAnalysisReport_Draft_v2.3.docx`.
 
 ## Run the analysis
 
-- **Analysis → Platoon Consistency** analyzes all followers in the displayed event.
+- **Analysis → Noise → Platoon Consistency** analyzes all followers in the displayed event.
 - **Right-click → Noise Analysis → Platoon Consistency** analyzes the target trajectories as followers. Leader candidates still include every vehicle in the event.
 - **File → Export → Export Analysis → Platoon Consistency** exports the selected events. The results dialog also has a **Save CSV…** button.
 

@@ -13,9 +13,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 import numpy as np
 from PyQt6.QtWidgets import QApplication, QDialog
 from PyQt6.QtCore import Qt
-from comp.spectral.spectral_comp import SpectralComp, write_csv
-from comp.spectral.spectral_dialog import SpectralDialog, SpectralResultsDialog
-from comp.plot_export import export_plot_to_svg
+from analysis.spectral.spectral_comp import SpectralComp, write_csv
+from analysis.spectral.spectral_dialog import SpectralDialog, SpectralResultsDialog
+from ui_kit.plot_export import export_plot_to_svg
 
 
 class SpectralTests(unittest.TestCase):
@@ -102,6 +102,23 @@ class SpectralTests(unittest.TestCase):
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0].time_step, 3)
         np.testing.assert_allclose(results[0].fourier_coefficient, np.fft.fft([1, 2, 3]))
+
+    def test_removed_trajectories_and_placeholder_rows_are_excluded(self):
+        from utils import IMPUTED_ORIGINAL, IMPUTED_SPLINE, TRAJ_KEPT, TRAJ_REMOVED
+        self.add([1, 2, 100])
+        self.add([10, 20], vehicle=2)
+        self.conn.execute('ALTER TABLE events ADD COLUMN traj_status TEXT')
+        self.conn.execute('ALTER TABLE events ADD COLUMN imputed_status TEXT')
+        self.conn.execute('UPDATE events SET traj_status = ?, imputed_status = ?',
+                          (TRAJ_KEPT, IMPUTED_ORIGINAL))
+        self.conn.execute('UPDATE events SET traj_status = ? WHERE veh_id = 2',
+                          (TRAJ_REMOVED,))
+        self.conn.execute('UPDATE events SET imputed_status = ? '
+                          'WHERE veh_id = 1 AND veh_time = 2', (IMPUTED_SPLINE,))
+        results = SpectralComp().comp_event(self.conn, 1)
+        self.assertEqual([r.veh_id for r in results], [1])
+        np.testing.assert_allclose(results[0].fourier_coefficient, np.fft.fft([1, 2]))
+        self.assertEqual(SpectralComp().comp_series(self.conn, 1, [2]), [])
 
     def test_existing_time_diff_and_fallback(self):
         self.add([1, 2, 3], [0, 2, 6])
@@ -230,7 +247,7 @@ class SpectralTests(unittest.TestCase):
         from gui.main_window import MainWindow
         window = SimpleNamespace(_db_connection=self.conn,
                                  _plot_widget=SimpleNamespace(_current_event_id=7))
-        with patch('comp.spectral.SpectralDialog') as dialog:
+        with patch('analysis.spectral.SpectralDialog') as dialog:
             MainWindow._run_spectral_analysis(window)
             dialog.assert_called_once_with(window, self.conn, event_ids=[7])
             with patch('gui.event_selection_dialog.EventSelectionDialog') as selection:
@@ -238,6 +255,23 @@ class SpectralTests(unittest.TestCase):
                 selection.return_value.selected_event_ids = [1, 2]
                 MainWindow._export_spectral_analysis(window)
                 dialog.assert_called_with(window, self.conn, event_ids=[1, 2], export_mode=True)
+
+    def test_merged_noise_and_export_menus_have_working_actions(self):
+        from gui.main_window import MainWindow
+        with patch.object(MainWindow, '_load_settings'), \
+                patch.object(MainWindow, '_setup_home_page'), \
+                patch.object(MainWindow, '_load_home_page'):
+            window = MainWindow()
+        self.addCleanup(window.close)
+        noise_menu = window._analysis_menu.actions()[0].menu()
+        self.assertEqual(noise_menu.title(), '&Noise')
+        actions = {a.text().replace('&', ''): a for a in noise_menu.actions()}
+        for label in ('Platoon Consistency', 'Spectral Analysis'):
+            self.assertTrue(actions[label].isEnabled())
+        exports = next(a.menu() for a in window._export_menu.actions()
+                       if a.menu() and 'Analysis' in a.text())
+        export_labels = {a.text().replace('&', '') for a in exports.actions()}
+        self.assertTrue({'Platoon Consistency', 'Spectral Analysis'} <= export_labels)
 
 
 if __name__ == '__main__':

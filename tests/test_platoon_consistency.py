@@ -2,7 +2,7 @@ import math
 import sqlite3
 import unittest
 
-from comp.platoon.platoon_comp import PlatoonConsistencyComp, summarize
+from analysis.platoon.platoon_comp import PlatoonConsistencyComp, summarize
 
 
 class PlatoonConsistencyTests(unittest.TestCase):
@@ -33,6 +33,24 @@ class PlatoonConsistencyTests(unittest.TestCase):
         self.assertEqual(pair.minimum_spacing, 20)
         self.assertEqual(pair.rmse_bias, 0)
         self.assertEqual(pair.sample_count, 3)
+
+    def test_removed_and_placeholder_leaders_are_excluded(self):
+        from utils import IMPUTED_ORIGINAL, IMPUTED_SPLINE, TRAJ_KEPT, TRAJ_REMOVED
+        for t in (0, 1):
+            for vehicle, position in ((1, 0), (2, 4), (3, 10), (4, 2)):
+                self.add(vehicle, t, position + 10*t)
+        self.conn.execute('ALTER TABLE events ADD COLUMN traj_status TEXT')
+        self.conn.execute('ALTER TABLE events ADD COLUMN imputed_status TEXT')
+        self.conn.execute('UPDATE events SET traj_status = ?, imputed_status = ?',
+                          (TRAJ_KEPT, IMPUTED_ORIGINAL))
+        self.conn.execute('UPDATE events SET traj_status = ? WHERE veh_id = 2',
+                          (TRAJ_REMOVED,))
+        self.conn.execute('UPDATE events SET imputed_status = ? WHERE veh_id = 4',
+                          (IMPUTED_SPLINE,))
+        pair, = self.run_comp([1])[0].pairs
+        self.assertEqual(pair.leader_id, 3)
+        self.assertEqual(pair.minimum_spacing, 10)
+        self.assertEqual(self.run_comp([2, 4])[0].pairs, [])
 
     def test_trapezoidal_bias_and_rmspe_ratio(self):
         for t, spacing in ((0, 10), (1, 12), (3, 18)):

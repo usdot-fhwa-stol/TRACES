@@ -1,6 +1,6 @@
 # Spectral Analysis (Module 5)
 
-Open an event, then choose **Analysis → Spectral Analysis**. Select `veh_speed`
+Open an event, then choose **Analysis → Noise → Spectral Analysis**. Select `veh_speed`
 (default) or `veh_accel`, then click **OK**. Computation runs in the background
 for every vehicle in the current event, independently of the plot selection.
 The result window provides a trajectory dropdown, Previous/Next buttons, and
@@ -39,6 +39,8 @@ The implementation follows Module 5 of NoiseAnalysisReport_Draft_v2.3:
 - Group by event and vehicle and sort by time. Omit missing/nonfinite signal
   values and nonfinite timestamps. Skip trajectories with fewer than two samples
   or no valid positive sampling interval.
+- Exclude removed trajectories and synthetic placeholder rows using the shared
+  analysis filters; retain actual gap fills and lane corrections.
 - Reuse `time_diff` when it exists and is finite for all retained observations
   after the first (the initial value may be NULL). Otherwise calculate differences
   between retained timestamps. Average only finite, positive differences.

@@ -1,7 +1,6 @@
 import json
 import sqlite3
 import logging
-import math
 from datetime import datetime
 from pathlib import Path
 from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QProgressBar, QTextEdit, QFileDialog, QMessageBox, QLabel
@@ -102,11 +101,6 @@ class _ImportWorkerThread(QThread):
         """)
 
         # Determine which optional columns exist in this database
-        cursor.execute("PRAGMA table_info(events)")
-        existing_cols = {row[1] for row in cursor.fetchall()}
-        has_orig_lane = "orig_lane_id" in existing_cols
-        has_event_name = "event_name" in existing_cols
-
         logger.debug("Creating event summaries")
         self.log_signal.emit("Creating event summaries", True)
 
@@ -117,73 +111,17 @@ class _ImportWorkerThread(QThread):
         logger.debug(f"Creating summaries for {len(event_ids)} events")
         self.log_signal.emit(f"Creating summaries for {len(event_ids)} events", True)
 
+        from data_import.db_utils import build_event_summary
         for i, event_id in enumerate(event_ids):
             if self.interrupt_flag:
                 logger.debug("Interrupt flag set during event summary creation")
                 return False
 
-            # Get event name (optional column; fall back to a generated label)
-            event_name = f"Event {event_id}"
-            if has_event_name:
-                cursor.execute("""
-                    SELECT DISTINCT event_name FROM events
-                    WHERE event_id = ?
-                """, (event_id,))
-                result = cursor.fetchone()
-                if result and result[0] is not None:
-                    event_name = result[0]
+            summary = build_event_summary(self.db_connection, event_id)
+            cursor.execute(
+                "INSERT INTO ranges (event_id, summary_json) VALUES (?, ?)",
+                (event_id, json.dumps(summary)))
 
-            # Get time and distance ranges
-            cursor.execute("""
-                SELECT MIN(veh_time), MAX(veh_time), MIN(veh_dist_trav), MAX(veh_dist_trav)
-                FROM events
-                WHERE event_id = ?
-            """, (event_id,))
-            time_min, time_max, dist_min, dist_max = cursor.fetchone()
-
-            # Get unique lane IDs; pair with orig_lane_id when available,
-            # otherwise pair with None so consumers see a consistent shape.
-            if has_orig_lane:
-                cursor.execute("""
-                    SELECT DISTINCT lane_id, orig_lane_id FROM events
-                    WHERE event_id = ?
-                    ORDER BY lane_id
-                """, (event_id,))
-                lane_ids = [[row[0], row[1]] for row in cursor.fetchall() if row[0] is not None]
-            else:
-                cursor.execute("""
-                    SELECT DISTINCT lane_id FROM events
-                    WHERE event_id = ?
-                    ORDER BY lane_id
-                """, (event_id,))
-                lane_ids = [[row[0], None] for row in cursor.fetchall() if row[0] is not None]
-
-            # Get unique vehicle IDs
-            cursor.execute("""
-                SELECT DISTINCT veh_id FROM events
-                WHERE event_id = ?
-                ORDER BY veh_id
-            """, (event_id,))
-            veh_ids = [row[0] for row in cursor.fetchall()]
-
-            # Create summary JSON
-            summary = {
-                "event_name": event_name,
-                "veh_time": [math.floor(time_min) if time_min is not None else 0,
-                            math.ceil(time_max) if time_max is not None else 0],
-                "veh_dist_trav": [math.floor(dist_min) if dist_min is not None else 0,
-                                math.ceil(dist_max) if dist_max is not None else 0],
-                "lane_id": lane_ids,
-                "veh_id": veh_ids
-            }
-
-            # Insert summary into ranges table
-            cursor.execute("""
-                INSERT INTO ranges (event_id, summary_json)
-                VALUES (?, ?)
-            """, (event_id, json.dumps(summary)))
-
-            # Update progress bar based on event processing
             if len(event_ids) > 0:
                 progress = int(((i + 1) / len(event_ids)) * 100)
                 self.progress_signal.emit(progress)
@@ -319,7 +257,7 @@ class ImportDialog(QDialog):
         self._selected_file_type = ""
         self._worker_thread = None
         # Use get_user_data_path for log file to work in both development and PyInstaller environments
-        self._log_file = get_user_data_path("trajectory_tools.log")
+        self._log_file = get_user_data_path("traces.log")
         self._import_completed = False  # Track if import completed successfully
         self._successful_import_path = ""  # Store path of successful import
         logger.debug("ImportDialog initialized")
