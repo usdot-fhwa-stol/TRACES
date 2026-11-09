@@ -169,7 +169,7 @@ Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for the f
 
 ## Contact
 
-For more information, contact CAVSupportServices@dot.gov.
+For more information, contact ITSAMS@dot.gov.
 
 ## Platoon Consistency
 
