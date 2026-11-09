@@ -19,6 +19,24 @@ class SpectralResult:
     fourier_coefficient: np.ndarray
     magnitude: np.ndarray
 
+    def one_sided_values(self, spectrum_type='magnitude'):
+        """Return raw magnitude, peak amplitude, or mean-square power per bin.
+
+        Real signals share each interior bin's contribution with its negative
+        frequency partner. DC and the even-length Nyquist bin have no partner.
+        """
+        n = len(self.magnitude)
+        values = self.magnitude[:n // 2 + 1].copy()
+        if spectrum_type == 'magnitude':
+            return values
+        values /= n
+        if spectrum_type == 'power':
+            values **= 2
+        elif spectrum_type != 'amplitude':
+            raise ValueError(f'Unknown spectrum type: {spectrum_type}')
+        values[1:-1 if n % 2 == 0 else None] *= 2
+        return values
+
 
 class SpectralComp(BaseComp):
     OPTIONS_SCHEMA = {'selected_signal': 'veh_speed'}

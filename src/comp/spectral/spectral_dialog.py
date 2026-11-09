@@ -1,4 +1,4 @@
-"""Spectral parameter entry, background analysis and magnitude plots."""
+"""Spectral parameter entry, background analysis and spectrum plots."""
 from pathlib import Path
 
 import pyqtgraph as pg
@@ -29,7 +29,7 @@ class SpectralDialog(BaseAnalysisDialog):
             if signal in columns:
                 self._signal_combo.addItem(signal, signal)
         form.addRow('Selected signal:', self._signal_combo)
-        hint = QLabel('Raw DFT magnitude using the mean positive sampling interval.\n'
+        hint = QLabel('Spectra using the mean positive sampling interval.\n'
                       'Missing signal values are omitted; no resampling is applied.')
         hint.setWordWrap(True)
         form.addRow(hint)
@@ -119,6 +119,18 @@ class SpectralResultsDialog(QDialog):
         navigation.addWidget(self._trajectory_combo, 1)
         navigation.addWidget(self._next)
         layout.addLayout(navigation)
+        spectrum_controls = QHBoxLayout()
+        spectrum_controls.addWidget(QLabel('Spectrum:'))
+        self._spectrum_combo = QComboBox()
+        self._spectrum_combo.addItem('Magnitude (raw DFT)', 'magnitude')
+        self._spectrum_combo.addItem('Amplitude (one-sided)', 'amplitude')
+        self._spectrum_combo.addItem('Power Spectrum (one-sided)', 'power')
+        self._spectrum_combo.setToolTip(
+            'Amplitude shows peak oscillation size. Power shows mean-square '
+            'contribution per frequency bin in squared signal units.')
+        spectrum_controls.addWidget(self._spectrum_combo)
+        spectrum_controls.addStretch()
+        layout.addLayout(spectrum_controls)
         self._plot = pg.PlotWidget(background='w')
         self._plot.setLabel('bottom', 'Frequency', units='Hz')
         self._plot.setLabel('left', 'Magnitude (raw DFT)')
@@ -155,10 +167,27 @@ class SpectralResultsDialog(QDialog):
         self._next.clicked.connect(lambda: self._trajectory_combo.setCurrentIndex(
             self._trajectory_combo.currentIndex() + 1))
         self._trajectory_combo.currentIndexChanged.connect(self._update_plot)
+        self._spectrum_combo.currentIndexChanged.connect(
+            lambda: self._update_plot(self._trajectory_combo.currentIndex()))
         self._update_plot(self._trajectory_combo.currentIndex())
 
     def _update_plot(self, index):
         self._plot.clear()
+        spectrum_type = self._spectrum_combo.currentData()
+        label, description = {
+            'magnitude': ('Magnitude (raw DFT)', 'Magnitude = |X[k]| (unnormalized).'),
+            'amplitude': ('Amplitude', 'One-sided peak amplitude = 2|X[k]|/N; '
+                          'DC and Nyquist (when present) use |X[k]|/N.'),
+            'power': ('Power', 'One-sided power per bin = 2|X[k]|²/N²; '
+                      'DC and Nyquist (when present) use |X[k]|²/N². '
+                      'Total power equals the signal mean square; this is not a PSD.'),
+        }[spectrum_type]
+        self._tabs.setTabText(0, {
+            'magnitude': 'Magnitude Spectrum',
+            'amplitude': 'Amplitude Spectrum',
+            'power': 'Power Spectrum',
+        }[spectrum_type])
+        self._plot.setLabel('left', label)
         valid = 0 <= index < len(self.frequency_spectrum)
         self._table_model.set_result(self.frequency_spectrum[index] if valid else None)
         self._save.setEnabled(valid)
@@ -172,18 +201,24 @@ class SpectralResultsDialog(QDialog):
         result = self.frequency_spectrum[index]
         n = len(result.frequency_index)
         stop = n // 2 + 1
-        self._plot.plot(result.frequency[:stop], result.magnitude[:stop],
+        values = result.one_sided_values(spectrum_type)
+        units = 'm/s' if result.selected_signal == 'veh_speed' else 'm/s²'
+        if spectrum_type == 'power':
+            units = f'({units})²'
+        self._plot.setLabel('left', f'{label} ({units})')
+        self._plot.plot(result.frequency[:stop], values,
                         pen=pg.mkPen('#0000ff', width=1), fillLevel=0,
                         brush=pg.mkBrush(0, 0, 255, 100))
         self._plot.setTitle(f'{result.selected_signal} — Event {result.event_id}, '
                             f'Vehicle {result.veh_id}')
         self._plot.enableAutoRange()
         self._plot.setXRange(0, float(result.frequency[stop - 1]), padding=0)
-        self._plot.setYRange(0, max(float(result.magnitude[:stop].max()), 1e-12), padding=0.03)
+        self._plot.setYRange(0, max(float(values.max()), 1e-12), padding=0.03)
         self._info.setText(f'{n} samples; mean time increment {result.time_step:.6g} s. '
-                           'Magnitude is unnormalized. Irregular sampling and gaps are '
+                           f'{description} The mean is retained at 0 Hz. '
+                           'Irregular sampling and gaps are '
                            'represented by the mean increment, without interpolation. '
-                           'Spectrum Table shows all frequency bins for this trajectory; '
+                           'Spectrum Table shows raw DFT values for all bins; '
                            'Save Table exports the selected vehicle to CSV. '
                            'File → Export → Export Analysis → Spectral Analysis '
                            'saves the table for selected events.')

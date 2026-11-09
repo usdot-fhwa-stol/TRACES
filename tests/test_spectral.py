@@ -61,6 +61,39 @@ class SpectralTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             SpectralComp().comp_event(self.conn, 1, {'selected_signal': 'other'})
 
+    def test_one_sided_amplitude_and_power_analytic_signal(self):
+        # An odd length also checks that the highest bin is doubled when it
+        # has a negative-frequency partner (it is not a Nyquist bin).
+        for n in (15, 16):
+            with self.subTest(n=n):
+                k = n // 2 - (n % 2 == 0)
+                values = 20 + 2*np.sin(2*np.pi*k*np.arange(n)/n)
+                self.add(values, vehicle=n)
+                result = SpectralComp().comp_series(self.conn, 1, [n])[0]
+                original = result.magnitude.copy()
+                amplitude = result.one_sided_values('amplitude')
+                power = result.one_sided_values('power')
+                expected_amplitude = np.zeros(n // 2 + 1)
+                expected_amplitude[0], expected_amplitude[k] = 20, 2
+                expected_power = np.zeros(n // 2 + 1)
+                expected_power[0], expected_power[k] = 400, 2
+                np.testing.assert_allclose(amplitude, expected_amplitude, atol=1e-12)
+                np.testing.assert_allclose(power, expected_power, atol=1e-12)
+                self.assertAlmostEqual(power.sum(), np.mean(values**2))
+                np.testing.assert_array_equal(result.magnitude, original)
+
+    def test_nyquist_and_total_power(self):
+        for n in (2, 3, 15, 16):
+            with self.subTest(n=n):
+                values = 3 + 4*(-1.)**np.arange(n)
+                self.add(values, vehicle=n)
+                result = SpectralComp().comp_series(self.conn, 1, [n])[0]
+                self.assertAlmostEqual(result.one_sided_values('power').sum(),
+                                       np.mean(values**2))
+                if n % 2 == 0:
+                    self.assertAlmostEqual(result.one_sided_values('amplitude')[-1], 4)
+                    self.assertAlmostEqual(result.one_sided_values('power')[-1], 16)
+
     def test_missing_and_degenerate_samples(self):
         self.add([1, None, 2, float('inf'), 3], [0, 1, 2, 3, 6])
         self.add([None, 2], vehicle=2)
@@ -114,6 +147,46 @@ class SpectralTests(unittest.TestCase):
         self.assertFalse(empty._save.isEnabled())
         self.assertEqual(empty._table_model.rowCount(), 0)
         empty.close()
+
+    def test_spectrum_selector_plot_navigation_and_export(self):
+        for n in (15, 16):
+            self.add(20 + 2*np.sin(2*np.pi*3*np.arange(n)/n), vehicle=n)
+        results = SpectralComp().comp_event(self.conn, 1)
+        dialog = SpectralResultsDialog(None, results)
+        self.addCleanup(dialog.close)
+        self.assertEqual(dialog._spectrum_combo.currentData(), 'magnitude')
+        self.assertAlmostEqual(dialog._plot.listDataItems()[0].yData[3], 15)
+        dialog._spectrum_combo.setCurrentIndex(1)
+        self.assertAlmostEqual(dialog._plot.listDataItems()[0].yData[3], 2)
+        self.assertIn('Amplitude (m/s)', dialog._plot.getAxis('left').labelText)
+        self.assertEqual(dialog._tabs.tabText(0), 'Amplitude Spectrum')
+        dialog._next.click()
+        self.assertAlmostEqual(dialog._plot.listDataItems()[0].yData[3], 2)
+        dialog._spectrum_combo.setCurrentIndex(2)
+        self.assertAlmostEqual(dialog._plot.listDataItems()[0].yData[3], 2)
+        self.assertAlmostEqual(dialog._plot.listDataItems()[0].yData[0], 400)
+        self.assertIn('Power ((m/s)²)', dialog._plot.getAxis('left').labelText)
+        self.assertIn('Power', export_plot_to_svg(dialog._plot))
+        # The table continues to expose raw coefficients and magnitudes.
+        self.assertAlmostEqual(float(dialog._table_model.data(
+            dialog._table_model.index(3, 5))), 16)
+        dialog._spectrum_combo.setCurrentIndex(0)
+        self.assertAlmostEqual(dialog._plot.listDataItems()[0].yData[3], 16)
+        accel_results = SpectralComp().comp_event(
+            self.conn, 1, {'selected_signal': 'veh_accel'})
+        accel = SpectralResultsDialog(None, accel_results)
+        self.addCleanup(accel.close)
+        accel._spectrum_combo.setCurrentIndex(1)
+        self.assertAlmostEqual(accel._plot.listDataItems()[0].yData[3], 4)
+        self.assertIn('Amplitude (m/s²)', accel._plot.getAxis('left').labelText)
+        accel._spectrum_combo.setCurrentIndex(2)
+        self.assertIn('Power ((m/s²)²)', accel._plot.getAxis('left').labelText)
+        empty = SpectralResultsDialog(None, [])
+        self.addCleanup(empty.close)
+        for index in (1, 2, 0):
+            empty._spectrum_combo.setCurrentIndex(index)
+            self.assertFalse(empty._save.isEnabled())
+            self.assertEqual(empty._plot.listDataItems(), [])
 
     def test_dialog_parameters_and_missing_columns(self):
         dialog = SpectralDialog(None, self.conn, event_ids=[1])
