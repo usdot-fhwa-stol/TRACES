@@ -1,0 +1,16 @@
+{
+  "col_defs": 
+  {
+    "veh_id": {"func": "copy", "parms": [0], "type": "int"},
+    "veh_time": {"func": "copy", "parms": [1]},
+    "veh_speed": {"func": "copy", "parms": [2]},
+    "veh_accel": {"func": "copy", "parms": [3]},
+    "veh_dist_trav": {"func": "copy", "parms": [4]},
+    "lane_id": {"func": "const", "parms": [1], "type": "int"},
+    "orig_lane_id": {"func": "const", "parms": [1], "type": "int"},
+    "event_id": {"func": "const", "parms": [1], "type": "int"},
+    "event_name": {"func": "const", "parms": ["run index: 1"], "type": "text"},
+    "x_map_loc": {"func": "const", "parms": [0.0]},
+    "y_map_loc": {"func": "const", "parms": [0.0]}
+  }
+}
