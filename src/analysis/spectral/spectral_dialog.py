@@ -122,9 +122,9 @@ class SpectralResultsDialog(QDialog):
         spectrum_controls = QHBoxLayout()
         spectrum_controls.addWidget(QLabel('Spectrum:'))
         self._spectrum_combo = QComboBox()
-        self._spectrum_combo.addItem('Magnitude (raw DFT)', 'magnitude')
-        self._spectrum_combo.addItem('Amplitude (one-sided)', 'amplitude')
-        self._spectrum_combo.addItem('Power Spectrum (one-sided)', 'power')
+        self._spectrum_combo.addItem('Magnitude', 'magnitude')
+        self._spectrum_combo.addItem('Amplitude', 'amplitude')
+        self._spectrum_combo.addItem('Power Spectrum', 'power')
         self._spectrum_combo.setToolTip(
             'Amplitude shows peak oscillation size. Power shows mean-square '
             'contribution per frequency bin in squared signal units.')
@@ -133,7 +133,7 @@ class SpectralResultsDialog(QDialog):
         layout.addLayout(spectrum_controls)
         self._plot = pg.PlotWidget(background='w')
         self._plot.setLabel('bottom', 'Frequency', units='Hz')
-        self._plot.setLabel('left', 'Magnitude (raw DFT)')
+        self._plot.setLabel('left', 'Magnitude')
         self._plot.showGrid(x=True, y=True, alpha=0.25)
         self._tabs = QTabWidget()
         self._tabs.addTab(self._plot, 'Magnitude Spectrum')
@@ -175,12 +175,9 @@ class SpectralResultsDialog(QDialog):
         self._plot.clear()
         spectrum_type = self._spectrum_combo.currentData()
         label, description = {
-            'magnitude': ('Magnitude (raw DFT)', 'Magnitude = |X[k]| (unnormalized).'),
-            'amplitude': ('Amplitude', 'One-sided peak amplitude = 2|X[k]|/N; '
-                          'DC and Nyquist (when present) use |X[k]|/N.'),
-            'power': ('Power', 'One-sided power per bin = 2|X[k]|²/N²; '
-                      'DC and Nyquist (when present) use |X[k]|²/N². '
-                      'Total power equals the signal mean square; this is not a PSD.'),
+            'magnitude': ('Magnitude', 'Magnitude = |X[k]|.'),
+            'amplitude': ('Amplitude', 'Amplitude = 2|X[k]|/N.'),
+            'power': ('Power', 'Power per bin = 2|X[k]|²/N².'),
         }[spectrum_type]
         self._tabs.setTabText(0, {
             'magnitude': 'Magnitude Spectrum',
@@ -215,13 +212,7 @@ class SpectralResultsDialog(QDialog):
         self._plot.setXRange(0, float(result.frequency[stop - 1]), padding=0)
         self._plot.setYRange(0, max(float(values.max()), 1e-12), padding=0.03)
         self._info.setText(f'{n} samples; mean time increment {result.time_step:.6g} s. '
-                           f'{description} The mean is retained at 0 Hz. '
-                           'Irregular sampling and gaps are '
-                           'represented by the mean increment, without interpolation. '
-                           'Spectrum Table shows raw DFT values for all bins; '
-                           'Save Table exports the selected vehicle to CSV. '
-                           'File → Export → Export Analysis → Spectral Analysis '
-                           'saves the table for selected events.')
+                           f'{description}')
 
     def _save_table_csv(self):
         result = self._table_model.result

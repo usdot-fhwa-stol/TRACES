@@ -8,8 +8,8 @@ The result window provides a trajectory dropdown, Previous/Next buttons, and
 spectral action.
 
 Results include a spectrum plot and **Spectrum Table (all bins)** tabs.
-Use the **Spectrum** selector to choose **Magnitude (raw DFT)** (the default),
-**Amplitude (one-sided)**, or **Power Spectrum (one-sided)**. The plot tab,
+Use the **Spectrum** selector to choose **Magnitude** (the default),
+**Amplitude**, or **Power Spectrum**. The plot tab,
 y-axis label, scale, and saved SVG reflect the selection. The choice is retained
 when navigating between trajectories.
 The trajectory dropdown and Previous/Next buttons update both views. The table
