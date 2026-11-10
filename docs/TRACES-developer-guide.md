@@ -43,13 +43,13 @@ Source file (CSV, ...)
         ▼
   SQLite database: events, ranges, + side tables
         │                                    │
-        │  analysis: BaseComp subclasses      │  plot: TimeSpacePlotWidget
-        │  + dialogs (results, corrections)   │  + interaction-mode handlers
-        │  write derived columns, row         │  (handlers call into analysis
-        │  status, and side tables back       │   for shockwaves, stitching)
+        │  analysis: BaseComp subclasses     │  plot: TimeSpacePlotWidget
+        │  + dialogs (results, corrections)  │  + interaction-mode handlers
+        │  write derived columns, row        │  (handlers call into analysis
+        │  status, and side tables back      │   for shockwaves, stitching)
         ▼                                    ▼
   Result windows, CSV / HTML export      Time-space plot, other plots
-                 ▲                          ▲
+                 ▲                                            ▲
                  └──────── gui: MainWindow, DatabaseSession ──┘
 ```
 
@@ -171,10 +171,10 @@ The single definition of a gap is in `utils`: `event_time_step(conn, event_id)` 
 | `analysis/jerk/`, `missing_data/`, `internal_consistency/` | `*_comp.py` + dialogs | Noise analyses. |
 | `analysis/spline/` | `spline_comp.py` + dialogs | Spline fitting; its math is shared with Gap Interpolation. |
 | `analysis/shockwave/` | `shockwave_comp.py` + dialogs | Shockwave computation; the interaction is in `plot/handlers/shockwave_handler.py`. |
-| `analysis/advanced_statistics/` | `advanced_stats_comp.py`, `leader_follower.py`, `lane_changes.py`, `stat_registry.py` + dialogs | Leader/follower and lane-change statistics (Task 9.4). |
-| `analysis/gap_interpolation/` | `gap_interpolation_comp.py`, `gap_sort.py` + dialogs | Gap detection and spline fill, with review (Task 9.1). |
-| `analysis/manual_stitching/` | `stitching_comp.py`, `safety_rules.py`, `stitching_preview_dialog.py` | Trajectory stitching (Task 9.2). |
-| `analysis/lane_anomaly/` | registry, store, correction, two anomaly types and their views, dialogs | Lane-level anomaly detection and correction (Task 9.3); see §11. |
+| `analysis/advanced_statistics/` | `advanced_stats_comp.py`, `leader_follower.py`, `lane_changes.py`, `stat_registry.py` + dialogs | Leader/follower and lane-change statistics. |
+| `analysis/gap_interpolation/` | `gap_interpolation_comp.py`, `gap_sort.py` + dialogs | Gap detection and spline fill, with review. |
+| `analysis/manual_stitching/` | `stitching_comp.py`, `safety_rules.py`, `stitching_preview_dialog.py` | Trajectory stitching. |
+| `analysis/lane_anomaly/` | registry, store, correction, two anomaly types and their views, dialogs | Lane-level anomaly detection and correction; see §11. |
 | `plot/` | `time_space_plot_widget.py`, `custom_view_box.py`, `slider_view_box.py`, settings, statistics, time-speed/accel, and vehicle-search dialogs | The time-space plot and its dialogs. |
 | `plot/handlers/` | `interaction_mode.py`, `gap_headway_handler.py`, `shockwave_handler.py`, `shockwave_result_panel.py`, `stitch_select_handler.py`, `plot_overlay_label.py` | Interaction modes of the time-space plot; see §10. |
 | `gui/` | `main_window.py`, `database_session.py`, `home_widget.py`, import, export, event selection, log viewer, and about dialogs | Application shell. |
@@ -386,7 +386,7 @@ once per event, concatenates the results, optionally calls `write_csv(results, d
 4. **`gui/main_window.py`** — **Analysis → Noise → Jerk Analysis** (`_run_jerk_analysis`, whole event) and **File → Export → Export Analysis → Jerk Analysis** (`_export_jerk_analysis`: an `EventSelectionDialog`, then the dialog with `export_mode=True`).
 5. **`plot/custom_view_box.py`** — the right-click **Noise Analysis → Jerk Analysis** entry in `_context_menu_registry`, calling a method that creates the dialog with the context's vehicles.
 
-### 9.4 Adding an analysis — checklist
+### 9.4 Adding an analysis
 
 1. Create `analysis/<name>/` with `<name>_comp.py` (Qt-free `BaseComp` subclass) and dialog modules; give it an `__init__.py` in the house style (§2).
 2. Implement `comp_series()`, reading with `active_rows_clause()` / `measured_rows_clause()` and gating optional columns on `events_columns()`.
@@ -776,4 +776,3 @@ When you extend TRACES:
 
 - *TRACES Configuration Guide* — JSON import configurations: column definitions, import functions, units, data dictionary, and reserved names.
 - *TRACES User Guide* — end-user workflows, menus, interaction modes, and the correction modules.
-- Task 9.1–9.4 specifications (`Task9.1_v2.1.docx` … `Task9.4_v2.1.docx`) — the requirements for Gap Interpolation, Trajectory Stitching, Lane-Level Anomalies, and Advanced Statistics. The Lane-Level Anomalies module deviates from its specification by customer direction; see the *TRACES User Guide*, section 13 "Data Menu — Lane-Level Anomalies".
