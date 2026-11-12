@@ -31,19 +31,32 @@ TimeSpacePlotWidget:
              diamond, upside-down triangle outlined (cross and x have no
              outlined form), then the cycle repeats (lane_symbol)
 
-The legend (top left) has one entry per lane, drawn with its symbol in
-black, and one per vehicle plus "Other traffic", each drawn as a short
-line in its color (symbols mean lanes only); clicking an entry hides
-or shows its points. Hovering a point shows vehicle, time, lane and
-distance. The anomaly span is shaded light red (green once fixed); the
-plot opens framed on it and pans and zooms with the mouse.
+The legend (top left), clicking an entry hides or shows its points:
 
-Other traffic is drawn for the anomaly's lanes, the lanes its vehicles use
-nearby, and any lane a pending fix would move them to.
+    Veh N              one per anomaly vehicle, a short line in its color:
+                       all of that vehicle's points, in every lane
+    Lane N             one per lane of the event, in event order, its
+                       symbol in grey: the other traffic in that lane
+                       only -- the anomaly's vehicles stay visible
+
+Every entry starts on (its points visible) each time an anomaly is shown.
+Hovering a point shows vehicle, time, lane and distance. The anomaly span is shaded light red (green once
+fixed); the plot opens framed on it and pans and zooms with the mouse.
+
+Other traffic (traffic_lanes, loaded by the review panel through
+lane_correction.anomaly_traffic) is every lane of the event -- which
+includes every lane the fix panel can move a vehicle to
+(AnomalyType.fix_target_lanes) and the anomaly's own lanes -- within
+anomaly_window, at any distance: time is the only bound, so each lane in
+the legend has points whenever it carries traffic in that window. Every
+lane a fix can choose is therefore drawn from the start; choosing one
+changes nothing but the preview.
 
 A fix panel's preview (Preview) shades the segment it would change yellow
 and rings each sample that would move with its new lane's symbol in the
-proposal color (magenta), outlined.
+proposal color (magenta), outlined. SegmentFixPanel also warns when the
+fix would put a moved vehicle closer than the proximity threshold to
+another vehicle in its new lane (proximity.spacing_conflicts).
 """
 
 import sqlite3
@@ -62,7 +75,8 @@ from utils import event_time_step
 from ui_kit.plot_style import PROPOSAL_COLOR, apply_plot_style, region_brush
 from .anomaly_registry import anomaly_type
 from .lane_anomaly_store import LaneAnomaly
-from .lane_correction import LaneMove, event_lanes, lane_traffic, move_times
+from .lane_correction import LaneMove, event_lanes, move_times
+from .proximity import proximity_threshold, spacing_conflicts
 
 # Vehicle colors: the first two are the Trajectory Stitching preview's
 # Traj 1 (amber) and Traj 2 (green); the rest (Okabe-Ito) serve a future
@@ -70,7 +84,7 @@ from .lane_correction import LaneMove, event_lanes, lane_traffic, move_times
 VEHICLE_COLORS = ("#E69F00", "#009E73", "#56B4E9", "#CC79A7", "#0072B2", "#D55E00")
 VEHICLE_COLOR_NAMES = ("amber", "green", "sky blue", "pink", "blue", "vermillion")
 TRAFFIC_COLOR = "#A9A9A9"
-LEGEND_COLOR = "k"
+WARNING_COLOR = "#B00020"   # fix panel's spacing-conflict warning text
 
 # Lane symbols (pyqtgraph names): 't1' points up, 't' points down.
 LANE_SYMBOLS = ("o", "s", "t1", "+", "d", "t", "x")
@@ -106,6 +120,20 @@ def anomaly_window(anomaly: LaneAnomaly) -> Tuple[float, float]:
     """Time span of data loaded around an anomaly (room to pan out)."""
     pad = max(_MIN_PAD_S, anomaly.duration)
     return anomaly.start_time - pad, anomaly.end_time + pad
+
+
+def traffic_lanes(conn: sqlite3.Connection, anomaly: LaneAnomaly,
+                  rows: Dict[int, Dict[str, np.ndarray]]) -> List[int]:
+    """Lanes whose other traffic the review panel draws for *anomaly*:
+    every lane of the event, plus any lane its fix can move a vehicle to
+    (fix_target_lanes), its own lanes and the lanes its vehicles use in
+    *rows* (normally all already among the event's)."""
+    lanes = {int(l) for l in event_lanes(conn, anomaly.event_id)}
+    lanes |= {int(l) for l in anomaly_type(anomaly.anomaly_type).fix_target_lanes(conn, anomaly)}
+    lanes |= {int(l) for l in anomaly.lane_ids}
+    for r in rows.values():
+        lanes |= {int(l) for l in r["lane"] if l is not None}
+    return sorted(lanes)
 
 
 def _lanes_float(lanes: np.ndarray) -> np.ndarray:
@@ -174,13 +202,11 @@ class AnomalyPlot(pg.PlotWidget):
         self._anomaly: Optional[LaneAnomaly] = None
         self._ui: Optional["AnomalyTypeUI"] = None
         self._rows: Dict[int, Dict[str, np.ndarray]] = {}
-        self._window: Tuple[float, float] = (0.0, 1.0)
-        self._traffic_lanes: List[int] = []
         self._traffic: Dict[int, Dict[str, np.ndarray]] = {}
         self._items: List[pg.GraphicsObject] = []
         self._points: Dict[Tuple[int, str], pg.ScatterPlotItem] = {}   # (lane, group)
-        self._lane_proxies: Dict[int, pg.ScatterPlotItem] = {}
-        self._group_proxies: Dict[str, pg.PlotDataItem] = {}
+        self._lane_proxies: Dict[int, pg.ScatterPlotItem] = {}         # lane's traffic
+        self._vehicle_proxies: Dict[str, pg.PlotDataItem] = {}         # "v0", "v1", ...
 
         apply_plot_style(self)
         self.setLabel("left", "Distance traveled", units="m")
@@ -207,22 +233,19 @@ class AnomalyPlot(pg.PlotWidget):
         return lane_symbol(self._lane_order.get(int(lane), int(lane)))
 
     def show_anomaly(self, anomaly: Optional[LaneAnomaly], ui: Optional["AnomalyTypeUI"],
-                     rows: Dict[int, Dict[str, np.ndarray]]) -> None:
+                     rows: Dict[int, Dict[str, np.ndarray]],
+                     traffic: Optional[Dict[int, Dict[str, np.ndarray]]] = None) -> None:
         """Draw *anomaly*'s vehicles (*rows*, loaded over anomaly_window)
-        and the traffic around them, framed on its span. None clears."""
+        and the other *traffic* around them (module docstring), framed on
+        its span. None clears."""
         self._anomaly, self._ui, self._rows = anomaly, ui, rows
+        self._traffic = (traffic or {}) if anomaly is not None else {}
         self._clear_preview_items()
         if anomaly is None:
-            self._traffic_lanes, self._traffic = [], {}
             self._rebuild()
             self.setTitle("No anomaly selected.")
             self._span.hide()
             return
-        self._window = anomaly_window(anomaly)
-        lanes = {int(l) for l in anomaly.lane_ids}
-        for r in rows.values():
-            lanes |= {int(l) for l in r["lane"] if l is not None}
-        self._load_traffic(sorted(lanes))
         self._rebuild()
         self.setTitle(ui.title(anomaly))
         self._span.setBrush(region_brush(FIXED_REGION if anomaly.is_fixed else SPAN_REGION))
@@ -235,10 +258,8 @@ class AnomalyPlot(pg.PlotWidget):
         if preview is None or (preview.segment is None and not preview.moves):
             self._clear_preview_items()
             return
-        new_lanes = {int(lane) for _, _, _, lane in preview.moves} - set(self._traffic_lanes)
-        if new_lanes and self._anomaly is not None:
-            self._load_traffic(sorted(set(self._traffic_lanes) | new_lanes))
-            self._rebuild()
+        # Every lane a fix can choose is already drawn (module docstring),
+        # so the plot isn't rebuilt and legend toggles are kept.
         if preview.segment is not None:
             self._selection.setRegion(preview.segment)
             self._selection.show()
@@ -256,27 +277,21 @@ class AnomalyPlot(pg.PlotWidget):
         self._selection.hide()
         self._preview.setData([])
 
-    def _load_traffic(self, lanes: List[int]) -> None:
-        self._traffic_lanes = lanes
-        a = self._anomaly
-        self._traffic = (lane_traffic(self._conn, a.event_id, lanes, *self._window,
-                                      exclude=a.veh_ids) if a is not None else {})
-
     def _rebuild(self) -> None:
         for item in self._items:
             self.removeItem(item)
         self._items, self._points = [], {}
-        self._lane_proxies, self._group_proxies = {}, {}
+        self._lane_proxies, self._vehicle_proxies = {}, {}
         self._legend.clear()
         if self._anomaly is None:
             return
 
         # Group per (lane, who): "traffic", then "v0", "v1", ... drawn in
-        # that order so the anomaly's second vehicle ends up on top.
+        # that order so the anomaly's second vehicle ends up on top. Other
+        # traffic has no legend entry of its own: its lanes' entries.
         groups: List[Tuple[str, str, str, int, Dict[int, Dict[str, np.ndarray]]]] = []
         if self._traffic:
-            groups.append(("traffic", "Other traffic", TRAFFIC_COLOR, TRAFFIC_SIZE,
-                           self._traffic))
+            groups.append(("traffic", "", TRAFFIC_COLOR, TRAFFIC_SIZE, self._traffic))
         for i, (veh, rows) in enumerate(self._rows.items()):
             groups.append((f"v{i}", self._ui.vehicle_label(self._anomaly, veh, i),
                            VEHICLE_COLORS[i % len(VEHICLE_COLORS)], VEHICLE_SIZE,
@@ -293,7 +308,7 @@ class AnomalyPlot(pg.PlotWidget):
                         (rows["time"][mask], rows["dist"][mask], int(veh)))
             for lane, parts in per_lane.items():
                 lanes_shown.add(lane)
-                t = np.concatenate([p[0] for p in parts])
+                t =np.concatenate([p[0] for p in parts])
                 d = np.concatenate([p[1] for p in parts])
                 vehs = np.concatenate([np.full(p[0].size, p[2]) for p in parts]).tolist()
                 item = self._scatter(lane, color, size, t, d, vehs)
@@ -301,21 +316,27 @@ class AnomalyPlot(pg.PlotWidget):
                 self._add(item)
                 self._points[(lane, key)] = item
 
-        # Legend: lanes first (in event order), then vehicles and traffic.
-        for lane in sorted(lanes_shown, key=lambda l: self._lane_order.get(l, l)):
+        # Legend: the vehicles, each a plain line in its color (symbols
+        # are kept for lanes) ...
+        for key, label, color, _size, _data in groups:
+            if key == "traffic":
+                continue
+            proxy = pg.PlotDataItem(pen=pg.mkPen(color, width=_LEGEND_LINE_WIDTH))
+            self._add_proxy(proxy, label)
+            self._vehicle_proxies[key] = proxy
+        # ... then one entry per lane of the event (and any other lane
+        # drawn), in event order, drawn as its traffic is: toggles that
+        # lane's other traffic only.
+        legend_lanes = set(self._lane_order) | lanes_shown
+        for lane in sorted(legend_lanes, key=lambda l: self._lane_order.get(l, l)):
             symbol, filled = self.lane_symbol_for(lane)
             proxy = pg.ScatterPlotItem(
                 symbol=symbol, size=VEHICLE_SIZE,
-                pen=pg.mkPen(LEGEND_COLOR, width=_OUTLINE_WIDTH),
-                brush=pg.mkBrush(LEGEND_COLOR) if filled else pg.mkBrush(None))
+                pen=pg.mkPen(TRAFFIC_COLOR, width=_OUTLINE_WIDTH),
+                brush=pg.mkBrush(TRAFFIC_COLOR) if filled else pg.mkBrush(None))
             self._add_proxy(proxy, f"Lane {lane}")
             self._lane_proxies[lane] = proxy
-        for key, label, color, _size, _data in sorted(groups, key=lambda g: g[0] == "traffic"):
-            # A plain line in the legend: color is the vehicle, while
-            # symbols are kept for lanes.
-            proxy = pg.PlotDataItem(pen=pg.mkPen(color, width=_LEGEND_LINE_WIDTH))
-            self._add_proxy(proxy, label)
-            self._group_proxies[key] = proxy
+        self._sync_visibility()   # every entry was just made visible
 
     def _scatter(self, lane: int, color: str, size: int, t: np.ndarray, d: np.ndarray,
                  vehs: list) -> pg.ScatterPlotItem:
@@ -338,17 +359,20 @@ class AnomalyPlot(pg.PlotWidget):
 
     def _add_proxy(self, proxy: pg.GraphicsObject, label: str) -> None:
         """A dataless item standing for a set of points in the legend;
-        clicking its legend entry toggles it, and _sync_visibility follows."""
+        clicking its legend entry toggles it, and _sync_visibility follows.
+        Starts visible, so its points do too."""
+        proxy.setVisible(True)
         self._add(proxy)
         self._legend.addItem(proxy, label)
         proxy.visibleChanged.connect(self._sync_visibility)
 
     def _sync_visibility(self) -> None:
+        """A vehicle's points follow its own entry; other traffic in a
+        lane follows that lane's entry."""
         for (lane, key), item in self._points.items():
-            lane_proxy = self._lane_proxies.get(lane)
-            group_proxy = self._group_proxies.get(key)
-            item.setVisible((lane_proxy is None or lane_proxy.isVisible())
-                            and (group_proxy is None or group_proxy.isVisible()))
+            proxy = (self._lane_proxies.get(lane) if key == "traffic"
+                     else self._vehicle_proxies.get(key))
+            item.setVisible(proxy is None or proxy.isVisible())
 
     def _frame(self) -> None:
         """x: the anomaly span with a margin; y: the anomaly vehicles'
@@ -390,11 +414,54 @@ class FixPanel(QGroupBox):
         self._event_id = event_id
         self._anomaly: Optional[LaneAnomaly] = None
         self._rows: Dict[int, Dict[str, np.ndarray]] = {}
+        self._traffic: Dict[int, Dict[str, np.ndarray]] = {}
+        self._threshold: Tuple[float, bool] = proximity_threshold(conn, event_id)
+        self._time_step = event_time_step(conn, event_id)
+
+    def set_traffic(self, traffic: Dict[int, Dict[str, np.ndarray]]) -> None:
+        """The other traffic the plot draws for the next anomaly shown
+        (lane_correction.lane_traffic's form, the anomaly's vehicles left
+        out). The review panel calls this just before show_anomaly."""
+        self._traffic = traffic or {}
 
     def show_anomaly(self, anomaly: Optional[LaneAnomaly],
                      rows: Dict[int, Dict[str, np.ndarray]]) -> None:
         """Show *anomaly*; any pending (unapplied) choices are discarded."""
         self._anomaly, self._rows = anomaly, rows
+
+    def conflicts(self, preview: "Preview") -> list:
+        """proximity.SpacingConflicts the fix *preview* shows would create:
+        moved samples closer than the proximity threshold to another
+        vehicle in their new lane -- the traffic set by set_traffic, or
+        another of the anomaly's vehicles as the fix would leave it."""
+        if not preview.moves:
+            return []
+        moved = {int(v): (t, l) for v, t, _d, l in preview.moves}
+        occupants = dict(self._traffic)
+        for veh, r in self._rows.items():
+            lanes = r["lane"]
+            if int(veh) in moved:
+                times, to_lane = moved[int(veh)]
+                lanes = lanes.copy()
+                lanes[np.isin(r["time"], times)] = int(to_lane)
+            occupants[veh] = {"time": r["time"], "dist": r["dist"], "lane": lanes}
+        return spacing_conflicts(preview.moves, occupants, self._threshold[0],
+                                 self._time_step)
+
+    def conflict_text(self, conflicts: list) -> str:
+        """User-facing warning for *conflicts*, "" when there are none."""
+        if not conflicts:
+            return ""
+        threshold, detected = self._threshold
+        source = ("the threshold of the last Proximity detection" if detected
+                  else "the default Proximity threshold")
+        lines = [f"Warning: this fix would bring vehicles closer than {threshold:g} m "
+                 f"({source}):"]
+        for c in conflicts:
+            lines.append(f"Vehicle {c.veh_id} would be {c.spacing_m:.1f} m from vehicle "
+                         f"{c.other_veh_id} in lane {c.lane_id} at {c.time:.2f} s "
+                         f"({c.samples} sample(s) too close).")
+        return "\n".join(lines)
 
     def has_pending_fix(self) -> bool:
         """Whether the current choices describe a fix to apply (cheap: no
@@ -411,8 +478,10 @@ class SegmentFixPanel(FixPanel):
     """Base of the built-in fix panels: a fix made of LaneMoves over one
     time segment. Layout, top to bottom: the applied fix's text (fixed
     anomalies only), then the editor -- Start / End spinboxes snapped to
-    the vehicles' samples, _build_choices() and a summary line.
-    Subclasses implement _build_choices, _load_choices and _moves."""
+    the vehicles' samples, _build_choices(), a summary line and, when the
+    fix would create spacing conflicts, a warning (conflict_text). The
+    warning doesn't block Apply. Subclasses implement _build_choices,
+    _load_choices and _moves."""
 
     def __init__(self, ui, conn, event_id, parent=None):
         super().__init__(ui, conn, event_id, parent)
@@ -440,6 +509,11 @@ class SegmentFixPanel(FixPanel):
         self._info = QLabel()
         self._info.setWordWrap(True)
         editor.addWidget(self._info)
+        self._warning = QLabel()
+        self._warning.setWordWrap(True)
+        self._warning.setStyleSheet(f"color: {WARNING_COLOR};")
+        self._warning.hide()
+        editor.addWidget(self._warning)
 
         layout.addWidget(self._editor)
         layout.addStretch(1)
@@ -530,6 +604,7 @@ class SegmentFixPanel(FixPanel):
         lo, hi = self._seg
         if hi < lo:
             self._info.setText("Start must be before End.")
+            self._show_warning("")
             self._set_pending(False)
             self.preview_changed.emit(Preview())
             return
@@ -550,8 +625,13 @@ class SegmentFixPanel(FixPanel):
                 lines.append(f"Vehicle {m.veh_id} is already in lane {m.to_lane} "
                              f"for the whole segment.")
         self._info.setText("\n".join(lines) or "Choose a lane to move a vehicle to.")
+        self._show_warning(self.conflict_text(self.conflicts(preview)))
         self._set_pending(bool(preview.moves))
         self.preview_changed.emit(preview)
+
+    def _show_warning(self, text: str) -> None:
+        self._warning.setText(text)
+        self._warning.setVisible(bool(text))
 
     def has_pending_fix(self) -> bool:
         return self._has_pending

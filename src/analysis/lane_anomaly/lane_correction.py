@@ -99,8 +99,11 @@ def vehicle_rows(conn: sqlite3.Connection, event_id: int, veh_id: int,
 
 def lane_traffic(conn: sqlite3.Connection, event_id: int, lanes: Iterable[int],
                  start_time: float, end_time: float,
-                 exclude: Iterable[int] = ()) -> Dict[int, Dict[str, np.ndarray]]:
-    """Every active trajectory sample in *lanes* within [start, end], per
+                 exclude: Iterable[int] = (),
+                 min_dist: Optional[float] = None,
+                 max_dist: Optional[float] = None) -> Dict[int, Dict[str, np.ndarray]]:
+    """Every active trajectory sample in *lanes* within [start, end] -- and,
+    when given, with veh_dist_trav within [min_dist, max_dist] -- per
     vehicle, except vehicles in *exclude*: {veh_id: {"time", "dist",
     "lane"}}. The surrounding traffic drawn behind an anomaly. Read-only."""
     lanes = [int(l) for l in lanes]
@@ -109,12 +112,19 @@ def lane_traffic(conn: sqlite3.Connection, event_id: int, lanes: Iterable[int],
     skip = {int(v) for v in exclude}
     cols = events_columns(conn)
     marks = ",".join("?" for _ in lanes)
+    where = (f"event_id = ? AND lane_id IN ({marks}) AND veh_time BETWEEN ? AND ? "
+             f"AND veh_dist_trav IS NOT NULL")
+    params: list = [event_id, *lanes, float(start_time), float(end_time)]
+    if min_dist is not None:
+        where += " AND veh_dist_trav >= ?"
+        params.append(float(min_dist))
+    if max_dist is not None:
+        where += " AND veh_dist_trav <= ?"
+        params.append(float(max_dist))
     rows = conn.execute(
-        f"SELECT veh_id, veh_time, veh_dist_trav, lane_id FROM events "
-        f"WHERE event_id = ? AND lane_id IN ({marks}) AND veh_time BETWEEN ? AND ? "
-        f"AND veh_dist_trav IS NOT NULL{active_rows_clause(cols)}{measured_rows_clause(cols)} "
-        f"ORDER BY veh_id, veh_time",
-        (event_id, *lanes, float(start_time), float(end_time))).fetchall()
+        f"SELECT veh_id, veh_time, veh_dist_trav, lane_id FROM events WHERE {where}"
+        f"{active_rows_clause(cols)}{measured_rows_clause(cols)} "
+        f"ORDER BY veh_id, veh_time", params).fetchall()
     out: Dict[int, Dict[str, list]] = defaultdict(lambda: {"time": [], "dist": [], "lane": []})
     for v, t, d, l in rows:
         if v in skip:
@@ -126,6 +136,17 @@ def lane_traffic(conn: sqlite3.Connection, event_id: int, lanes: Iterable[int],
                 "dist": np.asarray(x["dist"], dtype=np.float64),
                 "lane": np.asarray(x["lane"], dtype=object)}
             for v, x in out.items()}
+
+
+def anomaly_traffic(conn: sqlite3.Connection, anomaly: LaneAnomaly,
+                    lanes: Iterable[int], start_time: float,
+                    end_time: float) -> Dict[int, Dict[str, np.ndarray]]:
+    """The other traffic around *anomaly*: lane_traffic over *lanes* and
+    [start_time, end_time], at any distance -- time is the only bound, so
+    every lane with traffic in the span gets points. The anomaly's own
+    vehicles are left out. Read-only."""
+    return lane_traffic(conn, anomaly.event_id, lanes, start_time, end_time,
+                        exclude=anomaly.veh_ids)
 
 
 def event_lanes(conn: sqlite3.Connection, event_id: int) -> List[int]:
