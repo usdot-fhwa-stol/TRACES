@@ -18,7 +18,7 @@
 - [12. Data Menu — Gap Interpolation](#12-data-menu--gap-interpolation)
 - [13. Data Menu — Lane-Level Anomalies](#13-data-menu--lane-level-anomalies)
 - [14. Trajectory Stitching](#14-trajectory-stitching)
-- [15. Analysis Menu — Jerk, Missing Data, Internal Consistency](#15-analysis-menu--jerk-missing-data-internal-consistency)
+- [15. Analysis Menu — Jerk, Missing Data, Internal Consistency, Platoon Consistency, and Spectral Analysis](#15-analysis-menu--jerk-missing-data-internal-consistency-platoon-consistency-and-spectral-analysis)
 - [16. Advanced Statistics](#16-advanced-statistics)
 - [17. Exporting Data](#17-exporting-data)
 - [18. Vehicle Search](#18-vehicle-search)
@@ -31,62 +31,67 @@
 
 | Figure | Title | Section |
 |---|---|---|
-| Figure  1 | TRACES main window showing a populated time-space plot | [1. Introduction](#1-introduction) |
-| Figure  2 | Start screen with no recent files | [2. Getting Started](#2-getting-started) |
-| Figure  3 | Start screen with recent files populated | [2. Getting Started](#2-getting-started) |
-| Figure  4 | Kinematic stacked plot with two plots in view | [3. Working with Plots](#3-working-with-plots) |
-| Figure  5 | Hover cursor and value labels on a kinematic stacked plot | [3. Working with Plots](#3-working-with-plots) |
-| Figure  6 | File menu showing Open, Recent, and Import | [4. Opening a Database vs. Importing CSV Data](#4-opening-a-database-vs-importing-csv-data) |
-| Figure  7 | Import dialog with input file selected, ready to import | [4. Opening a Database vs. Importing CSV Data](#4-opening-a-database-vs-importing-csv-data) |
-| Figure  8 | Import dialog mid-import with progress | [4. Opening a Database vs. Importing CSV Data](#4-opening-a-database-vs-importing-csv-data) |
-| Figure  9 | Import completion popup on success | [4. Opening a Database vs. Importing CSV Data](#4-opening-a-database-vs-importing-csv-data) |
+| Figure 1 | TRACES main window showing a populated time-space plot | [1. Introduction](#1-introduction) |
+| Figure 2 | Start screen with no recent files | [2. Getting Started](#2-getting-started) |
+| Figure 3 | Start screen with recent files populated | [2. Getting Started](#2-getting-started) |
+| Figure 4 | Kinematic stacked plot with two plots in view | [3. Working with Plots](#3-working-with-plots) |
+| Figure 5 | Hover cursor and value labels on a kinematic stacked plot | [3. Working with Plots](#3-working-with-plots) |
+| Figure 6 | File menu showing Open, Recent, and Import | [4. Opening a Database vs. Importing CSV Data](#4-opening-a-database-vs-importing-csv-data) |
+| Figure 7 | Import dialog with input file selected, ready to import | [4. Opening a Database vs. Importing CSV Data](#4-opening-a-database-vs-importing-csv-data) |
+| Figure 8 | Import dialog mid-import with progress | [4. Opening a Database vs. Importing CSV Data](#4-opening-a-database-vs-importing-csv-data) |
+| Figure 9 | Import completion popup on success | [4. Opening a Database vs. Importing CSV Data](#4-opening-a-database-vs-importing-csv-data) |
 | Figure 10 | Time Space Plot Settings dialog for a newly opened database | [5. Selecting an Event to Plot](#5-selecting-an-event-to-plot) |
 | Figure 11 | Vehicle Limit Exceeded warning dialog | [5. Selecting an Event to Plot](#5-selecting-an-event-to-plot) |
 | Figure 12 | Data menu | [6. Main Window Tour](#6-main-window-tour) |
 | Figure 13 | Analysis menu with the Noise submenu open | [6. Main Window Tour](#6-main-window-tour) |
-| Figure 14 | Mode menu open with Select Trajectory checked | [6. Main Window Tour](#6-main-window-tour) |
-| Figure 15 | Time-space plot with data loaded, no selection | [7. The Time-Space Plot](#7-the-time-space-plot) |
-| Figure 16 | Time-space plot with Show Speed enabled and a selection active | [7. The Time-Space Plot](#7-the-time-space-plot) |
-| Figure 17 | Right-click menu in the "All" context with the Statistics submenu | [8. Right-Click Menu on the Plot](#8-right-click-menu-on-the-plot) |
-| Figure 18 | Noise Analysis submenu expanded | [8. Right-Click Menu on the Plot](#8-right-click-menu-on-the-plot) |
-| Figure 19 | Right-click menu in the "Series" context with the Stitching submenu | [8. Right-Click Menu on the Plot](#8-right-click-menu-on-the-plot) |
-| Figure 20 | Gap Headway mode with a locked overlay | [9. Interaction Modes](#9-interaction-modes) |
-| Figure 21 | Shockwave configuration dialog | [9. Interaction Modes](#9-interaction-modes) |
-| Figure 22 | Shockwave chain under construction | [9. Interaction Modes](#9-interaction-modes) |
-| Figure 23 | Committed shockwave with the floating results panel | [9. Interaction Modes](#9-interaction-modes) |
-| Figure 24 | Shockwave results table | [9. Interaction Modes](#9-interaction-modes) |
-| Figure 25 | Write Changes prompt on the first change to a database | [10. Changing Data: Write Targets and Row Status](#10-changing-data-write-targets-and-row-status) |
-| Figure 26 | Event selection list | [11. Data Menu — Spline Fitting](#11-data-menu--spline-fitting) |
-| Figure 27 | Spline Fitting parameter dialog | [11. Data Menu — Spline Fitting](#11-data-menu--spline-fitting) |
-| Figure 28 | Spline Fit Statistics results table | [11. Data Menu — Spline Fitting](#11-data-menu--spline-fitting) |
-| Figure 29 | Right-click Spline Fitting preview dialog | [11. Data Menu — Spline Fitting](#11-data-menu--spline-fitting) |
-| Figure 30 | Gap Interpolation configuration dialog | [12. Data Menu — Gap Interpolation](#12-data-menu--gap-interpolation) |
-| Figure 31 | Gap Review window with an automatically filled gap selected | [12. Data Menu — Gap Interpolation](#12-data-menu--gap-interpolation) |
-| Figure 32 | Gap Review window previewing new spline parameters with View | [12. Data Menu — Gap Interpolation](#12-data-menu--gap-interpolation) |
-| Figure 33 | Gap Review window in Add Points mode | [12. Data Menu — Gap Interpolation](#12-data-menu--gap-interpolation) |
-| Figure 34 | Gap Review window after Apply: the gap is manually filled | [12. Data Menu — Gap Interpolation](#12-data-menu--gap-interpolation) |
-| Figure 35 | Select Anomalies to Identify dialog | [13. Data Menu — Lane-Level Anomalies](#13-data-menu--lane-level-anomalies) |
-| Figure 36 | Lane-Level Anomalies review panel: a Proximity anomaly with a fix set up | [13. Data Menu — Lane-Level Anomalies](#13-data-menu--lane-level-anomalies) |
-| Figure 37 | Lane-Level Anomalies review panel: a Rapid Lane Change anomaly with a fix set up | [13. Data Menu — Lane-Level Anomalies](#13-data-menu--lane-level-anomalies) |
-| Figure 38 | Lane-Level Anomalies review panel after Apply | [13. Data Menu — Lane-Level Anomalies](#13-data-menu--lane-level-anomalies) |
-| Figure 39 | Trajectory stitching selection with two trajectories picked | [14. Trajectory Stitching](#14-trajectory-stitching) |
-| Figure 40 | Trajectory Stitching preview for an overlapping pair | [14. Trajectory Stitching](#14-trajectory-stitching) |
-| Figure 41 | Trajectory Stitching preview for a pair separated by a gap | [14. Trajectory Stitching](#14-trajectory-stitching) |
-| Figure 42 | Trajectory Stitching preview showing a safety warning | [14. Trajectory Stitching](#14-trajectory-stitching) |
-| Figure 43 | Jerk Analysis parameter dialog | [15. Analysis Menu — Jerk, Missing Data, Internal Consistency](#15-analysis-menu--jerk-missing-data-internal-consistency) |
-| Figure 44 | Jerk Analysis box plot results | [15. Analysis Menu — Jerk, Missing Data, Internal Consistency](#15-analysis-menu--jerk-missing-data-internal-consistency) |
-| Figure 45 | Missing Data parameter dialog | [15. Analysis Menu — Jerk, Missing Data, Internal Consistency](#15-analysis-menu--jerk-missing-data-internal-consistency) |
-| Figure 46 | Internal Consistency combined results dialog | [15. Analysis Menu — Jerk, Missing Data, Internal Consistency](#15-analysis-menu--jerk-missing-data-internal-consistency) |
-| Figure 47 | Advanced Statistics parameter dialog | [16. Advanced Statistics](#16-advanced-statistics) |
-| Figure 48 | Advanced Statistics results table | [16. Advanced Statistics](#16-advanced-statistics) |
-| Figure 49 | Generate Plots variable selection | [16. Advanced Statistics](#16-advanced-statistics) |
-| Figure 50 | Advanced Statistics box plots | [16. Advanced Statistics](#16-advanced-statistics) |
-| Figure 51 | Export Selected dialog | [17. Exporting Data](#17-exporting-data) |
-| Figure 52 | Export Analysis submenu | [17. Exporting Data](#17-exporting-data) |
-| Figure 53 | Export completion dialog | [17. Exporting Data](#17-exporting-data) |
-| Figure 54 | Vehicle Search dialog with a filtered result list | [18. Vehicle Search](#18-vehicle-search) |
-| Figure 55 | System Log Viewer window | [19. System Log Viewer](#19-system-log-viewer) |
-| Figure 56 | About dialog | [20. About Dialog](#20-about-dialog) |
+| Figure 14 | Mode menu open with Time-Space Diagram checked | [6. Main Window Tour](#6-main-window-tour) |
+| Figure 15 | Help menu with the available interaction help topics | [6. Main Window Tour](#6-main-window-tour) |
+| Figure 16 | Time-Space Diagram help window | [6. Main Window Tour](#6-main-window-tour) |
+| Figure 17 | Time-space plot with data loaded, no selection | [7. The Time-Space Plot](#7-the-time-space-plot) |
+| Figure 18 | Time-space plot with Show Speed enabled and a selection active | [7. The Time-Space Plot](#7-the-time-space-plot) |
+| Figure 19 | Right-click menu in the "All" context with the Statistics submenu | [8. Right-Click Menu on the Plot](#8-right-click-menu-on-the-plot) |
+| Figure 20 | Noise Analysis submenu expanded | [8. Right-Click Menu on the Plot](#8-right-click-menu-on-the-plot) |
+| Figure 21 | Right-click menu in the "Series" context with the Stitching submenu | [8. Right-Click Menu on the Plot](#8-right-click-menu-on-the-plot) |
+| Figure 22 | Gap Headway mode with a locked overlay | [9. Interaction Modes](#9-interaction-modes) |
+| Figure 23 | Shockwave configuration dialog | [9. Interaction Modes](#9-interaction-modes) |
+| Figure 24 | Shockwave chain under construction | [9. Interaction Modes](#9-interaction-modes) |
+| Figure 25 | Committed shockwave with the floating results panel | [9. Interaction Modes](#9-interaction-modes) |
+| Figure 26 | Shockwave results table | [9. Interaction Modes](#9-interaction-modes) |
+| Figure 27 | Write Changes prompt on the first change to a database | [10. Changing Data: Write Targets and Row Status](#10-changing-data-write-targets-and-row-status) |
+| Figure 28 | Event selection list | [11. Data Menu — Spline Fitting](#11-data-menu--spline-fitting) |
+| Figure 29 | Spline Fitting parameter dialog | [11. Data Menu — Spline Fitting](#11-data-menu--spline-fitting) |
+| Figure 30 | Spline Fit Statistics results table | [11. Data Menu — Spline Fitting](#11-data-menu--spline-fitting) |
+| Figure 31 | Right-click Spline Fitting preview dialog | [11. Data Menu — Spline Fitting](#11-data-menu--spline-fitting) |
+| Figure 32 | Gap Interpolation configuration dialog | [12. Data Menu — Gap Interpolation](#12-data-menu--gap-interpolation) |
+| Figure 33 | Gap Review window with an automatically filled gap selected | [12. Data Menu — Gap Interpolation](#12-data-menu--gap-interpolation) |
+| Figure 34 | Gap Review window previewing new spline parameters with View | [12. Data Menu — Gap Interpolation](#12-data-menu--gap-interpolation) |
+| Figure 35 | Gap Review window in Add Points mode | [12. Data Menu — Gap Interpolation](#12-data-menu--gap-interpolation) |
+| Figure 36 | Gap Review window after Apply: the gap is manually filled | [12. Data Menu — Gap Interpolation](#12-data-menu--gap-interpolation) |
+| Figure 37 | Select Anomalies to Identify dialog | [13. Data Menu — Lane-Level Anomalies](#13-data-menu--lane-level-anomalies) |
+| Figure 38 | Lane-Level Anomalies review panel: a Proximity anomaly with a fix set up | [13. Data Menu — Lane-Level Anomalies](#13-data-menu--lane-level-anomalies) |
+| Figure 39 | Lane-Level Anomalies review panel: a Rapid Lane Change anomaly with a fix set up | [13. Data Menu — Lane-Level Anomalies](#13-data-menu--lane-level-anomalies) |
+| Figure 40 | Lane-Level Anomalies review panel after Apply | [13. Data Menu — Lane-Level Anomalies](#13-data-menu--lane-level-anomalies) |
+| Figure 41 | Trajectory stitching selection with two trajectories picked | [14. Trajectory Stitching](#14-trajectory-stitching) |
+| Figure 42 | Trajectory Stitching preview for an overlapping pair | [14. Trajectory Stitching](#14-trajectory-stitching) |
+| Figure 43 | Trajectory Stitching preview for a pair separated by a gap | [14. Trajectory Stitching](#14-trajectory-stitching) |
+| Figure 44 | Trajectory Stitching preview showing a safety warning | [14. Trajectory Stitching](#14-trajectory-stitching) |
+| Figure 45 | Jerk Analysis parameter dialog | [15. Analysis Menu — Jerk, Missing Data, Internal Consistency, Platoon Consistency, and Spectral Analysis](#15-analysis-menu--jerk-missing-data-internal-consistency-platoon-consistency-and-spectral-analysis) |
+| Figure 46 | Jerk Analysis box plot results | [15. Analysis Menu — Jerk, Missing Data, Internal Consistency, Platoon Consistency, and Spectral Analysis](#15-analysis-menu--jerk-missing-data-internal-consistency-platoon-consistency-and-spectral-analysis) |
+| Figure 47 | Missing Data parameter dialog | [15. Analysis Menu — Jerk, Missing Data, Internal Consistency, Platoon Consistency, and Spectral Analysis](#15-analysis-menu--jerk-missing-data-internal-consistency-platoon-consistency-and-spectral-analysis) |
+| Figure 48 | Internal Consistency combined results dialog | [15. Analysis Menu — Jerk, Missing Data, Internal Consistency, Platoon Consistency, and Spectral Analysis](#15-analysis-menu--jerk-missing-data-internal-consistency-platoon-consistency-and-spectral-analysis) |
+| Figure 49 | Platoon Consistency results table | [15. Analysis Menu — Jerk, Missing Data, Internal Consistency, Platoon Consistency, and Spectral Analysis](#15-analysis-menu--jerk-missing-data-internal-consistency-platoon-consistency-and-spectral-analysis) |
+| Figure 50 | Spectral Analysis magnitude spectrum | [15. Analysis Menu — Jerk, Missing Data, Internal Consistency, Platoon Consistency, and Spectral Analysis](#15-analysis-menu--jerk-missing-data-internal-consistency-platoon-consistency-and-spectral-analysis) |
+| Figure 51 | Spectral Analysis all-bin results table | [15. Analysis Menu — Jerk, Missing Data, Internal Consistency, Platoon Consistency, and Spectral Analysis](#15-analysis-menu--jerk-missing-data-internal-consistency-platoon-consistency-and-spectral-analysis) |
+| Figure 52 | Advanced Statistics parameter dialog | [16. Advanced Statistics](#16-advanced-statistics) |
+| Figure 53 | Advanced Statistics results table | [16. Advanced Statistics](#16-advanced-statistics) |
+| Figure 54 | Generate Plots variable selection | [16. Advanced Statistics](#16-advanced-statistics) |
+| Figure 55 | Advanced Statistics box plots | [16. Advanced Statistics](#16-advanced-statistics) |
+| Figure 56 | Export Selected dialog | [17. Exporting Data](#17-exporting-data) |
+| Figure 57 | Export Analysis submenu | [17. Exporting Data](#17-exporting-data) |
+| Figure 58 | Export completion dialog | [17. Exporting Data](#17-exporting-data) |
+| Figure 59 | Vehicle Search dialog with a filtered result list | [18. Vehicle Search](#18-vehicle-search) |
+| Figure 60 | System Log Viewer window | [19. System Log Viewer](#19-system-log-viewer) |
+| Figure 61 | About dialog | [20. About Dialog](#20-about-dialog) |
 
 ---
 
@@ -151,7 +156,7 @@ Where a plot has a **legend**, clicking a legend entry hides or shows that serie
 
 ### The Time-Space Plot Is Different
 
-The main time-space plot ([Section 7](#7-the-time-space-plot)) does **not** pan by dragging, because click-and-drag is how you select trajectories in its default Select Trajectory mode. Instead, its visible window is controlled by the **Time (s)** slider below the plot and the **Dist (m)** slider to its right: drag a slider's handles to narrow or widen the window, or drag the slider between its handles to move (pan) the window. The mouse wheel still zooms — over the plot both axes zoom together around the cursor, and over an axis only that axis zooms — and the sliders follow every zoom. The Time-Speed and Time-Accel plots use the same pair of sliders, but because they have no selection mode they also pan by dragging.
+The main time-space plot ([Section 7](#7-the-time-space-plot)) does **not** pan by dragging, because click-and-drag is how you select trajectories in its default Time-Space Diagram mode. Instead, its visible window is controlled by the **Time (s)** slider below the plot and the **Dist (m)** slider to its right: drag a slider's handles to narrow or widen the window, or drag the slider between its handles to move (pan) the window. The mouse wheel still zooms — over the plot both axes zoom together around the cursor, and over an axis only that axis zooms — and the sliders follow every zoom. The Time-Speed and Time-Accel plots use the same pair of sliders, but because they have no selection mode they also pan by dragging.
 
 ### Kinematic Stacked Plots
 
@@ -308,12 +313,12 @@ Canceling out of a database entirely (see §5) hides Data, Analysis, and Mode ag
 ### File Menu
 
 - **Open**, **Recent** (up to 7 entries; grayed out when empty), and **Import** are always available — see [§4](#4-opening-a-database-vs-importing-csv-data).
-- **Export** — All / Selected / Analysis (Jerk Analysis, Missing Data, Internal Consistency; **Platoon Consistency** is present but disabled, reserved for a not-yet-implemented module) — stays grayed out until a database is open. Covered in [§17](#17-exporting-data).
+- **Export** — All / Selected / Analysis (Jerk Analysis, Missing Data, Internal Consistency, Platoon Consistency, Spectral Analysis) — stays grayed out until a database is open. Covered in [§17](#17-exporting-data).
 - **About** and **Exit** are always available — see [§20](#20-about-dialog).
 
 ### View Menu
 
-- **Search Vehicle** is only enabled while the plot is in Select Trajectory mode *and* an event is confirmed; it's automatically disabled (and its dialog closed) the moment you switch to Gap Headway or Shockwave mode, or while the settings dialog is open. See [§18](#18-vehicle-search).
+- **Search Vehicle** is only enabled while the plot is in Time-Space Diagram mode *and* an event is confirmed; it's automatically disabled (and its dialog closed) the moment you switch to Gap Headway or Shockwave mode, or while the settings dialog is open. See [§18](#18-vehicle-search).
 - **Log** is always available and opens the modeless System Log Viewer. See [§19](#19-system-log-viewer).
 
 ### Data Menu
@@ -332,7 +337,7 @@ The fourth correction module, **Trajectory Stitching**, works on trajectories yo
 
 ### Analysis Menu
 
-The Analysis menu has a **Noise** submenu (the same list as the right-click Noise Analysis submenu). **Jerk Analysis**, **Missing Data**, and **Internal Consistency** each run against whichever event is currently plotted when launched from this menu (running them against other events requires the right-click plot menu or Export Analysis — see [§8](#8-right-click-menu-on-the-plot) and [§17](#17-exporting-data)). **Platoon Consistency** and **Spectral Analysis** are visible but disabled — they're reserved placeholders for analysis modules that haven't been implemented yet. Full details in [§15](#15-analysis-menu--jerk-missing-data-internal-consistency).
+The Analysis menu has a **Noise** submenu (the same list as the right-click Noise Analysis submenu). **Jerk Analysis**, **Missing Data**, **Internal Consistency**, **Platoon Consistency** and **Spectral Analysis** each run against whichever event is currently plotted when launched from this menu (running them against other events requires the right-click plot menu or Export Analysis — see [§8](#8-right-click-menu-on-the-plot) and [§17](#17-exporting-data)). Full details in [§15](#15-analysis-menu--jerk-missing-data-internal-consistency-platoon-consistency-and-spectral-analysis).
 
 ![Analysis menu with the Noise submenu open](images/13-analysis-menu.png)
 
@@ -340,15 +345,24 @@ The Analysis menu has a **Noise** submenu (the same list as the right-click Nois
 
 ### Mode Menu
 
-Populated only once a plot exists, with three mutually exclusive, checkable actions: **Select Trajectory** (the default), **Gap Headway**, and **Shockwave**. Selecting Shockwave first prompts for configuration; only its **Semi-Automatic** method is currently implemented — Manual and Automatic appear in that configuration dialog but are disabled for now. Full behavior in [§9](#9-interaction-modes).
+Populated only once a plot exists, with three mutually exclusive, checkable actions: **Time-Space Diagram** (the default), **Gap Headway**, and **Shockwave**. Selecting Shockwave first prompts for configuration; only its **Semi-Automatic** method is currently implemented — Manual and Automatic appear in that configuration dialog but are disabled for now. Full behavior in [§9](#9-interaction-modes).
 
-![Mode menu open with Select Trajectory checked](images/14-mode-menu.png)
+![Mode menu open with Time-Space Diagram checked](images/14-mode-menu.png)
 
-*Figure 14 Mode menu open with Select Trajectory checked*
+*Figure 14 Mode menu open with Time-Space Diagram checked*
 
 ### Help Menu
 
 **Help**, immediately to the right of **Mode**, provides **Time-Space Diagram**, **Gap Headway**, and **Shockwave** entries. Each opens a separate help window listing the mouse and keyboard controls, including Shockwave's Ctrl+left-click editing and Ctrl+right-click deletion. These windows can stay open while you use the plot, and each has a **Close** button. Opening Help does not change the active mode. Help is also available before a database is opened.
+
+![Help menu with the available interaction help topics](images/15-help-menu.png)
+
+*Figure 15 Help menu with the available interaction help topics*
+
+![Time-Space Diagram help window](images/16-time-space-diagram-help.png)
+
+*Figure 16 Time-Space Diagram help window*
+
 
 ---
 
@@ -356,9 +370,9 @@ Populated only once a plot exists, with three mutually exclusive, checkable acti
 
 The time-space plot is the application's central view: vehicle position (distance traveled) plotted against time, one point per recorded observation, one lane at a time.
 
-![Time-space plot with data loaded, no selection](images/15-time-space-plot-layout.png)
+![Time-space plot with data loaded, no selection](images/17-time-space-plot-layout.png)
 
-*Figure 15 Time-space plot with data loaded, no selection*
+*Figure 17 Time-space plot with data loaded, no selection*
 
 ### Layout
 
@@ -380,7 +394,7 @@ Hovering near a point shows a tooltip with that vehicle's ID, time, lane, distan
 
 ### Selecting Trajectories
 
-In the default **Select Trajectory** mode ([§9](#9-interaction-modes)):
+In the default **Time-Space Diagram** mode ([§9](#9-interaction-modes)):
 
 - **Click** near a point to toggle that vehicle's selection on or off.
 - **Drag** to draw a selection box; every vehicle with at least one point inside it is added to the selection. **Shift+drag** removes the vehicles inside the box from the selection instead.
@@ -392,9 +406,9 @@ Your selection determines what several right-click menu items act on — one veh
 
 Toggling **Show Speed** on the left replaces each vehicle's flat color with a per-point color drawn from the gradient legend, based on that point's recorded speed (points without a speed value, or where the dataset has no `veh_speed` column, are shown at the low end of the gradient). Dimming from an active selection still applies on top of the gradient — dimmed points stay flat gray regardless of speed.
 
-![Time-space plot with Show Speed enabled and a selection active](images/16-plot-speed-gradient-selection.png)
+![Time-space plot with Show Speed enabled and a selection active](images/18-plot-speed-gradient-selection.png)
 
-*Figure 16 Time-space plot with Show Speed enabled and a selection active*
+*Figure 18 Time-space plot with Show Speed enabled and a selection active*
 
 ---
 
@@ -410,9 +424,9 @@ Right-clicking anywhere on the plot canvas opens a context menu. Its title and t
 
 The context name appears as a non-clickable heading at the top of the menu, so you always know which of the three you're in before choosing an item. Items that don't apply in the current context are grayed out; hover over one to see why.
 
-![Right-click menu in the "All" context with the Statistics submenu](images/17-context-menu-statistics.png)
+![Right-click menu in the "All" context with the Statistics submenu](images/19-context-menu-statistics.png)
 
-*Figure 17 Right-click menu in the "All" context with the Statistics submenu*
+*Figure 19 Right-click menu in the "All" context with the Statistics submenu*
 
 ### Statistics
 
@@ -431,19 +445,19 @@ Opens a preview-only spline fitting window for a single trajectory, letting you 
 
 ### Noise Analysis
 
-**Jerk Analysis**, **Missing Data**, and **Internal Consistency** run the same analyses available from the Analysis menu's Noise submenu ([§15](#15-analysis-menu--jerk-missing-data-internal-consistency)), but scoped to whatever the right-click context implies — the clicked vehicle, your current selection, or every vehicle in the visible lane for "All." This is an important distinction from the Analysis menu: launching an analysis from there always runs against **every vehicle in the entire event**, regardless of lane or selection, while launching it here always runs against the **current context's vehicles in the current lane only**. **Platoon Consistency** is present but disabled — reserved for a not-yet-implemented module.
+**Jerk Analysis**, **Missing Data**, **Internal Consistency**, and **Platoon Consistency** run the same analyses available from the Analysis menu's Noise submenu ([§15](#15-analysis-menu--jerk-missing-data-internal-consistency-platoon-consistency-and-spectral-analysis)), but scoped to whatever the right-click context implies — the clicked vehicle, your current selection, or every vehicle in the visible lane for "All." This is an important distinction from the Analysis menu: launching an analysis from there always runs against **every vehicle in the entire event**, regardless of lane or selection, while launching it here always runs against the **current context's vehicles in the current lane only**.
 
-![Noise Analysis submenu expanded](images/18-context-menu-noise-analysis.png)
+![Noise Analysis submenu expanded](images/20-context-menu-noise-analysis.png)
 
-*Figure 18 Noise Analysis submenu expanded*
+*Figure 20 Noise Analysis submenu expanded*
 
 ### Stitching
 
-**Basic Stitching** starts [Trajectory Stitching](#14-trajectory-stitching) with the targeted trajectory as the first segment. It's enabled only when exactly one trajectory is targeted (right-click directly on it) and the plot is in Select Trajectory mode. **Advanced Stitching** is present but disabled — reserved for a future module.
+**Basic Stitching** starts [Trajectory Stitching](#14-trajectory-stitching) with the targeted trajectory as the first segment. It's enabled only when exactly one trajectory is targeted (right-click directly on it) and the plot is in Time-Space Diagram mode. **Advanced Stitching** is present but disabled — reserved for a future module.
 
-![Right-click menu in the "Series" context with the Stitching submenu](images/19-context-menu-stitching.png)
+![Right-click menu in the "Series" context with the Stitching submenu](images/21-context-menu-stitching.png)
 
-*Figure 19 Right-click menu in the "Series" context with the Stitching submenu*
+*Figure 21 Right-click menu in the "Series" context with the Stitching submenu*
 
 ---
 
@@ -451,11 +465,11 @@ Opens a preview-only spline fitting window for a single trajectory, letting you 
 
 The **Mode** menu switches how clicking and hovering on the time-space plot behaves. Only one mode is active at a time.
 
-### 9.1 Select Trajectory
+### 9.1 Time-Space Diagram
 
 The default mode, covered in [§7](#7-the-time-space-plot): click to toggle a vehicle's selection, drag to box-select multiple vehicles, Shift+drag to remove them. Most other features (Statistics, Plots, Filter, Noise Analysis, and Stitching in the right-click menu; Vehicle Search) assume you're in this mode.
 
-Trajectory Stitching temporarily replaces this mode with its own trajectory-picking mode, and returns to Select Trajectory when you finish or cancel; see [§14](#14-trajectory-stitching).
+Trajectory Stitching temporarily replaces this mode with its own trajectory-picking mode, and returns to Time-Space Diagram when you finish or cancel; see [§14](#14-trajectory-stitching).
 
 ### 9.2 Gap Headway
 
@@ -466,9 +480,9 @@ Gap Headway mode overlays spacing information for individual points instead of s
 - Locked points persist even if you temporarily switch to another mode and back to Gap Headway.
 - Press **Escape** to clear every locked point at once.
 
-![Gap Headway mode with a locked overlay](images/20-gap-headway-overlay.png)
+![Gap Headway mode with a locked overlay](images/22-gap-headway-overlay.png)
 
-*Figure 20 Gap Headway mode with a locked overlay*
+*Figure 22 Gap Headway mode with a locked overlay*
 
 ### 9.3 Shockwave
 
@@ -481,9 +495,9 @@ Shockwave mode identifies traffic shockwaves — lines of constant speed drawn t
 - **Vicinity parameter** — reserved for Automatic mode; disabled for now.
 - **Data selection** — plot against the original measured position data, or against spline-fitted position data if [Spline Fitting](#11-data-menu--spline-fitting) has already been run for this event (otherwise disabled with an explanatory tooltip).
 
-![Shockwave configuration dialog](images/21-shockwave-config-dialog.png)
+![Shockwave configuration dialog](images/23-shockwave-config-dialog.png)
 
-*Figure 21 Shockwave configuration dialog*
+*Figure 23 Shockwave configuration dialog*
 
 **Building a chain.** Once active, colored X markers appear on every trajectory at its detected candidate inflection points — green for a **release** point (speed increasing) and red for a **compression** point (speed decreasing). Click a marker to start a chain:
 
@@ -491,23 +505,23 @@ Shockwave mode identifies traffic shockwaves — lines of constant speed drawn t
 - Only markers on the trajectory immediately adjacent to the current front or back of your chain are selectable next (shown at full size); every other marker dims, preventing you from skipping a trajectory or picking points out of order.
 - Selected points are connected by a line as you build the chain.
 
-![Shockwave chain under construction](images/22-shockwave-chain-building.png)
+![Shockwave chain under construction](images/24-shockwave-chain-building.png)
 
-*Figure 22 Shockwave chain under construction*
+*Figure 24 Shockwave chain under construction*
 
 **Committing.** Press **Enter** to fit a line through the chain (at least 2 points are required). The fit is drawn as a dashed line through the full set of trajectories with a "SW N" label, and a floating results panel appears in the plot's upper-right corner showing that shockwave's ID, equation, fitted speed, and R². Press **Escape** instead to abandon an in-progress chain without committing it.
 
-![Committed shockwave with the floating results panel](images/23-shockwave-committed-result.png)
+![Committed shockwave with the floating results panel](images/25-shockwave-committed-result.png)
 
-*Figure 23 Committed shockwave with the floating results panel*
+*Figure 25 Committed shockwave with the floating results panel*
 
 **Reviewing, editing, and deleting.** Click the result panel's title to open the full results table for every shockwave committed this session, without ending the session. To revise a committed shockwave, **Ctrl+Left-click** it to reopen its points as an active chain — add or remove points and press Enter to re-fit, or Escape to revert to the original. **Ctrl+Right-click** deletes a chain point while building, or a committed shockwave while idle.
 
 **Saving your results.** Switching out of Shockwave mode (or closing the plot) with committed results prompts you to save first. Choosing to save opens the results table with a **Save** button that writes every committed shockwave's ID, mode, equation, speed, R², and point count to a CSV file.
 
-![Shockwave results table](images/24-shockwave-results-table.png)
+![Shockwave results table](images/26-shockwave-results-table.png)
 
-*Figure 24 Shockwave results table*
+*Figure 26 Shockwave results table*
 
 ---
 
@@ -522,9 +536,9 @@ The three correction modules — **Gap Interpolation**, **Lane-Level Anomalies**
 - **The open database.** The first time any of these modules is about to change the open file, a **Write Changes** prompt says where the changes will be written and offers **Write to This File**, **Save to a Copy…**, or **Cancel** (the default). Once you choose Write to This File, TRACES doesn't ask again for that file until you open a database again.
 - **A copy.** Choosing **Save to a Copy…** in the prompt — or entering or browsing to a different file in the Write changes to row — copies the open database to that file (asking before replacing an existing one) and switches TRACES to the copy. The plot keeps its event, lanes, and view; the window title and the Recent list show the copy; and the original file is left untouched. Any other window still reading the original (for example, a Spline Fitting preview) is closed.
 
-![Write Changes prompt on the first change to a database](images/25-write-changes-prompt.png)
+![Write Changes prompt on the first change to a database](images/27-write-changes-prompt.png)
 
-*Figure 25 Write Changes prompt on the first change to a database*
+*Figure 27 Write Changes prompt on the first change to a database*
 
 Spline Fitting and Internal Consistency write their calculated columns directly to the open database without this prompt: they add columns of results and never change the measured values.
 
@@ -580,9 +594,9 @@ This is the entry point that actually modifies your database. It has two steps:
 
 **Step 1 — choose events.** A multi-select list (also used by File → Export → Export Analysis, [§17](#17-exporting-data)) shows every event in the database by ID and name, with **Select All** / **Clear** helpers. At least one event must be selected to continue.
 
-![Event selection list](images/26-event-selection-dialog.png)
+![Event selection list](images/28-event-selection-dialog.png)
 
-*Figure 26 Event selection list*
+*Figure 28 Event selection list*
 
 **Step 2 — set parameters.** The Spline Fitting dialog offers:
 
@@ -591,17 +605,17 @@ This is the entry point that actually modifies your database. It has two steps:
 - **Spline degree (k)** — the available degrees depend on the chosen fitting base (only odd degrees are offered).
 - **Fill missing rows (resample at uniform timestep)** — when checked, also inserts new rows at a uniform timestep to fill timing gaps in the data, populated only with calculated values (measured columns are left blank on these synthetic rows, since there's no actual measurement).
 
-![Spline Fitting parameter dialog](images/27-spline-fitting-parameters.png)
+![Spline Fitting parameter dialog](images/29-spline-fitting-parameters.png)
 
-*Figure 27 Spline Fitting parameter dialog*
+*Figure 29 Spline Fitting parameter dialog*
 
 Clicking **OK** runs the fit across every selected event on a background thread, with a progress bar. When it finishes, it writes four columns to the events table — `calc_position`, `calc_speed`, `calc_acceleration`, `calc_jerk`. Rows added by "Fill missing rows" are marked `S` in the `imputed_status` column ([§10](#10-changing-data-write-targets-and-row-status)), which distinguishes them from existing rows that simply received a calculated value. These columns are added automatically the first time you run Spline Fitting and are then available everywhere else in the application (other analyses, plots, and exports) like any other column.
 
 A **Spline Fit Statistics** window then opens: a per-trajectory table of goodness-of-fit metrics (RMSE, MAE, max/min/mean error for each of the four kinematics, plus point and imputed-row counts) with its own **Save…** button to export the table to CSV. This is the only CSV export path specific to Spline Fitting — there's no separate Export Analysis entry for it, since the `calc_*` columns themselves are already available through the ordinary [Export All / Export Selected](#17-exporting-data) paths once they exist.
 
-![Spline Fit Statistics results table](images/28-spline-stats-dialog.png)
+![Spline Fit Statistics results table](images/30-spline-stats-dialog.png)
 
-*Figure 28 Spline Fit Statistics results table*
+*Figure 30 Spline Fit Statistics results table*
 
 ### 11.2 Right-Click → Filter → Spline Fitting
 
@@ -611,9 +625,9 @@ Choose a fitting base, smoothness, and degree, then click **Update Plot** — no
 
 **Save Plots** exports all four plots to a self-contained interactive HTML file ([§3](#saving-plots-as-interactive-html)).
 
-![Right-click Spline Fitting preview dialog](images/29-spline-preview-dialog.png)
+![Right-click Spline Fitting preview dialog](images/31-spline-preview-dialog.png)
 
-*Figure 29 Right-click Spline Fitting preview dialog*
+*Figure 31 Right-click Spline Fitting preview dialog*
 
 ---
 
@@ -625,9 +639,9 @@ Choose **Data → Gap Interpolation** to start. It always works on the entire ev
 
 ### 12.1 The Configuration Window
 
-![Gap Interpolation configuration dialog](images/30-gap-config-dialog.png)
+![Gap Interpolation configuration dialog](images/32-gap-config-dialog.png)
 
-*Figure 30 Gap Interpolation configuration dialog*
+*Figure 32 Gap Interpolation configuration dialog*
 
 **Gap definition.** Two settings decide what counts as a gap:
 
@@ -658,9 +672,9 @@ Apply, Skip, and Delete all use the **Write changes to** target ([§10](#10-chan
 
 The review window shows one trajectory at a time as a [kinematic stacked plot](#kinematic-stacked-plots) of distance traveled, speed, and acceleration. Each gap of that trajectory is shaded on all three plots and labeled with its gap number, and the selected gap has a black border.
 
-![Gap Review window with an automatically filled gap selected](images/31-gap-review-dialog.png)
+![Gap Review window with an automatically filled gap selected](images/33-gap-review-dialog.png)
 
-*Figure 31 Gap Review window with an automatically filled gap selected*
+*Figure 33 Gap Review window with an automatically filled gap selected*
 
 **Gap colors.**
 
@@ -683,9 +697,9 @@ The review window shows one trajectory at a time as a [kinematic stacked plot](#
 
 Remove and Delete ask for confirmation.
 
-![Gap Review window previewing new spline parameters with View](images/32-gap-review-view-preview.png)
+![Gap Review window previewing new spline parameters with View](images/34-gap-review-view-preview.png)
 
-*Figure 32 Gap Review window previewing new spline parameters with View*
+*Figure 34 Gap Review window previewing new spline parameters with View*
 
 **Adding points.** **Add Points...** lets you place extra points inside the gap to guide the spline, which treats them as additional data. The plots are enlarged to the fitting-base plot and the plot derived from it (distance with speed, or speed with acceleration), so you see the effect on the derived quantity as you work; points can be added only on the fitting-base plot.
 
@@ -697,13 +711,13 @@ Remove and Delete ask for confirmation.
 
 The dashed preview updates after every change. Click **Apply** afterwards to save a fill that uses the points.
 
-![Gap Review window in Add Points mode](images/33-gap-review-add-points.png)
+![Gap Review window in Add Points mode](images/35-gap-review-add-points.png)
 
-*Figure 33 Gap Review window in Add Points mode*
+*Figure 35 Gap Review window in Add Points mode*
 
-![Gap Review window after Apply: the gap is manually filled](images/34-gap-review-manual-applied.png)
+![Gap Review window after Apply: the gap is manually filled](images/36-gap-review-manual-applied.png)
 
-*Figure 34 Gap Review window after Apply: the gap is manually filled*
+*Figure 36 Gap Review window after Apply: the gap is manually filled*
 
 **Closing.** **Close** ends the review. If anything changed, the time-space plot reloads so the fills appear immediately.
 
@@ -724,9 +738,9 @@ Two anomaly types are built in:
 
 ### 13.1 Selecting Anomalies to Identify
 
-![Select Anomalies to Identify dialog](images/35-lane-anomaly-config.png)
+![Select Anomalies to Identify dialog](images/37-lane-anomaly-config.png)
 
-*Figure 35 Select Anomalies to Identify dialog*
+*Figure 37 Select Anomalies to Identify dialog*
 
 Check each anomaly type to look for and set its parameter:
 
@@ -737,9 +751,9 @@ Click **Confirm** to analyze every trajectory of the event (the button is disabl
 
 ### 13.2 Reviewing and Fixing Anomalies
 
-![Lane-Level Anomalies review panel: a Proximity anomaly with a fix set up](images/36-lane-anomaly-review-proximity.png)
+![Lane-Level Anomalies review panel: a Proximity anomaly with a fix set up](images/38-lane-anomaly-review-proximity.png)
 
-*Figure 36 Lane-Level Anomalies review panel: a Proximity anomaly with a fix set up*
+*Figure 38 Lane-Level Anomalies review panel: a Proximity anomaly with a fix set up*
 
 **The plot.** The left side is a time-space diagram of the selected anomaly, framed on the anomaly's time span, which is shaded light red (green once fixed). Colors identify vehicles — the anomaly's first vehicle amber, the second green, other traffic grey — and symbols identify lanes (circle, square, triangle, and so on). The legend lists each lane's symbol and each vehicle's color; click an entry to hide or show its points, and hover over a point to see its vehicle, time, lane, and distance. Other traffic is drawn for the lanes involved, so you can see where a vehicle actually fits.
 
@@ -759,9 +773,9 @@ Click **Confirm** to analyze every trajectory of the event (the button is disabl
 
 The plot previews the fix as you set it up: the segment is shaded yellow and each sample that would move is ringed in magenta with its new lane's symbol. A summary line says what Apply will change.
 
-![Lane-Level Anomalies review panel: a Rapid Lane Change anomaly with a fix set up](images/37-lane-anomaly-review-rapid.png)
+![Lane-Level Anomalies review panel: a Rapid Lane Change anomaly with a fix set up](images/39-lane-anomaly-review-rapid.png)
 
-*Figure 37 Lane-Level Anomalies review panel: a Rapid Lane Change anomaly with a fix set up*
+*Figure 39 Lane-Level Anomalies review panel: a Rapid Lane Change anomaly with a fix set up*
 
 **Applying and undoing.** **Apply** writes the fix: the moved rows get their new lane and the `L` status ([§10](#10-changing-data-write-targets-and-row-status)), the previous lanes are saved, the anomaly is marked fixed, and the fix panel shows the fix in effect. **Undo** (after confirmation) gives every vehicle the fix moved its previous lanes back and returns the anomaly to detected. Because kinematics are never changed, spline fits and internal consistency results computed before a fix remain valid.
 
@@ -772,9 +786,9 @@ A fix is refused, with a message saying what to undo first, if part of the segme
 
 Anomalies on trajectories used in a stitch are hidden. Choosing another anomaly or type, or closing the panel, discards fix choices you haven't applied. When the panel closes after an Apply or Undo, the time-space plot reloads.
 
-![Lane-Level Anomalies review panel after Apply](images/38-lane-anomaly-fixed.png)
+![Lane-Level Anomalies review panel after Apply](images/40-lane-anomaly-fixed.png)
 
-*Figure 38 Lane-Level Anomalies review panel after Apply*
+*Figure 40 Lane-Level Anomalies review panel after Apply*
 
 The anomalies and every fix are recorded in the `lane_anomalies` and `lane_corrections` tables, so detected, reviewed, and corrected records can be traced. The module is built so that more anomaly types, with fixes of their own, can be added later.
 
@@ -791,17 +805,17 @@ Right-click one of the segments and choose **Stitching → Basic Stitching** ([�
 - **Click** another trajectory to pick it as the second segment; it gets a halo too. Clicking a third trajectory replaces the older pick. You can change lanes while picking.
 - **Enter** opens the stitching preview for the two picked trajectories.
 - **Escape** drops the most recent pick; dropping the only pick leaves the mode.
-- **Right-click**, or **Mode → Select Trajectory**, leaves the mode.
+- **Right-click**, or **Mode → Time-Space Diagram**, leaves the mode.
 
-![Trajectory stitching selection with two trajectories picked](images/39-stitch-selection-banner.png)
+![Trajectory stitching selection with two trajectories picked](images/41-stitch-selection-banner.png)
 
-*Figure 39 Trajectory stitching selection with two trajectories picked*
+*Figure 41 Trajectory stitching selection with two trajectories picked*
 
 ### 14.2 The Stitching Preview
 
-![Trajectory Stitching preview for an overlapping pair](images/40-stitching-preview-overlap.png)
+![Trajectory Stitching preview for an overlapping pair](images/42-stitching-preview-overlap.png)
 
-*Figure 40 Trajectory Stitching preview for an overlapping pair*
+*Figure 42 Trajectory Stitching preview for an overlapping pair*
 
 The preview names the two segments **Traj 1** and **Traj 2** in chronological order, whichever you clicked first.
 
@@ -819,9 +833,9 @@ The preview names the two segments **Traj 1** and **Traj 2** in chronological or
 | **Continuous** | Traj 2 starts at the next expected sample after Traj 1 ends | every observation of both |
 | **Overlap** | Traj 2 starts before Traj 1 ends | Traj 1 before the split point and Traj 2 from the split point on |
 
-![Trajectory Stitching preview for a pair separated by a gap](images/41-stitching-preview-gap.png)
+![Trajectory Stitching preview for a pair separated by a gap](images/43-stitching-preview-gap.png)
 
-*Figure 41 Trajectory Stitching preview for a pair separated by a gap*
+*Figure 43 Trajectory Stitching preview for a pair separated by a gap*
 
 **Overlap split.** For an overlapping pair, a slider — **Select where Traj 2 takes over (one step per sample)** — sets the split point, shown as a purple dashed line on every plot. It starts in the middle of the overlap and steps through Traj 2's samples, so the split always falls on a real observation; the last position keeps all of Traj 1's overlap. The overlap boundaries are drawn as black dashed lines. If Traj 2 lies entirely within Traj 1's time span, Traj 1 also supplies the samples after Traj 2 ends.
 
@@ -830,9 +844,9 @@ The preview names the two segments **Traj 1** and **Traj 2** in chronological or
 - **"The selected Trajectories Should Not Be Selected Together"** — for overlapping pairs only: a segment has more points in the overlap than outside it, and the nearest points of the two segments within a 1-second span are more than 5 m apart.
 - **"Trajectories That Skip A Lane Should Not Be Stitched"** — the stitched trajectory would jump over a lane where it passes from one segment to the other.
 
-![Trajectory Stitching preview showing a safety warning](images/42-stitching-safety-warning.png)
+![Trajectory Stitching preview showing a safety warning](images/44-stitching-safety-warning.png)
 
-*Figure 42 Trajectory Stitching preview showing a safety warning*
+*Figure 44 Trajectory Stitching preview showing a safety warning*
 
 **Stitching.** The bottom of the window has the **Write changes to** row ([§10](#10-changing-data-write-targets-and-row-status)) and the **Undo**, **Cancel**, and **Stitch** buttons. **Stitch** creates the new trajectory:
 
@@ -850,7 +864,7 @@ To review a stitch, start Basic Stitching on the stitched trajectory and press *
 
 ---
 
-## 15. Analysis Menu — Jerk, Missing Data, Internal Consistency
+## 15. Analysis Menu — Jerk, Missing Data, Internal Consistency, Platoon Consistency, and Spectral Analysis
 
 Jerk Analysis, Missing Data, and Internal Consistency — found under **Analysis → Noise** — share a common structure: a parameter dialog, a background computation with a progress bar, and a results view whose contents and arrangement depend on how you launched it.
 
@@ -874,18 +888,18 @@ All three run their computation on a background thread so the dialog stays respo
 - **Missing value gap threshold** (seconds, default 1.0) — the largest time gap between consecutive records that's still bridged when deriving a value; larger gaps are left blank rather than interpolated across.
 - **Jerk calculation method** — use the `veh_jerk` column directly, calculate jerk from acceleration, calculate acceleration and jerk from speed, or use jerk from spline-fit results. Only methods whose source column exists in your dataset are selectable.
 
-![Jerk Analysis parameter dialog](images/43-jerk-analysis-dialog.png)
+![Jerk Analysis parameter dialog](images/45-jerk-analysis-dialog.png)
 
-*Figure 43 Jerk Analysis parameter dialog*
+*Figure 45 Jerk Analysis parameter dialog*
 
 **Output per vehicle:** minimum, mean, and maximum jerk; the percentage of samples exceeding the jerk threshold; and a sign-inversion excess percentage (how often jerk oscillates in sign more than once within a one-second window — a rough smoothness/noise indicator).
 
 - **Top-level:** box plots of all five metrics across every vehicle in the event, with a count of vehicles dropped for having no jerk data available under the chosen method.
 - **Right-click:** a plain table of the same metrics for just the target vehicle(s).
 
-![Jerk Analysis box plot results](images/44-jerk-box-plot-results.png)
+![Jerk Analysis box plot results](images/46-jerk-box-plot-results.png)
 
-*Figure 44 Jerk Analysis box plot results*
+*Figure 46 Jerk Analysis box plot results*
 
 ### 15.3 Missing Data
 
@@ -894,9 +908,9 @@ All three run their computation on a background thread so the dialog stays respo
 - **Missing value gap threshold** (points, default 10) — the number of consecutive missing records required before a stretch counts as a reportable "gap."
 - **Time step** — leave **Auto-calculate Dataset Time Increment** checked to let TRACES infer the expected sampling interval from the data itself (the most common time step across the dataset), or uncheck it to enter a manual increment.
 
-![Missing Data parameter dialog](images/45-missing-data-dialog.png)
+![Missing Data parameter dialog](images/47-missing-data-dialog.png)
 
-*Figure 45 Missing Data parameter dialog*
+*Figure 47 Missing Data parameter dialog*
 
 **Output per vehicle:** the percentage of missing records, the number of gaps at or above the threshold, and the length of every individual gap.
 
@@ -919,9 +933,56 @@ Requires the `veh_dist_trav` column, which is always present since it's required
 - **Right-click:** opens a combined results window: on the left, a [kinematic stacked plot](#kinematic-stacked-plots) of speed, acceleration, and jerk, each with the measured value solid and the calculated value dashed in the same color; on the right, a statistics summary for the current trajectory above a scrollable raw data table. Clicking a raw-data row places the plot cursor at that row's time. **← Prev**, **Next →**, and the trajectory dropdown move between vehicles, and **Save Plots** exports the plots to interactive HTML. Clicking **Measured** or **Calculated** in any legend shows or hides it on all three plots. This path also writes the same six columns to the database.
 - **Export** (File → Export → Export Analysis): streams results straight to CSV across every selected event without writing anything to the database.
 
-![Internal Consistency combined results dialog](images/46-internal-consistency-results.png)
+![Internal Consistency combined results dialog](images/48-internal-consistency-results.png)
 
-*Figure 46 Internal Consistency combined results dialog*
+*Figure 48 Internal Consistency combined results dialog*
+
+### 15.5 Platoon Consistency
+
+This analysis checks whether the spacing between a leader and follower agrees with their recorded speeds: it reconstructs spacing from the difference between the two speeds, then compares that reconstructed value against the observed spacing. It also identifies unphysically small spacing and counts vehicle pair ID flips — cases where the same two vehicles exchange leader and follower roles over time.
+
+**Parameters:**
+
+- **Unphysical spacing threshold** (meters, default 5) — a continuous leader–follower segment counts as unphysical if any observed spacing is strictly below this value.
+- **Leader search distance threshold** (meters, default 50) — the maximum distance ahead to search for a leader in the same lane at the same timestamp. If your data already supplies a preceding vehicle ID and spacing, those values take priority and aren't limited by this search distance.
+
+Uses `veh_dist_trav` and `lane_id` to find leaders when no valid supplied assignment is available. The `veh_speed` column is needed for spacing-bias calculations; missing speeds leave spacing metrics available but limit how much of a segment can be compared.
+
+- **Top-level** (Analysis → Noise → Platoon Consistency): analyzes every follower in the currently plotted event on a background thread, then opens a results table. Each row is one continuous leader–follower segment, with its time range, sample count, minimum spacing, and minimum/maximum/mean bias, RMSE bias, and RMSPE bias. The summary above the table shows ID flips and the number and percentage of segments with unphysical spacing.
+- **Right-click:** opens the same results table for the context's vehicles as followers. Leaders can still be any vehicle in the event, including vehicles outside your selection.
+- **Export** (File → Export → Export Analysis → Platoon Consistency): writes a selection summary followed by the segment table straight to CSV across every selected event. The results dialog's **Save CSV…** button saves the displayed results in the same format.
+
+Bias is reconstructed spacing minus observed spacing. **RMSPE is a ratio** — 0.1 means 10%, not 0.1%. **N/A** means a metric couldn't be calculated; **Valid bias samples** shows how many observations contributed to the bias statistics. None of these paths writes anything to the database.
+
+![Platoon Consistency results table](images/49-platoon-consistency-results.png)
+
+*Figure 49 Platoon Consistency results table*
+
+### 15.6 Spectral Analysis
+
+This analysis shows how a trajectory's speed or acceleration varies across frequencies: it transforms the recorded signal into a frequency spectrum, letting you inspect slow variations and faster oscillations separately. Each vehicle has its own spectrum and a table of the underlying Fourier coefficients and magnitudes.
+
+**Parameters:**
+
+- **Selected signal** — Speed (`veh_speed`, the default when available) or Acceleration (`veh_accel`). Only columns present in your dataset are selectable; if neither exists, the analysis can't be run.
+
+Requires at least two finite samples and a positive sampling interval for each trajectory. Missing signal values are omitted, and trajectories without enough usable data are skipped. Timing gaps and irregular samples use a mean time increment without interpolation, so their frequency axes should be treated as approximate.
+
+- **Top-level** (Analysis → Noise → Spectral Analysis): analyzes every vehicle in the currently plotted event on a background thread, regardless of lane or selection, then opens a combined spectrum-and-table dialog. Use the trajectory dropdown or **Previous** / **Next** buttons to move between vehicles; both tabs update together.
+- **Right-click:** not available — launch this analysis from the top-level Analysis menu.
+- **Export** (File → Export → Export Analysis → Spectral Analysis): writes every frequency bin for every analyzable vehicle across the selected events straight to CSV, including event ID, vehicle ID, frequency index, frequency, Fourier coefficient, and magnitude. None of these paths writes anything to the database.
+
+The **Spectrum** dropdown switches the plot between **Magnitude** (the default, raw Fourier magnitude), **Amplitude** (the size of each frequency component in the signal's units), and **Power Spectrum** (mean-square contribution per frequency bin, not power per Hz). The signal's mean remains at zero frequency. Your choice stays selected as you move between vehicles. **Save Plot…** exports the displayed spectrum as an SVG file.
+
+![Spectral Analysis magnitude spectrum](images/50-spectral-analysis-spectrum.png)
+
+*Figure 50 Spectral Analysis magnitude spectrum*
+
+The **Spectrum Table (all bins)** tab shows every frequency bin, including those beyond the plotted half-spectrum. Changing the Spectrum dropdown only changes the plot — the table and CSV exports always contain the raw Fourier coefficients and magnitudes. **Save Table…** saves all bins for the currently displayed vehicle to CSV; use Export Analysis when you need multiple events or vehicles.
+
+![Spectral Analysis all-bin results table](images/51-spectral-analysis-table.png)
+
+*Figure 51 Spectral Analysis all-bin results table*
 
 ---
 
@@ -938,9 +999,9 @@ Leaders and followers are always identified from **every** trajectory of the eve
 
 ### 16.1 Parameters
 
-![Advanced Statistics parameter dialog](images/47-advanced-statistics-dialog.png)
+![Advanced Statistics parameter dialog](images/52-advanced-statistics-dialog.png)
 
-*Figure 47 Advanced Statistics parameter dialog*
+*Figure 52 Advanced Statistics parameter dialog*
 
 - **Minimum time in new lane** (s, default 1) — a move to another lane counts as a lane change only when the vehicle stays in the new lane at least this long. Shorter flips are ignored, so a vehicle flickering between two lanes and settling where it started has made no lane change.
 - **Maximum leader / follower gap** (m, default "No limit") — a vehicle further than this ahead (behind) in the same lane is not counted as a leader (follower).
@@ -963,9 +1024,9 @@ A gap with no vehicle on one side is left out of the statistics.
 
 ### 16.3 The Results Table
 
-![Advanced Statistics results table](images/48-advanced-statistics-table.png)
+![Advanced Statistics results table](images/53-advanced-statistics-table.png)
 
-*Figure 48 Advanced Statistics results table*
+*Figure 53 Advanced Statistics results table*
 
 The table has one row per reported vehicle, ordered by vehicle ID, followed by a bold summary row, **All**, over every vehicle in the table. Hover over a column header for the statistic's full name and definition. Values that can't be computed — no leader, no lane change, or no `veh_speed` column — show as N/A.
 
@@ -997,13 +1058,13 @@ Q1 and Q3 are the first and third quartiles (25th and 75th percentiles). In the 
 
 **Generate Plots** opens a list of the quantities with the full set of statistics — Speed, Leader Gap, Follower Gap, Accepted Gap Space Before Lane Change, Front Gap After Lane Change, and Rear Gap After Lane Change. Check any number of them and click **Confirm** to open one box plot per quantity, each built from the samples of every vehicle in the table, with outliers labeled by vehicle and time ([§15.1](#151-the-shared-pattern)).
 
-![Generate Plots variable selection](images/49-generate-plots-dialog.png)
+![Generate Plots variable selection](images/54-generate-plots-dialog.png)
 
-*Figure 49 Generate Plots variable selection*
+*Figure 54 Generate Plots variable selection*
 
-![Advanced Statistics box plots](images/50-advanced-statistics-box-plots.png)
+![Advanced Statistics box plots](images/55-advanced-statistics-box-plots.png)
 
-*Figure 50 Advanced Statistics box plots*
+*Figure 55 Advanced Statistics box plots*
 
 ---
 
@@ -1013,7 +1074,7 @@ File → Export gathers every way to get data back out of TRACES as CSV. The sub
 
 - **Export All** — every column, every record, the whole database.
 - **Export Selected** — chosen columns for one event.
-- **Export Analysis** — Jerk Analysis, Missing Data, Internal Consistency (Platoon Consistency is a disabled, not-yet-implemented placeholder), each writing that analysis's results straight to CSV.
+- **Export Analysis** — Jerk Analysis, Missing Data, Internal Consistency, Platoon Consistency, and Spectral Analysis, each writing that analysis's results straight to CSV.
 
 All three use the same batched producer/consumer export with a progress bar and an **Interrupt** button; closing an export dialog while it's running asks you to confirm before canceling the export.
 
@@ -1033,19 +1094,19 @@ Lets you export a subset of columns for a single event:
 
 A note in the dialog reminds you that the resulting file only contains the selected columns for one event and **cannot be re-imported** back into TRACES — this path is for taking a slice of data out to another tool, not for round-tripping.
 
-![Export Selected dialog](images/51-export-selected-dialog.png)
+![Export Selected dialog](images/56-export-selected-dialog.png)
 
-*Figure 51 Export Selected dialog*
+*Figure 56 Export Selected dialog*
 
 ### 17.3 Export Analysis
 
-Runs Jerk Analysis, Missing Data, or Internal Consistency ([§15](#15-analysis-menu--jerk-missing-data-internal-consistency)) purely to produce a CSV — no results dialog is shown, and nothing is written to the database.
+Runs Jerk Analysis, Missing Data, Internal Consistency, Platoon Consistency, or Spectral Analysis ([§15](#15-analysis-menu--jerk-missing-data-internal-consistency-platoon-consistency-and-spectral-analysis)) purely to produce a CSV — no results dialog is shown, and nothing is written to the database.
 
 Choosing an Export Analysis item first opens the [event selection list](#111-data--spline-fitting) so you can pick one or more events, then opens that module's parameter dialog with a **Save** button in place of OK. The analysis runs across every vehicle in each selected event.
 
-![Export Analysis submenu](images/52-export-analysis-submenu.png)
+![Export Analysis submenu](images/57-export-analysis-submenu.png)
 
-*Figure 52 Export Analysis submenu*
+*Figure 57 Export Analysis submenu*
 
 Results of the other modules are saved from their own windows: the Spline Fit Statistics table ([§11](#11-data-menu--spline-fitting)), the shockwave results table ([§9.3](#93-shockwave)), and the Advanced Statistics table ([§16](#16-advanced-statistics)) each have a Save button.
 
@@ -1053,15 +1114,15 @@ Results of the other modules are saved from their own windows: the Spline Fit St
 
 Every export path — All, Selected, or Analysis — ends with a confirmation dialog reporting success (including the number of records written, for Export All/Selected) or an error message if something went wrong.
 
-![Export completion dialog](images/53-export-complete-dialog.png)
+![Export completion dialog](images/58-export-complete-dialog.png)
 
-*Figure 53 Export completion dialog*
+*Figure 58 Export completion dialog*
 
 ---
 
 ## 18. Vehicle Search
 
-**View → Search Vehicle** opens a small, modeless tool window for jumping straight to a specific vehicle's trajectory by ID, without hunting for it visually on the plot. It's enabled only while the plot is in Select Trajectory mode with an event confirmed ([§6](#6-main-window-tour), [§9.1](#91-select-trajectory)) — switching to Gap Headway or Shockwave mode, or reopening the event settings dialog, closes it automatically.
+**View → Search Vehicle** opens a small, modeless tool window for jumping straight to a specific vehicle's trajectory by ID, without hunting for it visually on the plot. It's enabled only while the plot is in Time-Space Diagram mode with an event confirmed ([§6](#6-main-window-tour), [§9.1](#91-select-trajectory)) — switching to Gap Headway or Shockwave mode, or reopening the event settings dialog, closes it automatically.
 
 Because it's modeless, it stays open alongside the plot rather than blocking interaction — you can search for one vehicle, look at it, and search for another without reopening the dialog. Its list is updated when trajectories are added or removed by stitching.
 
@@ -1072,9 +1133,9 @@ Because it's modeless, it stays open alongside the plot rather than blocking int
 
 **What happens on selection:** if the vehicle already has loaded data in the currently displayed lane, it's selected and framed immediately. If it's on a different lane, TRACES finds the lane where that vehicle first appears, switches to it, then selects and frames the vehicle there. Framing snaps the time and distance sliders to the vehicle's exact trajectory extent (no padding) — the slider *ranges* only expand if the trajectory falls completely outside the current view, so you don't lose your broader context unnecessarily. The found vehicle becomes the sole selection, dimming every other trajectory.
 
-![Vehicle Search dialog with a filtered result list](images/54-vehicle-search-dialog.png)
+![Vehicle Search dialog with a filtered result list](images/59-vehicle-search-dialog.png)
 
-*Figure 54 Vehicle Search dialog with a filtered result list*
+*Figure 59 Vehicle Search dialog with a filtered result list*
 
 ---
 
@@ -1086,9 +1147,9 @@ The viewer displays `traces.log`, the same file the [Import dialog](#42-importin
 
 If the log file is cleared out from under it — for instance, the Import dialog clears it at the start of each new import — the viewer detects the file shrinking and clears its own display to match, then continues appending from there.
 
-![System Log Viewer window](images/55-log-viewer.png)
+![System Log Viewer window](images/60-log-viewer.png)
 
-*Figure 55 System Log Viewer window*
+*Figure 60 System Log Viewer window*
 
 ---
 
@@ -1096,9 +1157,9 @@ If the log file is cleared out from under it — for instance, the Import dialog
 
 **File → About** shows the TRACES logo, the version number, and a summary of the application's purpose, features, and requirements. Click **Close** to return to the application.
 
-![About dialog](images/56-about-dialog.png)
+![About dialog](images/61-about-dialog.png)
 
-*Figure 56 About dialog*
+*Figure 61 About dialog*
 
 ---
 
