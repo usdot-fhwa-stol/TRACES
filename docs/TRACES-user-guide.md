@@ -18,7 +18,7 @@
 - [12. Data Menu — Gap Interpolation](#12-data-menu--gap-interpolation)
 - [13. Data Menu — Lane-Level Anomalies](#13-data-menu--lane-level-anomalies)
 - [14. Trajectory Stitching](#14-trajectory-stitching)
-- [15. Analysis Menu — Jerk, Missing Data, Internal Consistency](#15-analysis-menu--jerk-missing-data-internal-consistency)
+- [15. Analysis Menu — Jerk, Missing Data, Internal Consistency, Platoon Consistency, and Spectral Analysis](#15-analysis-menu--jerk-missing-data-internal-consistency-platoon-consistency-and-spectral-analysis)
 - [16. Advanced Statistics](#16-advanced-statistics)
 - [17. Exporting Data](#17-exporting-data)
 - [18. Vehicle Search](#18-vehicle-search)
@@ -73,20 +73,23 @@
 | Figure 40 | Trajectory Stitching preview for an overlapping pair | [14. Trajectory Stitching](#14-trajectory-stitching) |
 | Figure 41 | Trajectory Stitching preview for a pair separated by a gap | [14. Trajectory Stitching](#14-trajectory-stitching) |
 | Figure 42 | Trajectory Stitching preview showing a safety warning | [14. Trajectory Stitching](#14-trajectory-stitching) |
-| Figure 43 | Jerk Analysis parameter dialog | [15. Analysis Menu — Jerk, Missing Data, Internal Consistency](#15-analysis-menu--jerk-missing-data-internal-consistency) |
-| Figure 44 | Jerk Analysis box plot results | [15. Analysis Menu — Jerk, Missing Data, Internal Consistency](#15-analysis-menu--jerk-missing-data-internal-consistency) |
-| Figure 45 | Missing Data parameter dialog | [15. Analysis Menu — Jerk, Missing Data, Internal Consistency](#15-analysis-menu--jerk-missing-data-internal-consistency) |
-| Figure 46 | Internal Consistency combined results dialog | [15. Analysis Menu — Jerk, Missing Data, Internal Consistency](#15-analysis-menu--jerk-missing-data-internal-consistency) |
-| Figure 47 | Advanced Statistics parameter dialog | [16. Advanced Statistics](#16-advanced-statistics) |
-| Figure 48 | Advanced Statistics results table | [16. Advanced Statistics](#16-advanced-statistics) |
-| Figure 49 | Generate Plots variable selection | [16. Advanced Statistics](#16-advanced-statistics) |
-| Figure 50 | Advanced Statistics box plots | [16. Advanced Statistics](#16-advanced-statistics) |
-| Figure 51 | Export Selected dialog | [17. Exporting Data](#17-exporting-data) |
-| Figure 52 | Export Analysis submenu | [17. Exporting Data](#17-exporting-data) |
-| Figure 53 | Export completion dialog | [17. Exporting Data](#17-exporting-data) |
-| Figure 54 | Vehicle Search dialog with a filtered result list | [18. Vehicle Search](#18-vehicle-search) |
-| Figure 55 | System Log Viewer window | [19. System Log Viewer](#19-system-log-viewer) |
-| Figure 56 | About dialog | [20. About Dialog](#20-about-dialog) |
+| Figure 43 | Jerk Analysis parameter dialog | [15. Analysis Menu — Jerk, Missing Data, Internal Consistency, Platoon Consistency, and Spectral Analysis](#15-analysis-menu--jerk-missing-data-internal-consistency-platoon-consistency-and-spectral-analysis) |
+| Figure 44 | Jerk Analysis box plot results | [15. Analysis Menu — Jerk, Missing Data, Internal Consistency, Platoon Consistency, and Spectral Analysis](#15-analysis-menu--jerk-missing-data-internal-consistency-platoon-consistency-and-spectral-analysis) |
+| Figure 45 | Missing Data parameter dialog | [15. Analysis Menu — Jerk, Missing Data, Internal Consistency, Platoon Consistency, and Spectral Analysis](#15-analysis-menu--jerk-missing-data-internal-consistency-platoon-consistency-and-spectral-analysis) |
+| Figure 46 | Internal Consistency combined results dialog | [15. Analysis Menu — Jerk, Missing Data, Internal Consistency, Platoon Consistency, and Spectral Analysis](#15-analysis-menu--jerk-missing-data-internal-consistency-platoon-consistency-and-spectral-analysis) |
+| Figure 47 | Platoon Consistency results table | [15. Analysis Menu — Jerk, Missing Data, Internal Consistency, Platoon Consistency, and Spectral Analysis](#15-analysis-menu--jerk-missing-data-internal-consistency-platoon-consistency-and-spectral-analysis) |
+| Figure 48 | Spectral Analysis magnitude spectrum | [15. Analysis Menu — Jerk, Missing Data, Internal Consistency, Platoon Consistency, and Spectral Analysis](#15-analysis-menu--jerk-missing-data-internal-consistency-platoon-consistency-and-spectral-analysis) |
+| Figure 49 | Spectral Analysis all-bin results table | [15. Analysis Menu — Jerk, Missing Data, Internal Consistency, Platoon Consistency, and Spectral Analysis](#15-analysis-menu--jerk-missing-data-internal-consistency-platoon-consistency-and-spectral-analysis) |
+| Figure 50 | Advanced Statistics parameter dialog | [16. Advanced Statistics](#16-advanced-statistics) |
+| Figure 51 | Advanced Statistics results table | [16. Advanced Statistics](#16-advanced-statistics) |
+| Figure 52 | Generate Plots variable selection | [16. Advanced Statistics](#16-advanced-statistics) |
+| Figure 53 | Advanced Statistics box plots | [16. Advanced Statistics](#16-advanced-statistics) |
+| Figure 54 | Export Selected dialog | [17. Exporting Data](#17-exporting-data) |
+| Figure 55 | Export Analysis submenu | [17. Exporting Data](#17-exporting-data) |
+| Figure 56 | Export completion dialog | [17. Exporting Data](#17-exporting-data) |
+| Figure 57 | Vehicle Search dialog with a filtered result list | [18. Vehicle Search](#18-vehicle-search) |
+| Figure 58 | System Log Viewer window | [19. System Log Viewer](#19-system-log-viewer) |
+| Figure 59 | About dialog | [20. About Dialog](#20-about-dialog) |
 
 ---
 
@@ -332,7 +335,7 @@ The fourth correction module, **Trajectory Stitching**, works on trajectories yo
 
 ### Analysis Menu
 
-The Analysis menu has a **Noise** submenu (the same list as the right-click Noise Analysis submenu). **Jerk Analysis**, **Missing Data**, and **Internal Consistency** each run against whichever event is currently plotted when launched from this menu (running them against other events requires the right-click plot menu or Export Analysis — see [§8](#8-right-click-menu-on-the-plot) and [§17](#17-exporting-data)). **Platoon Consistency** and **Spectral Analysis** are visible but disabled — they're reserved placeholders for analysis modules that haven't been implemented yet. Full details in [§15](#15-analysis-menu--jerk-missing-data-internal-consistency).
+The Analysis menu has a **Noise** submenu (the same list as the right-click Noise Analysis submenu). **Jerk Analysis**, **Missing Data**, and **Internal Consistency** each run against whichever event is currently plotted when launched from this menu (running them against other events requires the right-click plot menu or Export Analysis — see [§8](#8-right-click-menu-on-the-plot) and [§17](#17-exporting-data)). **Platoon Consistency** and **Spectral Analysis** are visible but disabled — they're reserved placeholders for analysis modules that haven't been implemented yet. Full details in [§15](#15-analysis-menu--jerk-missing-data-internal-consistency-platoon-consistency-and-spectral-analysis).
 
 ![Analysis menu with the Noise submenu open](images/13-analysis-menu.png)
 
@@ -431,7 +434,7 @@ Opens a preview-only spline fitting window for a single trajectory, letting you 
 
 ### Noise Analysis
 
-**Jerk Analysis**, **Missing Data**, and **Internal Consistency** run the same analyses available from the Analysis menu's Noise submenu ([§15](#15-analysis-menu--jerk-missing-data-internal-consistency)), but scoped to whatever the right-click context implies — the clicked vehicle, your current selection, or every vehicle in the visible lane for "All." This is an important distinction from the Analysis menu: launching an analysis from there always runs against **every vehicle in the entire event**, regardless of lane or selection, while launching it here always runs against the **current context's vehicles in the current lane only**. **Platoon Consistency** is present but disabled — reserved for a not-yet-implemented module.
+**Jerk Analysis**, **Missing Data**, and **Internal Consistency** run the same analyses available from the Analysis menu's Noise submenu ([§15](#15-analysis-menu--jerk-missing-data-internal-consistency-platoon-consistency-and-spectral-analysis)), but scoped to whatever the right-click context implies — the clicked vehicle, your current selection, or every vehicle in the visible lane for "All." This is an important distinction from the Analysis menu: launching an analysis from there always runs against **every vehicle in the entire event**, regardless of lane or selection, while launching it here always runs against the **current context's vehicles in the current lane only**. **Platoon Consistency** is present but disabled — reserved for a not-yet-implemented module.
 
 ![Noise Analysis submenu expanded](images/18-context-menu-noise-analysis.png)
 
@@ -850,19 +853,21 @@ To review a stitch, start Basic Stitching on the stitched trajectory and press *
 
 ---
 
-## 15. Analysis Menu — Jerk, Missing Data, Internal Consistency
+## 15. Analysis Menu — Jerk, Missing Data, Internal Consistency, Platoon Consistency, and Spectral Analysis
 
-Jerk Analysis, Missing Data, and Internal Consistency — found under **Analysis → Noise** — share a common structure: a parameter dialog, a background computation with a progress bar, and a results view whose contents and arrangement depend on how you launched it.
+Jerk Analysis, Missing Data, Internal Consistency, Platoon Consistency, and Spectral Analysis — found under **Analysis → Noise** — share a common structure: a parameter dialog, a background computation with a progress bar, and a results view whose contents and arrangement depend on how you launched it.
 
 ### 15.1 The Shared Pattern
 
 | Launched from | Button | Scope | Result |
 |---|---|---|---|
-| **Analysis → Noise** (top-level) | OK | Every vehicle in the currently plotted event | A box-plot summary (Jerk, Missing Data) or statistics table (Internal Consistency) |
-| **Right-click → Noise Analysis** ([§8](#8-right-click-menu-on-the-plot)) | OK | Only the right-click context's vehicles — clicked, selected, or all-in-lane | A plain results table (Jerk, Missing Data) or a combined plot-and-table dialog (Internal Consistency) |
+| **Analysis → Noise** (top-level) | OK | Every vehicle in the currently plotted event | A box-plot summary (Jerk, Missing Data), statistics table (Internal Consistency, Platoon Consistency), or spectrum-and-table dialog (Spectral Analysis) |
+| **Right-click → Noise Analysis** ([§8](#8-right-click-menu-on-the-plot)) | OK | Only the right-click context's vehicles — clicked, selected, or all-in-lane | A plain results table (Jerk, Missing Data, Platoon Consistency) or a combined plot-and-table dialog (Internal Consistency). |
 | **File → Export → Export Analysis** ([§17](#17-exporting-data)) | Save | Every vehicle in each event you choose from the event selection list ([§11.1](#111-data--spline-fitting)) | Written straight to a CSV file — no results dialog shown |
 
-All three run their computation on a background thread so the dialog stays responsive while the progress bar advances. Removed (stitched-away) trajectories are left out, and gap fills and lane corrections are included as part of their trajectories ([§10](#10-changing-data-write-targets-and-row-status)).
+For Platoon Consistency, the scoped vehicles are analyzed as followers;
+
+All five analyses run their computation on a background thread so the dialog stays responsive while the progress bar advances. Removed (stitched-away) trajectories are left out, and gap fills and lane corrections are included as part of their trajectories ([§10](#10-changing-data-write-targets-and-row-status)).
 
 **Box plots.** The Jerk and Missing Data box plots, and the Advanced Statistics box plots ([§16](#16-advanced-statistics)), share one window: a grid with one box plot per metric. Hovering over a box shows its statistics (quartiles, median, and whiskers, which reach the furthest values within 1.5 times the interquartile range); values beyond the whiskers are drawn as outliers and labeled with the vehicle they came from on hover. **Save** writes the grid as an interactive HTML page ([§3](#saving-plots-as-interactive-html)).
 
@@ -923,6 +928,54 @@ Requires the `veh_dist_trav` column, which is always present since it's required
 
 *Figure 46 Internal Consistency combined results dialog*
 
+### 15.5 Platoon Consistency
+
+This analysis checks whether the spacing between a leader and follower agrees with their recorded speeds: it reconstructs spacing from the difference between the two speeds, then compares that reconstructed value against the observed spacing. It also identifies unphysically small spacing and counts vehicle pair ID flips — cases where the same two vehicles exchange leader and follower roles over time.
+
+**Parameters:**
+
+- **Unphysical spacing threshold** (meters, default 5) — a continuous leader–follower segment counts as unphysical if any observed spacing is strictly below this value.
+- **Leader search distance threshold** (meters, default 50) — the maximum distance ahead to search for a leader in the same lane at the same timestamp. If your data already supplies a preceding vehicle ID and spacing, those values take priority and aren't limited by this search distance.
+
+Uses `veh_dist_trav` and `lane_id` to find leaders when no valid supplied assignment is available. The `veh_speed` column is needed for spacing-bias calculations; missing speeds leave spacing metrics available but limit how much of a segment can be compared.
+
+- **Top-level** (Analysis → Noise → Platoon Consistency): analyzes every follower in the currently plotted event on a background thread, then opens a results table. Each row is one continuous leader–follower segment, with its time range, sample count, minimum spacing, and minimum/maximum/mean bias, RMSE bias, and RMSPE bias. The summary above the table shows ID flips and the number and percentage of segments with unphysical spacing.
+- **Right-click:** opens the same results table for the context's vehicles as followers. Leaders can still be any vehicle in the event, including vehicles outside your selection.
+- **Export** (File → Export → Export Analysis → Platoon Consistency): writes a selection summary followed by the segment table straight to CSV across every selected event. The results dialog's **Save CSV…** button saves the displayed results in the same format.
+
+Bias is reconstructed spacing minus observed spacing. **RMSPE is a ratio** — 0.1 means 10%, not 0.1%. **N/A** means a metric couldn't be calculated; **Valid bias samples** shows how many observations contributed to the bias statistics. None of these paths writes anything to the database.
+
+![Platoon Consistency results table](images/47-platoon-consistency-results.png)
+
+*Figure 47 Platoon Consistency results table*
+
+### 15.6 Spectral Analysis
+
+This analysis shows how a trajectory's speed or acceleration varies across frequencies: it transforms the recorded signal into a frequency spectrum, letting you inspect slow variations and faster oscillations separately. Each vehicle has its own spectrum and a table of the underlying Fourier coefficients and magnitudes.
+
+**Parameters:**
+
+- **Selected signal** — Speed (`veh_speed`, the default when available) or Acceleration (`veh_accel`). Only columns present in your dataset are selectable; if neither exists, the analysis can't be run.
+
+Requires at least two finite samples and a positive sampling interval for each trajectory. Missing signal values are omitted, and trajectories without enough usable data are skipped. Timing gaps and irregular samples use a mean time increment without interpolation, so their frequency axes should be treated as approximate.
+
+- **Top-level** (Analysis → Noise → Spectral Analysis): analyzes every vehicle in the currently plotted event on a background thread, regardless of lane or selection, then opens a combined spectrum-and-table dialog. Use the trajectory dropdown or **Previous** / **Next** buttons to move between vehicles; both tabs update together.
+- **Right-click:** not available — launch this analysis from the top-level Analysis menu.
+- **Export** (File → Export → Export Analysis → Spectral Analysis): writes every frequency bin for every analyzable vehicle across the selected events straight to CSV, including event ID, vehicle ID, frequency index, frequency, Fourier coefficient, and magnitude. None of these paths writes anything to the database.
+
+The **Spectrum** dropdown switches the plot between **Magnitude** (the default, raw Fourier magnitude), **Amplitude** (the size of each frequency component in the signal's units), and **Power Spectrum** (mean-square contribution per frequency bin, not power per Hz). The signal's mean remains at zero frequency. Your choice stays selected as you move between vehicles. **Save Plot…** exports the displayed spectrum as an SVG file.
+
+![Spectral Analysis magnitude spectrum](images/48-spectral-analysis-spectrum.png)
+
+*Figure 48 Spectral Analysis magnitude spectrum*
+
+The **Spectrum Table (all bins)** tab shows every frequency bin, including those beyond the plotted half-spectrum. Changing the Spectrum dropdown only changes the plot — the table and CSV exports always contain the raw Fourier coefficients and magnitudes. **Save Table…** saves all bins for the currently displayed vehicle to CSV; use Export Analysis when you need multiple events or vehicles.
+
+![Spectral Analysis all-bin results table](images/49-spectral-analysis-table.png)
+
+*Figure 49 Spectral Analysis all-bin results table*
+
+
 ---
 
 ## 16. Advanced Statistics
@@ -938,9 +991,9 @@ Leaders and followers are always identified from **every** trajectory of the eve
 
 ### 16.1 Parameters
 
-![Advanced Statistics parameter dialog](images/47-advanced-statistics-dialog.png)
+![Advanced Statistics parameter dialog](images/50-advanced-statistics-dialog.png)
 
-*Figure 47 Advanced Statistics parameter dialog*
+*Figure 50 Advanced Statistics parameter dialog*
 
 - **Minimum time in new lane** (s, default 1) — a move to another lane counts as a lane change only when the vehicle stays in the new lane at least this long. Shorter flips are ignored, so a vehicle flickering between two lanes and settling where it started has made no lane change.
 - **Maximum leader / follower gap** (m, default "No limit") — a vehicle further than this ahead (behind) in the same lane is not counted as a leader (follower).
@@ -963,9 +1016,9 @@ A gap with no vehicle on one side is left out of the statistics.
 
 ### 16.3 The Results Table
 
-![Advanced Statistics results table](images/48-advanced-statistics-table.png)
+![Advanced Statistics results table](images/51-advanced-statistics-table.png)
 
-*Figure 48 Advanced Statistics results table*
+*Figure 51 Advanced Statistics results table*
 
 The table has one row per reported vehicle, ordered by vehicle ID, followed by a bold summary row, **All**, over every vehicle in the table. Hover over a column header for the statistic's full name and definition. Values that can't be computed — no leader, no lane change, or no `veh_speed` column — show as N/A.
 
@@ -997,13 +1050,13 @@ Q1 and Q3 are the first and third quartiles (25th and 75th percentiles). In the 
 
 **Generate Plots** opens a list of the quantities with the full set of statistics — Speed, Leader Gap, Follower Gap, Accepted Gap Space Before Lane Change, Front Gap After Lane Change, and Rear Gap After Lane Change. Check any number of them and click **Confirm** to open one box plot per quantity, each built from the samples of every vehicle in the table, with outliers labeled by vehicle and time ([§15.1](#151-the-shared-pattern)).
 
-![Generate Plots variable selection](images/49-generate-plots-dialog.png)
+![Generate Plots variable selection](images/52-generate-plots-dialog.png)
 
-*Figure 49 Generate Plots variable selection*
+*Figure 52 Generate Plots variable selection*
 
-![Advanced Statistics box plots](images/50-advanced-statistics-box-plots.png)
+![Advanced Statistics box plots](images/53-advanced-statistics-box-plots.png)
 
-*Figure 50 Advanced Statistics box plots*
+*Figure 53 Advanced Statistics box plots*
 
 ---
 
@@ -1033,19 +1086,19 @@ Lets you export a subset of columns for a single event:
 
 A note in the dialog reminds you that the resulting file only contains the selected columns for one event and **cannot be re-imported** back into TRACES — this path is for taking a slice of data out to another tool, not for round-tripping.
 
-![Export Selected dialog](images/51-export-selected-dialog.png)
+![Export Selected dialog](images/54-export-selected-dialog.png)
 
-*Figure 51 Export Selected dialog*
+*Figure 54 Export Selected dialog*
 
 ### 17.3 Export Analysis
 
-Runs Jerk Analysis, Missing Data, or Internal Consistency ([§15](#15-analysis-menu--jerk-missing-data-internal-consistency)) purely to produce a CSV — no results dialog is shown, and nothing is written to the database.
+Runs Jerk Analysis, Missing Data, or Internal Consistency ([§15](#15-analysis-menu--jerk-missing-data-internal-consistency-platoon-consistency-and-spectral-analysis)) purely to produce a CSV — no results dialog is shown, and nothing is written to the database.
 
 Choosing an Export Analysis item first opens the [event selection list](#111-data--spline-fitting) so you can pick one or more events, then opens that module's parameter dialog with a **Save** button in place of OK. The analysis runs across every vehicle in each selected event.
 
-![Export Analysis submenu](images/52-export-analysis-submenu.png)
+![Export Analysis submenu](images/55-export-analysis-submenu.png)
 
-*Figure 52 Export Analysis submenu*
+*Figure 55 Export Analysis submenu*
 
 Results of the other modules are saved from their own windows: the Spline Fit Statistics table ([§11](#11-data-menu--spline-fitting)), the shockwave results table ([§9.3](#93-shockwave)), and the Advanced Statistics table ([§16](#16-advanced-statistics)) each have a Save button.
 
@@ -1053,9 +1106,9 @@ Results of the other modules are saved from their own windows: the Spline Fit St
 
 Every export path — All, Selected, or Analysis — ends with a confirmation dialog reporting success (including the number of records written, for Export All/Selected) or an error message if something went wrong.
 
-![Export completion dialog](images/53-export-complete-dialog.png)
+![Export completion dialog](images/56-export-complete-dialog.png)
 
-*Figure 53 Export completion dialog*
+*Figure 56 Export completion dialog*
 
 ---
 
@@ -1072,9 +1125,9 @@ Because it's modeless, it stays open alongside the plot rather than blocking int
 
 **What happens on selection:** if the vehicle already has loaded data in the currently displayed lane, it's selected and framed immediately. If it's on a different lane, TRACES finds the lane where that vehicle first appears, switches to it, then selects and frames the vehicle there. Framing snaps the time and distance sliders to the vehicle's exact trajectory extent (no padding) — the slider *ranges* only expand if the trajectory falls completely outside the current view, so you don't lose your broader context unnecessarily. The found vehicle becomes the sole selection, dimming every other trajectory.
 
-![Vehicle Search dialog with a filtered result list](images/54-vehicle-search-dialog.png)
+![Vehicle Search dialog with a filtered result list](images/57-vehicle-search-dialog.png)
 
-*Figure 54 Vehicle Search dialog with a filtered result list*
+*Figure 57 Vehicle Search dialog with a filtered result list*
 
 ---
 
@@ -1086,9 +1139,9 @@ The viewer displays `traces.log`, the same file the [Import dialog](#42-importin
 
 If the log file is cleared out from under it — for instance, the Import dialog clears it at the start of each new import — the viewer detects the file shrinking and clears its own display to match, then continues appending from there.
 
-![System Log Viewer window](images/55-log-viewer.png)
+![System Log Viewer window](images/58-log-viewer.png)
 
-*Figure 55 System Log Viewer window*
+*Figure 58 System Log Viewer window*
 
 ---
 
@@ -1096,9 +1149,9 @@ If the log file is cleared out from under it — for instance, the Import dialog
 
 **File → About** shows the TRACES logo, the version number, and a summary of the application's purpose, features, and requirements. Click **Close** to return to the application.
 
-![About dialog](images/56-about-dialog.png)
+![About dialog](images/59-about-dialog.png)
 
-*Figure 56 About dialog*
+*Figure 59 About dialog*
 
 ---
 

@@ -1,100 +1,161 @@
-import csv
-import os
-import tempfile
+"""Database-only catalog and event selection UI."""
+from PyQt6.QtCore import QThread, pyqtSignal
+from PyQt6.QtWidgets import (QAbstractItemView, QDialog, QDialogButtonBox,
+                             QInputDialog, QLabel, QLineEdit, QProgressBar, QPushButton,
+                             QTableWidget, QTableWidgetItem, QVBoxLayout)
 
-import pandas as pd
-from sqlalchemy import create_engine
-from PyQt6.QtWidgets import QInputDialog
+from .database_catalog import (CatalogCanceled, DatabaseCatalog, available_tables,
+                               open_database)
 
 
-def process_postgres_csv(parent_widget, file_path: str) -> str:
-    """Export one ISU file/route pair, converting milliseconds to seconds.
+class _CatalogWorker(QThread):
+    log_signal = pyqtSignal(str, bool)
+    progress_signal = pyqtSignal(int)
 
-    Milepost is converted from miles to meters; speed remains in km/h.
-    Catalog duration remains
-    stored in milliseconds; only its displayed value is converted.
+    def __init__(self, catalog, event_id=None):
+        super().__init__()
+        self.catalog = catalog
+        self.interrupt_flag = False
+        self.error = None
+        self.event_id = event_id
+        self.result = None
+
+    def run(self):
+        try:
+            if self.event_id is None:
+                self.catalog.build(self)
+            else:
+                self.catalog.prepare_events(self)
+                self.result = self.catalog.export_event(self.event_id)
+        except Exception as exc:
+            self.error = exc
+
+
+class _CatalogProgress(QDialog):
+    def __init__(self, worker, parent, title='Loading Database Event Catalog'):
+        super().__init__(parent)
+        self.worker = worker
+        self.setWindowTitle(title)
+        self.setMinimumWidth(500)
+        layout = QVBoxLayout(self)
+        self.label = QLabel('Reading source data and applying JSON mappings...')
+        self.label.setWordWrap(True)
+        layout.addWidget(self.label)
+        progress = QProgressBar()
+        progress.setRange(0, 0)
+        layout.addWidget(progress)
+        self.cancel = QPushButton('Cancel')
+        self.cancel.clicked.connect(self.request_cancel)
+        layout.addWidget(self.cancel)
+        worker.log_signal.connect(lambda message, _: self.label.setText(message))
+        worker.finished.connect(self.accept)
+
+    def request_cancel(self):
+        self.worker.interrupt_flag = True
+        self.cancel.setEnabled(False)
+        self.label.setText('Canceling after the current database batch...')
+
+    def reject(self):
+        if self.worker.isRunning():
+            self.request_cancel()
+        else:
+            super().reject()
+
+    def closeEvent(self, event):
+        if self.worker.isRunning():
+            self.request_cancel()
+            event.ignore()
+        else:
+            event.accept()
+
+
+def _choose_event(parent, catalog):
+    dialog = QDialog(parent)
+    dialog.setWindowTitle('Select Database Event')
+    dialog.resize(900, 450)
+    layout = QVBoxLayout(dialog)
+    label = QLabel(f'Catalog: {catalog.schema}.{catalog.catalog_name}\n'
+                   'Select one event to import. Times and duration are in seconds.')
+    label.setWordWrap(True)
+    layout.addWidget(label)
+    columns = ('event_id', 'event_name', 'row_count', 'vehicle_count',
+               'start_time', 'end_time', 'duration')
+    table = QTableWidget(len(catalog.rows), len(columns))
+    table.setHorizontalHeaderLabels(['Event ID', 'Event name', 'Rows', 'Vehicles',
+                                    'Start (s)', 'End (s)', 'Duration (s)'])
+    table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+    table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+    table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+    for index, row in enumerate(catalog.rows):
+        for col, name in enumerate(columns):
+            value = row[name]
+            table.setItem(index, col, QTableWidgetItem('' if value is None else str(value)))
+    table.resizeColumnsToContents()
+    table.selectRow(0)
+    layout.addWidget(table)
+    buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok |
+                               QDialogButtonBox.StandardButton.Cancel)
+    buttons.accepted.connect(dialog.accept)
+    buttons.rejected.connect(dialog.reject)
+    table.doubleClicked.connect(lambda _: dialog.accept())
+    layout.addWidget(buttons)
+    if dialog.exec() != QDialog.DialogCode.Accepted or table.currentRow() < 0:
+        return None
+    return catalog.rows[table.currentRow()]['event_id']
+
+
+def process_postgres_csv(parent_widget, file_path, config, config_name, log_fn):
+    """Choose a source table, persist a JSON-derived catalog, and stage one event.
+
+    Returns (normalized CSV path, identity config), or None on cancellation.
+    The URI and JSON files and the source trajectory table remain unchanged.
     """
-    engine = None
     try:
-        with open(file_path, 'r', newline='', encoding='utf-8') as f:
-            uri = next(csv.reader(f))[0].strip()
-
-        print("Connecting to Postgres...")
-        engine = create_engine(uri)
-        catalog_df = pd.read_sql(
-            '''SELECT "vtti.file_id", "ROUTE_ID", trip_duration
-               FROM public.catalog_table
-               ORDER BY "vtti.file_id", "ROUTE_ID";''',
-            engine,
-        )
-        if catalog_df.empty:
-            print("No trips found in public.catalog_table.")
-            return ""
-
-        # Number labels to associate each selection with exactly one catalog row.
-        options = [
-            f"{index + 1}. File: {file_id} | Route: {route_id} | "
-            f"Duration: {duration / 1000.0:.1f}s"
-            for index, (file_id, route_id, duration) in enumerate(
-                catalog_df.itertuples(index=False, name=None)
-            )
-        ]
-        item, ok = QInputDialog.getItem(
-            parent_widget, "Database Selection",
-            "Select a file and route to import:", options, 0, False,
-        )
-        if not ok or not item:
-            return ""
-
-        selected = catalog_df.iloc[options.index(item)]
-        file_id = selected['vtti.file_id']
-        route_id = selected['ROUTE_ID']
-        # Use native Python values for psycopg2 parameters.
-        params = {
-            "file_id": None if pd.isna(file_id) else int(file_id),
-            "route_id": None if pd.isna(route_id) else str(route_id),
-        }
-        print(f"Querying C6 for file {params['file_id']}, route {params['route_id']}...")
-        query = '''
-            SELECT
-                "TARGET_ID" AS veh_id,
-                "vtti.timestamp" / 1000.0 AS veh_time,
-                "SPEED_KMPH" AS veh_speed,
-                NULL::double precision AS veh_accel,
-                "MILEPOST" * 1609.344 AS veh_dist_trav,
-                COALESCE(
-                    "vtti.timestamp" - LAG("vtti.timestamp") OVER (
-                        PARTITION BY "TARGET_ID"
-                        ORDER BY "vtti.timestamp"
-                    ),
-                    0
-                ) / 1000.0 AS dt
-            FROM public.c6
-            WHERE "vtti.file_id" IS NOT DISTINCT FROM %(file_id)s
-              AND "ROUTE_ID" IS NOT DISTINCT FROM %(route_id)s
-            ORDER BY veh_time, veh_id;
-        '''
-        trip_data = pd.read_sql(query, engine, params=params)
-
-        # Reserve 9999 for ego without merging it with a real target ID.
-        target_ids = pd.to_numeric(trip_data['veh_id'], errors='coerce')
-        if target_ids.eq(9999).any():
-            raise ValueError(
-                "TARGET_ID 9999 already exists in this trip; "
-                "choose another reserved ID for ego."
-            )
-        trip_data['veh_id'] = trip_data['veh_id'].replace({'ego': 9999})
-
-        # Preserve the existing five-column order and append dt.
-        # No acceleration mapping was specified, so leave that column empty.
-        temp_fd, temp_csv = tempfile.mkstemp(suffix=".csv")
-        os.close(temp_fd)
-        trip_data.to_csv(temp_csv, index=False)
-        print(f"Trajectory CSV created at: {temp_csv}")
-        return temp_csv
-    except Exception as e:
-        print(f"Postgres Helper Error: {e}")
-        return ""
+        engine = open_database(file_path, password_prompt=lambda: QInputDialog.getText(
+            parent_widget, 'PostgreSQL Password', 'Enter your PostgreSQL password:',
+            QLineEdit.EchoMode.Password))
+    except CatalogCanceled:
+        return None
+    catalog = None
+    try:
+        tables = available_tables(engine)
+        if not tables:
+            raise ValueError('No source tables are available in this database.')
+        labels = [f'{schema}.{name}' for schema, name in tables]
+        selected, ok = QInputDialog.getItem(
+            parent_widget, 'Select Source Table',
+            'Choose a table whose column order matches the JSON source indices:',
+            labels, 0, False)
+        if not ok or not selected:
+            return None
+        schema, name = tables[labels.index(selected)]
+        catalog = DatabaseCatalog(engine, schema, name, config, config_name)
+        worker = _CatalogWorker(catalog)
+        worker.log_signal.connect(log_fn)
+        progress = _CatalogProgress(worker, parent_widget)
+        worker.start()
+        progress.exec()
+        worker.wait()
+        if isinstance(worker.error, CatalogCanceled):
+            return None
+        if worker.error is not None:
+            raise worker.error
+        event_id = _choose_event(parent_widget, catalog)
+        if event_id is None:
+            return None
+        export_worker = _CatalogWorker(catalog, event_id=event_id)
+        export_worker.log_signal.connect(log_fn)
+        export_progress = _CatalogProgress(export_worker, parent_widget,
+                                          'Preparing Selected Database Event')
+        export_worker.start()
+        export_progress.exec()
+        export_worker.wait()
+        if isinstance(export_worker.error, CatalogCanceled):
+            return None
+        if export_worker.error is not None:
+            raise export_worker.error
+        return export_worker.result
     finally:
-        if engine is not None:
-            engine.dispose()
+        if catalog is not None:
+            catalog.close()
+        engine.dispose()

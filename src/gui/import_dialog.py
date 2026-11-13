@@ -9,6 +9,7 @@ from data_import.base_process import BaseProcess
 from data_import.postgres_helper import process_postgres_csv
 from utils import get_user_data_path, last_dialog_dir, remember_dialog_path
 import importlib
+from copy import deepcopy
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -731,44 +732,62 @@ class ImportDialog(QDialog):
         event.accept()
 
     def _select_db_input(self):
-        """Handle database URI file selection and processing."""
-        
-        # 1. Build the exact same file types string as the normal input button
-        file_types = ";;".join(
-            f"{ft} (*.{entry['config']['file_ext']})"
-            for ft, entry in self._configs.items()
-        )
-        
-        # 2. Open the file dialog, allowing the user to select the URI CSV AND the config type
-        file_path, selected_filter = QFileDialog.getOpenFileName(
-            self,
-            "Select DB URI File",
-            "",
-            file_types
-        )
-        
-        if file_path:
-            # 3. Extract the config type exactly like the original code does
-            config_type = selected_filter.split(" (")[0]
-            
+        """Choose URI and JSON via the file-type dropdown, then a source table."""
+        file_types = ";;".join(f"{name} (*.csv)" for name in self._configs)
+        uri_path, selected_filter = QFileDialog.getOpenFileName(
+            self, "Select DB URI File", last_dialog_dir(), file_types)
+        if not uri_path:
+            return
+        remember_dialog_path(uri_path)
+        config_type = selected_filter.split(" (")[0]
+        try:
+            if config_type not in self._configs:
+                raise ValueError("Choose a JSON configuration in the file-type dropdown.")
+            config = deepcopy(self._configs[config_type]["config"])
+            # The database catalog uses the existing CSV mapping implementation.
+            class_path = config.get("class", "data_import.csv_process.CsvProcess")
+            if class_path != "data_import.csv_process.CsvProcess":
+                raise ValueError("Select a CSV column-mapping JSON for database imports.")
+            processor_class = self._resolve_processor_class(class_path)
+            if processor_class is None or processor_class().check_configuration(deepcopy(config), self._log_message):
+                return
             self._log_message("Info: Connecting to database...", True)
-            QApplication.processEvents()
-            # Call the external helper
-            temp_path = process_postgres_csv(self, file_path)
-            
-            if temp_path:
-                # 4. Carry the selected JSON config and temp path into the main process
-                self._input_path = temp_path
-                self._selected_file_type = config_type
-                
-                # Automatically set an output path based on the chosen config
-                self._output_path = str(Path(temp_path).with_suffix(".sqlite"))
-                
-                self._log_message(f"Info: Database query complete. Data staged for {config_type}.", True)
-                self._log_message(f"Info: Output file set to: {self._output_path}", True)
-                self._log_message("Info: You can change the output file.", True)
-                
-                self._output_button.setEnabled(True)
-                self._import_button.setEnabled(True)
-            else:
-                self._log_message("Warning: Database selection canceled or failed.", False)
+            result = process_postgres_csv(self, uri_path, config, config_type + ".json",
+                                          self._log_message)
+            if result is None:
+                self._log_message("Info: Database event selection canceled.", True)
+                return
+            temp_path, normalized_config = result
+        except Exception as exc:
+            self._log_message(f"Error: Database import failed: {exc}", False)
+            return
+
+        default_output = str(Path(uri_path).with_name(config_type + ".sqlite"))
+        output_path, _ = QFileDialog.getSaveFileName(
+            self, "Save Selected Database Event as SQLite", default_output,
+            "SQLite Database (*.sqlite)")
+        if not output_path:
+            Path(temp_path).unlink(missing_ok=True)
+            return
+        remember_dialog_path(output_path)
+        # DB imports run independently of _configs and the CSV input selector.
+        processor = processor_class()
+        if processor.check_configuration(normalized_config, self._log_message):
+            Path(temp_path).unlink(missing_ok=True)
+            return
+        self._input_path = temp_path
+        self._output_path = output_path
+        self._selected_file_type = ""
+        self._import_completed = False
+        self._input_button.setEnabled(False)
+        self._db_button.setEnabled(False)
+        self._output_button.setEnabled(False)
+        self._import_button.setEnabled(False)
+        self._interrupt_button.setEnabled(True)
+        self._log_message(f"Info: Importing selected database event into {output_path}.", True)
+        self._worker_thread = _ImportWorkerThread(processor, temp_path, output_path)
+        self._worker_thread.log_signal.connect(self._log_message)
+        self._worker_thread.progress_signal.connect(self._progress_bar.setValue)
+        self._worker_thread.finished.connect(lambda: self._db_button.setEnabled(True))
+        self._worker_thread.finished.connect(self._finish_import)
+        self._worker_thread.start()
