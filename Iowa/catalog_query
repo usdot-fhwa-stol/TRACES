@@ -1,0 +1,9 @@
+-- Run in the isu_c6 database. Assumes the source table is public.c6.
+-- trip_duration uses the original units of "vtti.timestamp".
+CREATE TABLE public.catalog_table AS
+SELECT
+    "vtti.file_id",
+    "ROUTE_ID",
+    MAX("vtti.timestamp") - MIN("vtti.timestamp") AS trip_duration
+FROM public.c6
+GROUP BY "vtti.file_id", "ROUTE_ID";
