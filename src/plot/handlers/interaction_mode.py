@@ -73,8 +73,8 @@ class InteractionModeHandler:
         return False
 
     def on_right_click(self, view_box, ev) -> bool:
-        """Return True to suppress the context menu. Reserved for
-        Shockwave's undo-on-right-click; no current mode overrides this."""
+        """Return True to suppress the context menu. 
+        Shockwave and Stitching handlers override this."""
         return False
 
     # ── TimeSpacePlotWidget-originated events ───────────────────────────

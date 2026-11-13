@@ -5,7 +5,9 @@ System standard units:
     Length      : m       (meters)
     Speed       : m/s     (meters per second)
     Acceleration: m/s^2   (meters per second squared)
-    Unitless    : ""      (integer identifiers, text columns)
+    Jerk        : m/s^3   (meters per second cubed)
+    Unitless    : ""      (integer identifiers, text columns, and
+                           geographic coordinates in decimal degrees)
 """
 
 
@@ -36,12 +38,15 @@ class Units:
         "y_map_loc"         : "m",
         "x_frenet_loc"      : "m",
         "y_frenet_loc"      : "m",
-        "x_map_origin"      : "m",
-        "y_map_origin"      : "m",
+        "x_map_origin"      : "",      # degrees (longitude) – not converted by Units
+        "y_map_origin"      : "",      # degrees (latitude) – not converted by Units
         "veh_lat"           : "",      # degrees – not converted by Units
         "veh_lon"           : "",      # degrees – not converted by Units
         "veh_speed"         : "m/s",
         "veh_accel"         : "m/s^2",
+        "veh_jerk"          : "m/s^3",
+        "veh_spacing"       : "m",
+        "veh_time_headway"  : "s",
         "veh_length"        : "m",
         "veh_width"         : "m",
         "veh_automation"    : "",
@@ -97,6 +102,15 @@ class Units:
         "ft/s^2": {
             "ft/s^2" : 1.0,
             "m/s^2"  : 0.304_8,          # 1 ft/s² → m/s²
+        },
+        # ── jerk ──────────────────────────────────────────────────────────────
+        "m/s^3": {
+            "m/s^3"  : 1.0,
+            "ft/s^3" : 3.280_839_895,     # 1 m/s³ → ft/s³
+        },
+        "ft/s^3": {
+            "ft/s^3" : 1.0,
+            "m/s^3"  : 0.304_8,          # 1 ft/s³ → m/s³
         },
         # ── unitless / text (no conversion applied) ───────────────────────────
         "": {

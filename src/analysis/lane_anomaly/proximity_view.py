@@ -41,8 +41,5 @@ class ProximityUI(AnomalyTypeUI):
                 + (f", minimum spacing {spacing:.2f} m" if spacing is not None else "")
                 + (" -- fixed" if anomaly.is_fixed else ""))
 
-    def vehicle_label(self, anomaly: LaneAnomaly, veh_id: int, index: int) -> str:
-        return f"Veh {veh_id} ({'follower' if index == 0 else 'leader'})"
-
 
 ANOMALY_UI = ProximityUI(PROXIMITY_KEY)
