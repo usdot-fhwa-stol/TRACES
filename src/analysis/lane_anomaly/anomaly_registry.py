@@ -101,7 +101,9 @@ class AnomalyType(ABC):
     def fix_target_lanes(self, conn: sqlite3.Connection,
                          anomaly: LaneAnomaly) -> List[int]:
         """Lanes a vehicle may be moved to. Default: every lane of the
-        event -- a lane that isn't a neighbor may still be the right one."""
+        event -- a lane that isn't a neighbor may still be the right one.
+        The review panel's plot draws the other traffic of each of these
+        lanes from the start (anomaly_ui.traffic_lanes)."""
         return [int(l) for l in event_lanes(conn, anomaly.event_id)]
 
     def default_target_lane(self, conn: sqlite3.Connection, anomaly: LaneAnomaly,

@@ -1,117 +1,147 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 640" font-family="Helvetica, Arial, sans-serif">
-  <rect x="0" y="0" width="1040" height="640" fill="#ffffff"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 720" font-family="Helvetica, Arial, sans-serif">
+  <rect x="0" y="0" width="1040" height="720" fill="#ffffff"/>
 
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M0,0 L10,5 L0,10 z" fill="#555555"/>
     </marker>
+    <marker id="arrow-data" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#4f7f4f"/>
+    </marker>
   </defs>
 
-  <text x="520" y="26" text-anchor="middle" font-size="18" font-weight="700" fill="#1a1a1a">Trajectory Tools — Module Architecture</text>
+  <text x="520" y="28" text-anchor="middle" font-size="18" font-weight="700" fill="#1a1a1a">TRACES 1.0 — Module Architecture</text>
 
-  <!-- Connectors (drawn first so boxes and labels sit on top) -->
+  <!-- ── Connectors (drawn first so boxes and labels sit on top) ───────────── -->
+
+  <!-- Package dependencies: solid, pointing at the package imported -->
   <g stroke="#555555" stroke-width="1.5" fill="none">
-    <!-- Entry -> GUI -->
-    <line x1="520" y1="96" x2="520" y2="128" marker-end="url(#arrow)"/>
-
-    <!-- GUI fan-out -->
-    <line x1="520" y1="194" x2="130" y2="228" marker-end="url(#arrow)"/>
-    <line x1="520" y1="194" x2="385" y2="228" marker-end="url(#arrow)"/>
-    <line x1="520" y1="194" x2="635" y2="228" marker-end="url(#arrow)"/>
-    <line x1="520" y1="194" x2="880" y2="228" marker-end="url(#arrow)"/>
-
-    <!-- Row3 -> DB -->
-    <line x1="150" y1="334" x2="250" y2="442" marker-end="url(#arrow)"/>
-    <line x1="330" y1="334" x2="380" y2="442" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
-    <line x1="560" y1="334" x2="410" y2="442" marker-end="url(#arrow)"/>
-    <polyline points="800,334 800,420 300,420 300,442" marker-end="url(#arrow)"/>
-
-    <!-- Row3 -> Output -->
-    <polyline points="440,334 440,360 620,360 620,442" marker-end="url(#arrow)"/>
-    <line x1="710" y1="334" x2="750" y2="442" marker-end="url(#arrow)"/>
-    <line x1="950" y1="334" x2="850" y2="442" marker-end="url(#arrow)"/>
-
-    <!-- Shockwave: comp -.-> plot (unlabeled here; see legend) -->
-    <line x1="500" y1="282" x2="530" y2="282" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+    <line x1="340" y1="94"  x2="340" y2="118" marker-end="url(#arrow)"/>   <!-- traces.py -> gui -->
+    <line x1="340" y1="190" x2="340" y2="216" marker-end="url(#arrow)"/>   <!-- gui -> plot -->
+    <line x1="340" y1="288" x2="340" y2="314" marker-end="url(#arrow)"/>   <!-- plot -> analysis -->
+    <line x1="185" y1="414" x2="185" y2="440" marker-end="url(#arrow)"/>   <!-- analysis -> ui_kit -->
+    <line x1="495" y1="414" x2="495" y2="440" marker-end="url(#arrow)"/>   <!-- analysis -> data_import -->
+    <line x1="185" y1="526" x2="185" y2="552" marker-end="url(#arrow)"/>   <!-- ui_kit -> utils -->
+    <line x1="495" y1="526" x2="495" y2="552" marker-end="url(#arrow)"/>   <!-- data_import -> utils -->
   </g>
 
-  <!-- Edge labels, each on a white halo so any connector crossing beneath it is masked -->
-  <g font-size="11.5" fill="#444444" text-anchor="middle">
-    <rect x="130" y="383" width="140" height="18" fill="#ffffff"/>
-    <text x="200" y="396">import_data()</text>
-
-    <rect x="350" y="373" width="160" height="18" fill="#ffffff"/>
-    <text x="430" y="386">read / ALTER TABLE</text>
-
-    <rect x="555" y="343" width="60" height="16" fill="#ffffff"/>
-    <text x="585" y="355">reads</text>
-
-    <rect x="600" y="403" width="100" height="16" fill="#ffffff"/>
-    <text x="650" y="415">raw events</text>
+  <!-- Database access: dashed green -->
+  <g stroke="#4f7f4f" stroke-width="1.5" fill="none" stroke-dasharray="6,4">
+    <polyline points="640,176 865,176 865,214" marker-end="url(#arrow-data)"/>      <!-- gui: open, copy, read for export -->
+    <line x1="718" y1="258" x2="642" y2="258" marker-end="url(#arrow-data)"/>       <!-- DB -> plot: reads -->
+    <line x1="642" y1="352" x2="718" y2="352" marker-start="url(#arrow-data)" marker-end="url(#arrow-data)"/> <!-- analysis <-> DB -->
+    <polyline points="640,470 685,470 685,410 718,410" marker-end="url(#arrow-data)"/> <!-- data_import -> DB -->
   </g>
+
+  <!-- Results to output: solid grey -->
+  <g stroke="#555555" stroke-width="1.5" fill="none">
+    <polyline points="640,396 702,396 702,590 718,590" marker-end="url(#arrow)"/>      <!-- analysis -> results -->
+    <polyline points="640,134 1025,134 1025,590 1012,590" marker-end="url(#arrow)"/>   <!-- gui -> CSV export -->
+  </g>
+
+  <!-- Connector labels on white halos -->
+  <g font-size="11" fill="#3d6b3d" text-anchor="middle">
+    <rect x="676" y="158" width="150" height="15" fill="#ffffff"/>
+    <text x="751" y="170">open · copy · read</text>
+
+    <rect x="650" y="240" width="60" height="15" fill="#ffffff"/>
+    <text x="680" y="252">reads</text>
+
+    <rect x="646" y="326" width="68" height="28" fill="#ffffff"/>
+    <text x="680" y="337">results ·</text>
+    <text x="680" y="350">corrections</text>
+
+    <rect x="643" y="451" width="40" height="15" fill="#ffffff"/>
+    <text x="663" y="463">import</text>
+  </g>
+  <g font-size="11" fill="#444444" text-anchor="middle">
+    <rect x="766" y="116" width="170" height="15" fill="#ffffff"/>
+    <text x="851" y="128">Export All / Selected (CSV)</text>
+  </g>
+
+  <!-- ── Boxes ─────────────────────────────────────────────────────────────── -->
 
   <!-- Entry -->
-  <rect x="420" y="46" width="200" height="50" rx="10" fill="#ffffff" stroke="#333333" stroke-width="1.5"/>
-  <text x="520" y="68" text-anchor="middle" font-size="14" font-weight="700" fill="#1a1a1a">trajectory_tools.py</text>
-  <text x="520" y="84" text-anchor="middle" font-size="11" fill="#666666">entry point</text>
+  <rect x="240" y="48" width="200" height="46" rx="10" fill="#ffffff" stroke="#333333" stroke-width="1.5"/>
+  <text x="340" y="69" text-anchor="middle" font-size="14" font-weight="700" fill="#1a1a1a">traces.py</text>
+  <text x="340" y="85" text-anchor="middle" font-size="11" fill="#666666">entry point</text>
 
-  <!-- GUI -->
-  <rect x="320" y="130" width="400" height="64" rx="10" fill="#e8eef7" stroke="#3a6ea5" stroke-width="1.5"/>
-  <text x="520" y="156" text-anchor="middle" font-size="15" font-weight="700" fill="#1a1a1a">gui/</text>
-  <text x="520" y="174" text-anchor="middle" font-size="12" fill="#333333">MainWindow — menu bar · SQLite connection</text>
-
-  <!-- data_import -->
-  <rect x="20" y="230" width="220" height="104" rx="10" fill="#fdf3e3" stroke="#b8860b" stroke-width="1.5"/>
-  <text x="130" y="256" text-anchor="middle" font-size="14" font-weight="700" fill="#1a1a1a">data_import/</text>
-  <text x="130" y="276" text-anchor="middle" font-size="12" fill="#333333">BaseProcess subclasses</text>
-  <text x="130" y="292" text-anchor="middle" font-size="12" fill="#333333">(CsvProcess, ...)</text>
-
-  <!-- comp -->
-  <rect x="270" y="230" width="230" height="104" rx="10" fill="#fdf3e3" stroke="#b8860b" stroke-width="1.5"/>
-  <text x="385" y="252" text-anchor="middle" font-size="14" font-weight="700" fill="#1a1a1a">comp/</text>
-  <text x="385" y="270" text-anchor="middle" font-size="11.5" fill="#333333">BaseComp subclasses</text>
-  <text x="385" y="286" text-anchor="middle" font-size="11.5" fill="#333333">Jerk · Missing Data · Consistency</text>
-  <text x="385" y="302" text-anchor="middle" font-size="11.5" fill="#333333">Shockwave · Spline</text>
+  <!-- gui -->
+  <rect x="40" y="120" width="600" height="70" rx="10" fill="#e8eef7" stroke="#3a6ea5" stroke-width="1.5"/>
+  <text x="340" y="145" text-anchor="middle" font-size="15" font-weight="700" fill="#1a1a1a">gui/</text>
+  <text x="340" y="163" text-anchor="middle" font-size="12" fill="#333333">MainWindow — menus · DatabaseSession — open, copy, write targets · start screen</text>
+  <text x="340" y="179" text-anchor="middle" font-size="12" fill="#333333">import · export · event selection · log viewer · about dialogs</text>
 
   <!-- plot -->
-  <rect x="530" y="230" width="210" height="104" rx="10" fill="#fdf3e3" stroke="#b8860b" stroke-width="1.5"/>
-  <text x="635" y="256" text-anchor="middle" font-size="14" font-weight="700" fill="#1a1a1a">plot/</text>
-  <text x="635" y="276" text-anchor="middle" font-size="12" fill="#333333">TimeSpacePlotWidget</text>
-  <text x="635" y="292" text-anchor="middle" font-size="12" fill="#333333">+ InteractionModes</text>
+  <rect x="40" y="218" width="600" height="70" rx="10" fill="#e8eef7" stroke="#3a6ea5" stroke-width="1.5"/>
+  <text x="340" y="243" text-anchor="middle" font-size="15" font-weight="700" fill="#1a1a1a">plot/</text>
+  <text x="340" y="261" text-anchor="middle" font-size="12" fill="#333333">TimeSpacePlotWidget · CustomViewBox (right-click menu) · supporting plot dialogs</text>
+  <text x="340" y="277" text-anchor="middle" font-size="12" fill="#333333">handlers/ — interaction modes: Gap Headway · Shockwave · stitch selection</text>
 
-  <!-- ExportDialog -->
-  <rect x="770" y="230" width="220" height="104" rx="10" fill="#e8eef7" stroke="#3a6ea5" stroke-width="1.5"/>
-  <text x="880" y="256" text-anchor="middle" font-size="14" font-weight="700" fill="#1a1a1a">ExportDialog</text>
-  <text x="880" y="276" text-anchor="middle" font-size="12" fill="#333333">(gui/)</text>
-  <text x="880" y="292" text-anchor="middle" font-size="12" fill="#333333">raw events → CSV</text>
+  <!-- analysis -->
+  <rect x="40" y="316" width="600" height="98" rx="10" fill="#fdf3e3" stroke="#b8860b" stroke-width="1.5"/>
+  <text x="340" y="341" text-anchor="middle" font-size="15" font-weight="700" fill="#1a1a1a">analysis/</text>
+  <text x="340" y="359" text-anchor="middle" font-size="12" fill="#333333">BaseComp (Qt-free) · BaseAnalysisDialog · BaseAnalysisWorker · superseded-points helpers</text>
+  <text x="340" y="378" text-anchor="middle" font-size="12" fill="#333333">Analyses: Jerk · Missing Data · Internal Consistency · Spline · Shockwave · Advanced Statistics</text>
+  <text x="340" y="396" text-anchor="middle" font-size="12" fill="#333333">Corrections: Gap Interpolation · Manual Stitching · Lane-Level Anomalies (type registry)</text>
 
-  <!-- DB -->
-  <rect x="170" y="444" width="260" height="92" rx="14" fill="#eef5ee" stroke="#5a8f5a" stroke-width="1.5"/>
-  <text x="300" y="482" text-anchor="middle" font-size="14" font-weight="700" fill="#1a1a1a">SQLite database</text>
-  <text x="300" y="500" text-anchor="middle" font-size="12" fill="#333333">events + ranges</text>
+  <!-- ui_kit -->
+  <rect x="40" y="442" width="290" height="84" rx="10" fill="#e8eef7" stroke="#3a6ea5" stroke-width="1.5"/>
+  <text x="185" y="467" text-anchor="middle" font-size="15" font-weight="700" fill="#1a1a1a">ui_kit/</text>
+  <text x="185" y="485" text-anchor="middle" font-size="12" fill="#333333">stacked kinematic plots · box plots</text>
+  <text x="185" y="501" text-anchor="middle" font-size="12" fill="#333333">plot styles · interactive HTML export</text>
+  <text x="185" y="517" text-anchor="middle" font-size="12" fill="#333333">write-target row · branding</text>
+
+  <!-- data_import -->
+  <rect x="350" y="442" width="290" height="84" rx="10" fill="#f1edf7" stroke="#6f5a9e" stroke-width="1.5"/>
+  <text x="495" y="467" text-anchor="middle" font-size="15" font-weight="700" fill="#1a1a1a">data_import/</text>
+  <text x="495" y="485" text-anchor="middle" font-size="12" fill="#333333">BaseProcess · CsvProcess (JSON profiles)</text>
+  <text x="495" y="501" text-anchor="middle" font-size="12" fill="#333333">CsvAlgorithms (import functions) · Units</text>
+  <text x="495" y="517" text-anchor="middle" font-size="12" fill="#333333">db_utils — validation · event summaries</text>
+
+  <!-- utils -->
+  <rect x="40" y="554" width="600" height="56" rx="10" fill="#f1edf7" stroke="#6f5a9e" stroke-width="1.5"/>
+  <text x="340" y="578" text-anchor="middle" font-size="15" font-weight="700" fill="#1a1a1a">utils.py</text>
+  <text x="340" y="597" text-anchor="middle" font-size="12" fill="#333333">row-status codes and SQL filters · sampling-interval helpers · user-data paths</text>
+
+  <!-- Database -->
+  <rect x="720" y="216" width="290" height="216" rx="14" fill="#eef5ee" stroke="#5a8f5a" stroke-width="1.5"/>
+  <text x="865" y="243" text-anchor="middle" font-size="15" font-weight="700" fill="#1a1a1a">SQLite database</text>
+  <text x="865" y="268" text-anchor="middle" font-size="12" font-weight="700" fill="#333333">events</text>
+  <text x="865" y="284" text-anchor="middle" font-size="11.5" fill="#333333">configuration-driven columns</text>
+  <text x="865" y="300" text-anchor="middle" font-size="11.5" fill="#333333">+ imputed_status · traj_status</text>
+  <text x="865" y="316" text-anchor="middle" font-size="11.5" fill="#333333">+ calc_* · *_cal · *_error</text>
+  <text x="865" y="341" text-anchor="middle" font-size="12" font-weight="700" fill="#333333">ranges</text>
+  <text x="865" y="357" text-anchor="middle" font-size="11.5" fill="#333333">per-event summaries</text>
+  <text x="865" y="382" text-anchor="middle" font-size="12" font-weight="700" fill="#333333">side tables</text>
+  <text x="865" y="398" text-anchor="middle" font-size="11.5" fill="#333333">gaps · stitches · lane_anomalies</text>
+  <text x="865" y="414" text-anchor="middle" font-size="11.5" fill="#333333">lane_corrections · superseded_points</text>
 
   <!-- Output -->
-  <rect x="560" y="444" width="320" height="92" rx="10" fill="#f5f5f5" stroke="#333333" stroke-width="1.5"/>
-  <text x="720" y="482" text-anchor="middle" font-size="14" font-weight="700" fill="#1a1a1a">Result dialogs</text>
-  <text x="720" y="500" text-anchor="middle" font-size="12" fill="#333333">CSV / HTML export</text>
+  <rect x="720" y="556" width="290" height="68" rx="10" fill="#ffffff" stroke="#333333" stroke-width="1.5"/>
+  <text x="865" y="584" text-anchor="middle" font-size="14" font-weight="700" fill="#1a1a1a">Results and exports</text>
+  <text x="865" y="602" text-anchor="middle" font-size="12" fill="#333333">result windows · CSV files · interactive HTML</text>
 
-  <!-- Legend -->
+  <!-- ── Legend ────────────────────────────────────────────────────────────── -->
   <g font-size="11.5" fill="#333333">
-    <rect x="20" y="576" width="14" height="14" rx="3" fill="#ffffff" stroke="#333333"/>
-    <text x="40" y="587">Entry / output</text>
+    <rect x="40" y="650" width="14" height="14" rx="3" fill="#e8eef7" stroke="#3a6ea5"/>
+    <text x="60" y="661">Qt user interface</text>
 
-    <rect x="150" y="576" width="14" height="14" rx="3" fill="#e8eef7" stroke="#3a6ea5"/>
-    <text x="170" y="587">Orchestration (gui/)</text>
+    <rect x="180" y="650" width="14" height="14" rx="3" fill="#fdf3e3" stroke="#b8860b"/>
+    <text x="200" y="661">Computation and dialogs</text>
 
-    <rect x="320" y="576" width="14" height="14" rx="3" fill="#fdf3e3" stroke="#b8860b"/>
-    <text x="340" y="587">Independent extension point</text>
+    <rect x="350" y="650" width="14" height="14" rx="3" fill="#f1edf7" stroke="#6f5a9e"/>
+    <text x="370" y="661">Qt-free</text>
 
-    <rect x="540" y="576" width="14" height="14" rx="3" fill="#eef5ee" stroke="#5a8f5a"/>
-    <text x="560" y="587">Shared data store</text>
+    <rect x="440" y="650" width="14" height="14" rx="3" fill="#eef5ee" stroke="#5a8f5a"/>
+    <text x="460" y="661">Shared data store</text>
 
-    <line x1="700" y1="583" x2="730" y2="583" stroke="#555555" stroke-width="1.5" stroke-dasharray="5,4"/>
-    <text x="738" y="587">Direct cross-package link (Shockwave only)</text>
+    <line x1="590" y1="657" x2="620" y2="657" stroke="#555555" stroke-width="1.5" marker-end="url(#arrow)"/>
+    <text x="628" y="661">imports / produces</text>
+
+    <line x1="760" y1="657" x2="790" y2="657" stroke="#4f7f4f" stroke-width="1.5" stroke-dasharray="6,4" marker-end="url(#arrow-data)"/>
+    <text x="798" y="661">reads / writes the database</text>
   </g>
 
-  <text x="20" y="615" font-size="11" fill="#777777">gui does not import comp/plot/data_import logic back — data only flows through the SQLite tables, except the one Shockwave link noted above.</text>
+  <text x="40" y="694" font-size="11" fill="#777777">Each package may import any package below it and never one above it. Interaction handlers in plot/ call computations in analysis/; analysis/ never imports plot/.</text>
 </svg>

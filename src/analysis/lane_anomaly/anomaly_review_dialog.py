@@ -2,7 +2,10 @@
 
 Left, filling most of the width: the time-space diagram of the selected
 anomaly (AnomalyPlot -- a scatter plot, vehicles by color, lanes by
-symbol).
+symbol). Its other traffic -- every lane of the event, over the anomaly
+window, at any distance -- is read once per anomaly here and given to both the
+plot and the fix panel (FixPanel.set_traffic), which checks a pending fix
+against it for spacing conflicts.
 
 Right, one column, top to bottom:
 
@@ -49,9 +52,9 @@ from PyQt6.QtWidgets import (
 )
 
 from .anomaly_registry import anomaly_types
-from .anomaly_ui import AnomalyPlot, anomaly_window
+from .anomaly_ui import AnomalyPlot, anomaly_window, traffic_lanes
 from .lane_anomaly_store import ANOMALY_FIXED, LaneAnomaly, read_anomalies
-from .lane_correction import vehicle_rows
+from .lane_correction import anomaly_traffic, vehicle_rows
 
 logger = logging.getLogger(__name__)
 
@@ -266,13 +269,20 @@ class LaneAnomalyReviewDialog(QDialog):
             self._combo.blockSignals(False)
         self._index[key] = index if items else 0
 
-        rows = {}
+        rows, traffic = {}, {}
         if anomaly is not None:
             t0, t1 = anomaly_window(anomaly)
             rows = {v: vehicle_rows(self._db_connection, anomaly.event_id, v, t0, t1)
                     for v in anomaly.veh_ids}
-        self._plot.show_anomaly(anomaly, self._uis[key], rows)
-        self._fix_panels[key].show_anomaly(anomaly, rows)
+            # Every lane of the event, over the anomaly window, at any
+            # distance (anomaly_ui's module docstring).
+            traffic = anomaly_traffic(
+                self._db_connection, anomaly,
+                traffic_lanes(self._db_connection, anomaly, rows), t0, t1)
+        self._plot.show_anomaly(anomaly, self._uis[key], rows, traffic)
+        panel = self._fix_panels[key]
+        panel.set_traffic(traffic)
+        panel.show_anomaly(anomaly, rows)
         self._update_buttons()
 
     def _update_buttons(self):

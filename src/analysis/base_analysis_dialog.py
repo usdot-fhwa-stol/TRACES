@@ -44,7 +44,7 @@ class BaseAnalysisDialog(QDialog):
     Invocation paths
     ----------------
     Normal — top-level menu or right-click
-        OK is shown; on finish, emits params_accepted(dict, list).
+        OK is shown; on finish.
 
     Export
         Save is shown; on finish, writes CSV and shows a completion dialog.
