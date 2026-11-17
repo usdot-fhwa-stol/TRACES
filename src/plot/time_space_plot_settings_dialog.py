@@ -161,7 +161,7 @@ class TimeSpacePlotSettingsDialog(QDialog):
         bottom_layout.addStretch()  # Left spacer
         
         # Record count label
-        self._record_count_label = QLabel(f"0 of {self._record_limit} vehicle limit")
+        self._record_count_label = QLabel(f"0 vehicles to plot ({self._record_limit} or fewer recommended)")
         self._record_count_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.MinimumExpanding)
         self._record_count_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         font = self._record_count_label.font()
@@ -387,7 +387,7 @@ class TimeSpacePlotSettingsDialog(QDialog):
 
             self._current_record_count = cursor.fetchone()[0]   # <-- store it
             self._record_count_label.setText(
-                f"{self._current_record_count} of {self._record_limit} vehicle limit"
+                f"{self._current_record_count} vehicles to plot ({self._record_limit} or fewer recommended)"
             )
 
             if self._current_record_count > self._record_limit:
