@@ -168,7 +168,7 @@ The single definition of a gap is in `utils`: `event_time_step(conn, event_id)` 
 | `data_import/` | `base_process.py`, `csv_process.py`, `csv_algorithms.py`, `units.py`, `db_utils.py` | Importing source files into the database; database validation and event summaries. Qt-free. |
 | `ui_kit/` | `brand.py`, `db_target_row.py`, `kinematic_stacked_plot_widget.py`, `box_plot_item.py`, `box_plot_grid_dialog.py`, `gap_point_editor.py`, `point_edit_utils.py`, `plot_style.py`, `plot_export.py`, `plot_view.js`, `toggle_switch.py`, `vertical_gradient_value.py` | Reusable widgets, plot styling, and interactive HTML export. |
 | `analysis/` | `base_comp.py`, `base_analysis_dialog.py`, `base_analysis_worker.py`, `trajectory_utils.py` | Base classes and shared helpers for every analysis. |
-| `analysis/jerk/`, `missing_data/`, `internal_consistency/` | `*_comp.py` + dialogs | Noise analyses. |
+| `analysis/jerk/`, `missing_data/`, `internal_consistency/`, `platoon/`, `spectral/` | `*_comp.py` + dialogs | Noise analyses.|
 | `analysis/spline/` | `spline_comp.py` + dialogs | Spline fitting; its math is shared with Gap Interpolation. |
 | `analysis/shockwave/` | `shockwave_comp.py` + dialogs | Shockwave computation; the interaction is in `plot/handlers/shockwave_handler.py`. |
 | `analysis/advanced_statistics/` | `advanced_stats_comp.py`, `leader_follower.py`, `lane_changes.py`, `stat_registry.py` + dialogs | Leader/follower and lane-change statistics. |
@@ -478,7 +478,9 @@ The same reload sequence runs on every lane or event change, so a handler that d
 ```python
 {'filter': 'ASO', 'label': 'Noise Analysis', 'submenu': [
     {'label': 'Jerk Analysis', 'callback': self._run_jerk_analysis_rightclick},
-    {'label': 'Platoon Consistency', 'callback': None},            # disabled placeholder
+    {'label': 'Missing Data', 'callback': self._run_missing_data_analysis_rightclick},
+    {'label': 'Internal Consistency', 'callback': self._run_ic_rightclick},
+    {'label': 'Platoon Consistency', 'callback': self._run_platoon_rightclick},
 ]},
 {'filter': 'ASO', 'label': 'Stitching', 'submenu': [
     {'label': 'Basic Stitching', 'callback': self._start_stitching,
