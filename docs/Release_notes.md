@@ -1,7 +1,7 @@
  TRACES Release Notes
 ----------------------------
 
-### Version 1.0.0, released Nov 17th 2026
+### Version 1.0.0, released Nov 18th 2026
 
 ### Summary
 Trajectory Research, Analysis, Correction, Exploration, and Simulation (TRACES) tool (NEW) – This is the first release of TRACES, an open-source desktop application for importing, visualizing, analyzing, and correcting vehicle trajectory data. The tool allows users to explore vehicle movements and interactions through interactive time-space plots, evaluate trajectory data quality and traffic behavior, identify and correct missing or inconsistent observations, and export data and analysis results for further review. TRACES supports configurable CSV imports, SQLite trajectory databases, and an interactive graphical interface for transportation research and trajectory analysis.
